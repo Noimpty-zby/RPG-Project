@@ -18,14 +18,13 @@ private:
   int durability;
   int price;
   int quantity;
-  JobReq jobRequirement; // ★ 新增：职业限制
+  JobReq jobRequirement;
   int tier;
   ItemEffect effect;
   bool locked;
   std::string id;
 
 public:
-  // jobRequirement 默认 AnyJob，向后兼容
   Item(std::string name, int levelRequirement, ItemType type, int value,
        int durability, int price, int quantity, JobReq jobRequirement = AnyJob,
        int tier = 0, ItemEffect effect = ItemEffect::None, bool locked = false,
@@ -45,6 +44,9 @@ public:
   const std::string &getId() const;
   std::string getTierName() const;
   std::string getEffectName() const;
+  std::string getEffectDescription() const;
+  static const char *effectName(ItemEffect effect);
+  static const char *effectDescription(ItemEffect effect);
   bool supportsEffect(ItemEffect effect) const;
   static std::string templateId(const std::string &name, ItemType type,
                                 JobReq job, int tier);

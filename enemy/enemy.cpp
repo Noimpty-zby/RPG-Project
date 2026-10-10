@@ -1,11 +1,11 @@
 #include "enemy.h"
-#include "character.h"
+#include "game_config.h"
 #include <algorithm>
 #include <cstdlib>
-#include <limits>
-#include <ostream>
-using namespace std;
 #include <iostream>
+#include <limits>
+
+using namespace std;
 enemy::enemy(string name, int hp, int attack, int mp, int exp_reward,
              int coin_reward, int level)
     : Character(name, hp, attack, mp), exp_reward(exp_reward),
@@ -13,7 +13,7 @@ enemy::enemy(string name, int hp, int attack, int mp, int exp_reward,
 int enemy::getexp_reward() const { return exp_reward; }
 void enemy::takedamage(int damage) {
   int dodgeChance = rand() % 100;
-  if (dodgeChance < dogeRate) {
+  if (dodgeChance < dodgeRate) {
     cout << getname() << "闪避了攻击！" << endl;
     return; // 闪避成功，不受伤害
   }
@@ -41,8 +41,8 @@ void enemy::resetall(int hp, int attack, int mp, int exp_reward,
   resetexp_reward(exp_reward);
   resetcoin_reward(coin_reward);
 }
-int enemy::getdogeRate() const { return dogeRate; }
-void enemy::setdogeRate(int rate) { dogeRate = clamp(rate, 0, 100); }
+int enemy::getdodgeRate() const { return dodgeRate; }
+void enemy::setdodgeRate(int rate) { dodgeRate = clamp(rate, 0, 100); }
 Affix enemy::getRandomAffix() const {
   // 重新设计概率权重：危险词缀稀有但恐怖，普通词缀常见
   int r = rand() % 100;
@@ -53,7 +53,7 @@ Affix enemy::getRandomAffix() const {
   else if (r < 60)
     return Affix::QUICK; // 15% 迅捷：闪避提升
   else if (r < 73)
-    return Affix::POSIONOUS; // 13% 剧毒：持续伤害（危险）
+    return Affix::POISONOUS; // 13% 剧毒：持续伤害（危险）
   else if (r < 85)
     return Affix::HEALING; // 12% 治疗：战斗中回血（烦人）
   else if (r < 93)
@@ -108,37 +108,37 @@ bool enemy::hasAffix(Affix affix) const {
 void enemy::removeAffix(Affix affix) {
   affixes.erase(remove(affixes.begin(), affixes.end(), affix), affixes.end());
 }
+const char *affixName(Affix affix) {
+  switch (affix) {
+  case Affix::STRONG: return "强力";
+  case Affix::TOUGH: return "坚韧";
+  case Affix::QUICK: return "迅捷";
+  case Affix::EXPLOSIVE: return "爆炸";
+  case Affix::POISONOUS: return "剧毒";
+  case Affix::HEALING: return "治疗";
+  case Affix::SHIELDING: return "护盾";
+  }
+  return "未知";
+}
+const char *affixDescription(Affix affix) {
+  switch (affix) {
+  case Affix::STRONG: return "攻击提高20%。";
+  case Affix::TOUGH: return "生命提高20%。";
+  case Affix::QUICK: return "闪避率提高（最高25%），攻击可能落空。";
+  case Affix::EXPLOSIVE: return "被击败时爆炸：造成其攻击一半的伤害（最多基础生命10%），无法格挡或闪避。";
+  case Affix::POISONOUS: return "每回合开始造成其攻击1/5的伤害（最多基础生命5%），无法格挡或闪避。";
+  case Affix::HEALING: return "在“攻势恢复”回合回复3%最大生命；用爆发打断这个窗口。";
+  case Affix::SHIELDING: return "吸收普攻和多数技能的部分伤害（最多一半）；穿盾技能不受影响。";
+  }
+  return "";
+}
 void enemy::displayAffixes() const {
   if (affixes.empty()) {
-    cout << "[普通]";
+    cout << "[无词缀]" << endl;
     return;
   }
-  cout << "敌人被加持了！！！【词缀】" << endl;
-  for (auto aff : affixes) {
-    switch (aff) {
-    case Affix::STRONG:
-      cout << "[强力] ";
-      break;
-    case Affix::TOUGH:
-      cout << "[坚韧] ";
-      break;
-    case Affix::QUICK:
-      cout << "[迅捷] ";
-      break;
-    case Affix::EXPLOSIVE:
-      cout << "[爆炸] ";
-      break;
-    case Affix::POSIONOUS:
-      cout << "[剧毒] ";
-      break;
-    case Affix::HEALING:
-      cout << "[治疗] ";
-      break;
-    case Affix::SHIELDING:
-      cout << "[护盾] ";
-      break;
-    }
-  }
+  cout << "【词缀】";
+  for (Affix affix : affixes) cout << "[" << affixName(affix) << "] ";
   cout << endl;
 }
 void enemy::heal(int amount) {
@@ -177,45 +177,95 @@ struct BossProfile {
   EnemyIntentKind primary;
   EnemyIntentKind secondary;
   const char *hint;
+  // Bosses without a Charge tactic never open an interrupt/recovery window,
+  // so they hit slightly softer to keep chapter difficulty comparable.
+  int attackPercent;
 };
 const BossProfile bossProfiles[] = {
     {"荒野前哨·警钟巨兵", EnemyIntentKind::Charge, EnemyIntentKind::Charge,
-     "目标：普攻打断巨兵的敲钟蓄力；错过窗口时格挡重击。"},
+     "目标：普攻打断巨兵的敲钟蓄力；错过窗口时格挡重击。", 100},
     {"幽林回廊·树心祭司", EnemyIntentKind::Wound, EnemyIntentKind::Charge,
-     "目标：避开树心抑疗集中恢复，普攻打断仪式蓄力。"},
+     "目标：避开树心抑疗集中恢复，普攻打断仪式蓄力。", 100},
     {"沉没书库·禁书守卫", EnemyIntentKind::Shatter, EnemyIntentKind::Charge,
-     "目标：守卫破防时主动出击，普攻打断蓄力，为学者争取时间。"},
+     "目标：守卫破防时主动出击，普攻打断蓄力，为学者争取时间。", 100},
     {"赤砂矿井·引爆监工", EnemyIntentKind::ReadPattern, EnemyIntentKind::Charge,
-     "目标：改变监工预测的行动，用普攻打断引爆蓄力。"},
+     "目标：改变监工预测的行动，用普攻打断引爆蓄力。", 100},
     {"寒霜关隘·双首冰兽", EnemyIntentKind::Wound, EnemyIntentKind::Shatter,
-     "目标：避开冰霜抑疗安排恢复；连续格挡会招来破防。"},
+     "目标：避开冰霜抑疗安排恢复；连续格挡会招来破防。", 90},
     {"熔炉要塞·供能核心", EnemyIntentKind::Charge, EnemyIntentKind::Shatter,
-     "目标：摧毁供能炉削弱核心，普攻打断蓄力，破防时主动出击。"},
+     "目标：摧毁供能炉削弱核心，普攻打断蓄力，破防时主动出击。", 100},
     {"镜影剧场·镜阵导演", EnemyIntentKind::ReadPattern, EnemyIntentKind::Wound,
-     "目标：打乱镜阵记录的连招，避免连续依赖回血。"},
+     "目标：打乱镜阵记录的连招，避免连续依赖回血。", 100},
     {"星蚀观测站·蚀星观测者", EnemyIntentKind::Shatter, EnemyIntentKind::ReadPattern,
-     "目标：星蚀破防时主动出招，观测者预判时切换行动种类。"},
+     "目标：星蚀破防时主动出招，观测者预判时切换行动种类。", 90},
     {"王庭废墟·王座祭司", EnemyIntentKind::Wound, EnemyIntentKind::ReadPattern,
-     "目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。"},
+     "目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。", 90},
     {"天顶之门·远征裁决者", EnemyIntentKind::ReadPattern, EnemyIntentKind::Shatter,
-     "目标：应对裁决者的读招、破防与低血蓄力，改变行动争取突围窗口。"}};
+     "目标：应对裁决者的读招、破防与低血蓄力，改变行动争取突围窗口。", 100}};
 
-int chapterIndex(int floor) { return clamp((max(1, floor) - 1) / 10, 0, 9); }
+int chapterIndex(int floor) { return GameConfig::chapter(floor); }
 } // namespace
+
+namespace {
+// Ordinary enemies per chapter, in signature-tactic order: Charge, Wound,
+// Shatter, ReadPattern (see enemy::primaryTactic).
+const char *const ordinaryNames[10][4] = {
+    {"警钟哨兵", "荆棘野狼", "碎盾山贼", "鹰眼游猎者"},
+    {"树心侍祭", "毒藤潜伏者", "朽木巨蛛", "林影窥伺者"},
+    {"禁咒书灵", "墨潮水妖", "石化书卫", "记忆抄写者"},
+    {"引爆工头", "酸蚀蠕虫", "碎岩傀儡", "矿灯窥探者"},
+    {"冰晶术士", "霜咬雪狼", "冻甲巨熊", "白雾追踪者"},
+    {"熔炉卫兵", "灼烧监工", "锻锤机兵", "齿轮测算者"},
+    {"镜阵舞者", "伤痕小丑", "碎镜演员", "镜中模仿者"},
+    {"观星祭司", "星尘噬魂者", "陨铁守卫", "星图推演者"},
+    {"封印骑士", "王座刽子手", "断剑卫士", "宫廷谋士"},
+    {"回路守门人", "裁决之刃", "破界巨像", "天顶预言者"}};
+const char *const tacticRoles[4] = {"蓄力守卫", "抑疗猎手", "破阵斥候", "读招追猎者"};
+// Hints for ordinary enemies, in the same tactic order. Every ordinary enemy
+// can also Charge, so the non-Charge hints mention the interrupt counter too.
+const char *const tacticHints[4] = {
+    "会蓄力并在下回合重击；普攻实际命中可以打断，换来一回合休整。",
+    "在你治疗后压制治疗效果；先攻击或格挡，等离开该意图再回血。蓄力时普攻可打断。",
+    "在你格挡后发动无视格挡的破防攻击，此时主动出手更划算。蓄力时普攻可打断。",
+    "记录你的出招习惯并预判重复行动，改变行动可让预判落空。蓄力时普攻可打断。"};
+} // namespace
+
+int bossAttackPercent(int floor) { return bossProfiles[chapterIndex(floor)].attackPercent; }
+
+
+std::string enemyNameForFloor(int floor) {
+  return Bestiary::entryName(Bestiary::entryForFloor(floor));
+}
+
+namespace Bestiary {
+int entryForFloor(int floor) {
+  const int f = GameConfig::floor(floor);
+  const int slot = f % 10 == 0 ? 4 : f % 4;
+  return GameConfig::chapter(f) * EntriesPerChapter + slot;
+}
+int entryChapter(int entry) { return clamp(entry, 0, EntryCount - 1) / EntriesPerChapter; }
+bool entryIsBoss(int entry) { return clamp(entry, 0, EntryCount - 1) % EntriesPerChapter == 4; }
+std::string entryName(int entry) {
+  entry = clamp(entry, 0, EntryCount - 1);
+  if (entryIsBoss(entry)) return bossProfiles[entryChapter(entry)].title;
+  return ordinaryNames[entryChapter(entry)][entry % EntriesPerChapter];
+}
+std::string entryDescription(int entry) {
+  entry = clamp(entry, 0, EntryCount - 1);
+  if (entryIsBoss(entry)) return bossProfiles[entryChapter(entry)].hint;
+  const int slot = entry % EntriesPerChapter;
+  return std::string(tacticRoles[slot]) + "：" + tacticHints[slot];
+}
+} // namespace Bestiary
 
 string enemy::getEncounterTitle() const {
   if (bossEncounter) return bossProfiles[chapterIndex(encounterFloor)].title;
-  switch (primaryTactic()) {
-  case EnemyIntentKind::Charge: return "蓄力守卫";
-  case EnemyIntentKind::Wound: return "抑疗猎手";
-  case EnemyIntentKind::Shatter: return "破阵斥候";
-  case EnemyIntentKind::ReadPattern: return "读招追猎者";
-  default: return "普通敌人";
-  }
+  return tacticRoles[max(0, encounterFloor) % 4];
 }
 
 string enemy::getTacticalHint() const {
   if (bossEncounter) return bossProfiles[chapterIndex(encounterFloor)].hint;
+  if (encounterFloor > 0) return tacticHints[encounterFloor % 4];
   return "观察早期意图：普攻命中可打断蓄力；格挡能抗重击，换招能避开预判。";
 }
 

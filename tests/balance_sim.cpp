@@ -20,20 +20,10 @@
 // Different actions can consume different numbers of RNG draws thereafter.
 namespace {
 constexpr int turnLimit = 80;
-enum class Job { Warrior, Mage, Assassin };
 constexpr std::array<Job, 3> jobs{Job::Warrior, Job::Mage, Job::Assassin};
 
-const char *jobName(Job job) {
-  if (job == Job::Warrior) return "Warrior";
-  if (job == Job::Mage) return "Mage";
-  return "Assassin";
-}
-
-JobReq jobRequirement(Job job) {
-  if (job == Job::Warrior) return WarriorOnly;
-  if (job == Job::Mage) return MageOnly;
-  return AssassinOnly;
-}
+const char *jobName(Job job) { return jobProfile(job).saveKey; }
+JobReq jobRequirement(Job job) { return equipmentClass(job); }
 
 std::unique_ptr<player> newHero(Job job) {
   if (job == Job::Warrior) return std::make_unique<Warrior>("sim");
@@ -158,7 +148,7 @@ struct Policy {
     const int baselineAction = actionId(candidates.front());
     const int incoming = monster.getattack() * intent.damagePercent / 100;
     // This is a simple visible-risk heuristic, not a lookahead or optimal solver.
-    const int poison = monster.hasAffix(Affix::POSIONOUS)
+    const int poison = monster.hasAffix(Affix::POISONOUS)
                            ? std::max(1, std::min(monster.getattack() / 5,
                                                   hero.getmaxhp() / 20))
                            : 0;

@@ -1,6 +1,8 @@
 #include "campaign.h"
 #include "game_config.h"
+#include "help.h"
 #include "jobs.h"
+#include "profile.h"
 #include "save.h"
 #include "skills.h"
 #include <algorithm>
@@ -13,6 +15,8 @@
 #include <string>
 
 namespace {
+constexpr const char *ProfilePath = "profile.dat";
+
 int readInt() {
   std::string line;
   while (std::getline(std::cin, line)) {
@@ -28,6 +32,13 @@ int readInt() {
   std::cout << "\n输入结束，退出游戏。\n";
   std::exit(0);
 }
+// Unlocks newly earned achievements and persists the profile if any changed.
+void checkAchievements(Profile &profile, const player &hero, const BattleOutcome *battle = nullptr) {
+  const auto unlocked = profile.checkAchievements(hero, battle);
+  for (const auto *achievement : unlocked)
+    std::cout << "【成就解锁】" << achievement->title << "：" << achievement->description << '\n';
+  if (!unlocked.empty()) profile.save();
+}
 void backpack(player &hero) {
   for (;;) {
     hero.printBackpack();
@@ -42,23 +53,39 @@ void backpack(player &hero) {
     if (action < 1 || action > 4) continue;
     std::cout << "物品序号：";
     const int index = readInt();
-    if (action == 1) hero.useItem(index);
+    const auto &items = hero.getSaveBackpack();
+    if (index < 1 || index > static_cast<int>(items.size())) { std::cout << "没有这个序号。\n"; continue; }
+    if (action == 1 && !hero.useItem(index)) std::cout << "无法使用：只有药水可用，且生命未满时才会消耗。\n";
     if (action == 2) hero.equipItem(index);
-    if (action == 3) hero.dropItem(index);
-    if (action == 4 && !hero.toggleItemLock(index)) std::cout << "无法锁定该物品。\n";
+    if (action == 3) {
+      const Item &item = items[index - 1];
+      if (item.isLocked()) { std::cout << "该物品已锁定，先解锁再卖出。\n"; continue; }
+      int quantity = 1;
+      if (item.getQuantity() > 1) {
+        std::cout << "卖出数量（1-" << item.getQuantity() << "，单价 " << item.getPrice() / 3 << "，0取消）：";
+        quantity = readInt();
+        if (quantity == 0) continue;
+        if (quantity < 1 || quantity > item.getQuantity()) { std::cout << "数量无效，未卖出。\n"; continue; }
+      }
+      const std::string name = item.getName();
+      std::cout << "卖出 " << name << " ×" << quantity << "，获得 " << hero.sellItem(index, quantity) << " 金币。\n";
+    }
+    if (action == 4 && hero.toggleItemLock(index))
+      std::cout << (items[index - 1].isLocked() ? "已锁定：不会被卖出或拆解。\n" : "已解锁。\n");
   }
 }
 void skills(player &hero) {
   for (;;) {
-    hero.showSkills(hero);
+    hero.showSkills();
     std::cout << "[1] 升级 [2] 返回 [3] 选择专精（前两技能；10/30层开放）\n";
     const int action = readInt();
     if (action == 2) return;
     if (action != 1 && action != 3) continue;
     std::cout << "技能序号：";
     const int slot = readInt();
-    if (action == 1) hero.levelUpSkill(slot);
-    else {
+    if (action == 1) {
+      if (!hero.levelUpSkill(slot)) std::cout << "未升级：检查金币、等级需求、楼层解锁和当前阶数上限。\n";
+    } else {
       std::cout << "专精编号 [0] 基础 [1] 分支一 [2] 分支二；初选免费，重选费用随进度增加：";
       if (!hero.chooseSpecialization(slot, readInt())) std::cout << "未更改：检查解锁、金币和当前分支。\n";
     }
@@ -71,11 +98,11 @@ void shop(player &hero, int floor) {
     std::cout << "章节商店（商品跨楼层保留；金币 " << hero.getcoin() << "）\n";
     for (int i = 0; i < static_cast<int>(stock.size()); ++i) {
       if (hero.runState().shopPurchased[c] & (1 << i)) { std::cout << i + 1 << ". 已售出\n"; continue; }
-      const int price = Campaign::purchasePrice(hero, floor, stock[i]);
-      std::cout << i + 1 << ". " << stock[i].getName() << " 数值 " << stock[i].getValue()
-        << " 等级需求 " << stock[i].getLevelRequirement() << " 价格 " << price
-        << " 品质 " << stock[i].getTierName() << " 效果 " << stock[i].getEffectName()
-        << " " << stock[i].getJobRequirementName() << '\n';
+      const Item &item = stock[i];
+      std::cout << i + 1 << ". " << item.getName() << " 数值 " << item.getValue()
+        << " 等级需求 " << item.getLevelRequirement() << " 价格 " << Campaign::purchasePrice(hero, floor, item)
+        << " 品质 " << item.getTierName() << " 效果 " << item.getEffectName()
+        << " " << item.getJobRequirementName() << '\n';
     }
     std::cout << "[1-5] 购买 [6] 刷新（" << GameConfig::refreshCost(floor, hero.runState().shopRefreshes[c])
       << "金币，章内最多20次） [0] 返回\n";
@@ -85,6 +112,19 @@ void shop(player &hero, int floor) {
       if (!Campaign::refreshShop(hero, floor)) std::cout << "未刷新：金币不足或达到章内上限。\n";
     } else if (!Campaign::purchase(hero, floor, action)) std::cout << "未购买：检查金币、序号和库存。\n";
   }
+}
+void modifyEquipment(player &hero) {
+  hero.showEquippedItems();
+  std::cout << "已装备序号（一个效果槽，改造消耗材料）：";
+  const int index = readInt();
+  const auto &equipped = hero.getSaveEquipments();
+  if (index < 1 || index > static_cast<int>(equipped.size())) { std::cout << "没有这个序号。\n"; return; }
+  std::cout << "本次改造消耗 " << 3 + equipped[index - 1].getTier() * 2 << " 材料；当前 "
+    << hero.runState().materials << "。\n";
+  for (int effect = 1; effect <= 4; ++effect)
+    std::cout << "[" << effect << "] " << Item::effectDescription(static_cast<ItemEffect>(effect)) << '\n';
+  std::cout << "选择效果：";
+  if (!hero.modifyEquipment(index, readInt())) std::cout << "改造未执行：材料不足、效果相同或该部位不支持此效果。\n";
 }
 void camp(player &hero, int floor) {
   for (;;) {
@@ -104,16 +144,7 @@ void camp(player &hero, int floor) {
         hero.runState().lootTarget = target; hero.runState().pity = 0;
       }
     }
-    if (action == 4) {
-      hero.showEquippedItems();
-      std::cout << "已装备序号（一个效果槽，改造消耗材料）：";
-      const int index = readInt();
-      const auto &equipped = hero.getSaveEquipments();
-      if (index > 0 && index <= static_cast<int>(equipped.size()))
-        std::cout << "本次改造消耗 " << 3 + equipped[index - 1].getTier() * 2 << " 材料；当前 " << hero.runState().materials << "。\n";
-      std::cout << "效果 [1] 普攻回蓝 [2] 格挡回蓝 [3] 技能节能 [4] 控制强化：";
-      if (!hero.modifyEquipment(index, readInt())) std::cout << "改造未执行，检查材料、序号和效果。\n";
-    }
+    if (action == 4) modifyEquipment(hero);
     if (action == 5) shop(hero, floor);
     if (action == 6) skills(hero);
     if (action == 7) {
@@ -133,10 +164,32 @@ void showObjective(const EncounterRules &rules) {
   else std::cout << "目标：击败敌人。\n";
   if (rules.bossSabotaged) std::cout << "供能设施已破坏，Boss护盾失效。\n";
 }
-bool fight(player &hero, int floor) {
+// Read-only view during a fight; never advances the turn.
+void inspect(const player &hero, const enemy &monster, const BattleSession &battle) {
+  std::cout << "—— 敌人 ——\n" << monster.getname() << " | " << monster.getEncounterTitle()
+    << " | HP " << monster.gethp() << '/' << monster.getmaxhp() << " | 攻击 " << monster.getattack()
+    << " | 闪避 " << monster.getdodgeRate() << "%\n";
+  if (monster.getAffixes().empty()) std::cout << "无词缀。\n";
+  for (Affix affix : monster.getAffixes())
+    std::cout << "[" << affixName(affix) << "] " << affixDescription(affix) << '\n';
+  std::cout << "战术提示：" << monster.getTacticalHint() << '\n' << "—— 自身 ——\n";
+  hero.printstats();
+  hero.showEquippedItems();
+  hero.showSkillsCompact();
+  std::cout << "当前目标：" << battle.objectiveDescription() << '\n';
+}
+int potionCount(const player &hero) {
+  int count = 0;
+  for (const Item &item : hero.getSaveBackpack())
+    if (item.getType() == Potion) count += item.getQuantity();
+  return count;
+}
+bool fight(player &hero, int floor, Profile &profile) {
   auto monster = Campaign::makeEnemy(hero, floor);
   const auto rules = Campaign::rulesFor(hero, floor);
-  std::cout << "遭遇：" << monster.getname() << " HP " << monster.gethp() << " 攻击 " << monster.getattack() << '\n';
+  std::cout << "遭遇：" << monster.getname() << "（第" << floor << "层） HP " << monster.gethp()
+    << " 攻击 " << monster.getattack() << '\n';
+  profile.recordEncounter(floor, monster);
   showObjective(rules);
   Campaign::seedStream(hero, floor, 1200 + static_cast<unsigned>(hero.runState().attempts[floor]));
   BattleSession battle(hero, monster, rules);
@@ -146,24 +199,91 @@ bool fight(player &hero, int floor) {
     monster.displayIntent();
     std::cout << battle.objectiveDescription() << '\n';
     std::cout << "HP " << hero.gethp() << '/' << hero.getmaxhp() << " MP " << hero.getmp()
-      << '/' << hero.getmaxmp() << " 敌HP " << monster.gethp() << '\n'
-      << "[1] 普攻（命中可打断蓄力） [2] 技能 [3] 格挡 [4] 药水\n";
+      << '/' << hero.getmaxmp() << " 敌HP " << monster.gethp() << " 药水 " << potionCount(hero) << '\n'
+      << "[1] 普攻（命中可打断蓄力） [2] 技能 [3] 格挡 [4] 药水 [5] 查看敌我详情\n";
     const int action = readInt();
     BattleAction chosen{ActionType::Attack};
     if (action == 2) {
-      hero.showSkills(hero); std::cout << "技能序号，0返回：";
+      hero.showSkillsCompact(); std::cout << "技能序号，0返回：";
       chosen = {ActionType::Skill, readInt()}; if (chosen.index == 0) continue;
     } else if (action == 3) chosen.type = ActionType::Guard;
     else if (action == 4) {
       hero.printBackpack(); std::cout << "药水序号，0返回：";
       chosen = {ActionType::Potion, readInt()}; if (chosen.index == 0) continue;
-    } else if (action != 1) { std::cout << "无效行动。\n"; continue; }
+    } else if (action == 5) { inspect(hero, monster, battle); continue; }
+    else if (action != 1) { std::cout << "无效行动。\n"; continue; }
     if (!battle.act(chosen)) std::cout << "行动未执行，没有推进回合。\n";
   }
+  const auto &report = battle.report();
+  const BattleOutcome outcome{floor, battle.won(), report.damageTaken, report.potionsUsed,
+                              report.interrupts, hero.gethp(), hero.getmaxhp()};
   Campaign::printBattleReport(battle);
   const bool won = Campaign::settleEncounter(hero, monster, battle, floor);
+  if (won) profile.recordVictory(floor);
+  checkAchievements(profile, hero, &outcome);
+  profile.save();
   std::cout << (won ? "目标完成！可前往下一层，或在营地调整。\n" : "本次挑战未完成。\n");
   return won;
+}
+void travel(player &hero, int &floor) {
+  std::cout << "前往楼层（1-" << hero.getHighestFloor() << "，当前第" << floor
+    << "层；回访已到达的楼层可以补练，0取消）：";
+  const int target = readInt();
+  if (target == 0) return;
+  if (target < 1 || target > hero.getHighestFloor()) { std::cout << "只能前往已到达的楼层。\n"; return; }
+  floor = target;
+}
+void archive(const Profile &profile) {
+  for (;;) {
+    std::cout << "远征档案：[1] 敌人图鉴（" << profile.discovered() << "/" << Bestiary::EntryCount
+      << "） [2] 词缀图鉴 [3] 成就（" << profile.unlockedCount() << "/" << Profile::achievements().size()
+      << "） [4] 远征记录 [0] 返回\n";
+    const int action = readInt();
+    if (action == 0) return;
+    if (action == 1) {
+      for (;;) {
+        profile.printBestiaryOverview();
+        std::cout << "查看章节（1-10，0返回）：";
+        const int chapter = readInt();
+        if (chapter == 0) break;
+        if (chapter >= 1 && chapter <= 10) profile.printBestiaryChapter(chapter - 1);
+      }
+    }
+    if (action == 2) profile.printAffixes();
+    if (action == 3) profile.printAchievements();
+    if (action == 4) profile.printRecords();
+  }
+}
+void help() {
+  for (;;) {
+    std::cout << "帮助：";
+    for (int topic = 1; topic <= Help::topicCount(); ++topic)
+      std::cout << "[" << topic << "] " << Help::topicTitle(topic) << ' ';
+    std::cout << "[0] 返回\n";
+    const int topic = readInt();
+    if (topic == 0) return;
+    if (topic >= 1 && topic <= Help::topicCount())
+      std::cout << "—— " << Help::topicTitle(topic) << " ——\n" << Help::topicText(topic) << '\n';
+  }
+}
+void recordRun(Profile &profile, const player &hero, bool cleared) {
+  const RunState &run = hero.runState();
+  RunRecord record;
+  record.date = todayDate();
+  record.job = hero.getjob();
+  record.challenge = run.challenge;
+  record.cleared = cleared;
+  record.floor = hero.getHighestFloor();
+  record.level = hero.getlevel();
+  record.battles = run.battles;
+  record.turns = run.turns;
+  record.deaths = run.deaths;
+  record.potions = run.potionsUsed;
+  record.seed = run.seed;
+  record.name = hero.getname();
+  profile.addRecord(record);
+  profile.save();
+  std::cout << "本次远征已记入档案（[11] 远征档案 → 远征记录）。\n";
 }
 void exitGame(const player &hero, int floor) {
   std::cout << "退出前保存？[1] 是 [2] 否\n";
@@ -188,6 +308,9 @@ bool recover(player &hero) {
 }
 int main() {
   std::cout << "=== Aincrad：百层远征 ===\n十个章节，三种路线；行动意图与目标将在战斗前显示。\n";
+  std::string profileWarning;
+  Profile profile = Profile::load(ProfilePath, &profileWarning);
+  if (!profileWarning.empty()) std::cout << "[档案] " << profileWarning << '\n';
   std::unique_ptr<player> hero;
   int floor = 1;
   if (SaveSystem::hasSaveFile()) {
@@ -211,11 +334,18 @@ int main() {
     std::cout << "挑战 [0] 标准 [1] 补给匮乏（恢复减少，物价提高） [2] 无复苏；两种挑战的敌人特殊意图更频繁：";
     int challenge; do { challenge = readInt(); } while (challenge < 0 || challenge > 2);
     Campaign::initialize(*hero, seed == 0 ? static_cast<unsigned>(std::time(nullptr)) : static_cast<unsigned>(seed), challenge);
+    std::cout << "提示：主菜单 [12] 帮助 介绍意图、目标、路线与装备。\n";
   }
-  if (!recover(*hero)) return 0;
-  while (floor <= 100) {
-    if (!recover(*hero)) return 0;
+  // Only a death or a final clear that happens in this session ends the run
+  // in the records; reloading an old save never logs the same run twice.
+  bool diedThisSession = false;
+  while (floor <= GameConfig::MaxFloor) {
+    if (!recover(*hero)) {
+      if (diedThisSession) recordRun(profile, *hero, false);
+      return 0;
+    }
     hero->setHighestFloor(floor);
+    checkAchievements(profile, *hero);
     const int c = GameConfig::chapter(floor);
     if (hero->runState().routes[c] == 0) {
       std::cout << "进入" << Campaign::chapter(floor).name << "，选择本章路线（章内固定）：\n";
@@ -225,7 +355,8 @@ int main() {
     std::cout << "\n楼层 " << floor << " · " << Campaign::chapter(floor).name << " | HP " << hero->gethp()
       << '/' << hero->getmaxhp() << " | 金币 " << hero->getcoin() << " | "
       << (hero->runState().cleared[floor] ? "已首通" : "待完成") << '\n'
-      << "[1] 挑战本层 [2] 背包 [3] 装备 [4] 退出 [5] 存档 [6] 状态 [7] 技能 [8] 营地 [9] 下一层\n";
+      << "[1] 挑战本层 [2] 背包 [3] 装备 [4] 退出 [5] 存档 [6] 状态 [7] 技能 [8] 营地 [9] 下一层\n"
+      << "[10] 前往楼层 [11] 远征档案 [12] 帮助\n";
     const int action = readInt();
     if (action == 4) { exitGame(*hero, floor); return 0; }
     if (action == 5) { SaveSystem::saveGame(*hero, floor); continue; }
@@ -241,16 +372,25 @@ int main() {
       if (!hero->runState().cleared[floor]) std::cout << "先完成本层目标。\n"; else ++floor;
       continue;
     }
+    if (action == 10) { travel(*hero, floor); continue; }
+    if (action == 11) { archive(profile); continue; }
+    if (action == 12) { help(); continue; }
     if (action != 1) { std::cout << "无效选择。\n"; continue; }
     if (Campaign::eventPending(*hero, floor)) {
       std::cout << Campaign::eventDescription(floor) << '\n';
       while (!Campaign::resolveEvent(*hero, floor, readInt()))
         std::cout << "选择无效或金币不足，请重选；选项2无需金币，低资源时仍可完成。\n";
     }
-    if (fight(*hero, floor)) continue;
+    const bool firstFinalClear = floor == GameConfig::MaxFloor && !hero->runState().cleared[floor];
+    if (fight(*hero, floor, profile)) {
+      if (firstFinalClear) recordRun(profile, *hero, true);
+      continue;
+    }
     if (hero->isalive()) { std::cout << "撤回营地，可重新准备。\n"; continue; }
+    diedThisSession = true;
   }
   std::cout << "恭喜通关百层远征！\n";
-  Campaign::printJournal(*hero, 100); exitGame(*hero, 101);
+  Campaign::printJournal(*hero, GameConfig::MaxFloor);
+  exitGame(*hero, GameConfig::MaxFloor + 1);
   return 0;
 }

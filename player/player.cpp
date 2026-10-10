@@ -10,7 +10,6 @@
 using namespace std;
 
 namespace {
-constexpr int MaxCoins = 1000000000; // Matches save format validation, including legacy balances.
 bool validItem(const Item &item) {
   return item.getType() >= Weapon && item.getType() <= Potion &&
       item.getJobRequirement() >= AnyJob && item.getJobRequirement() <= AssassinOnly &&
@@ -18,12 +17,6 @@ bool validItem(const Item &item) {
       item.getValue() <= 1000000 && item.getDurability() >= 0 &&
       item.getPrice() >= 0 && item.getQuantity() > 0 &&
       item.getTier() >= 0 && item.getTier() <= 3 && item.supportsEffect(item.getEffect());
-}
-bool permitted(const Item &item, const player &hero) {
-  const auto job = item.getJobRequirement();
-  return job == AnyJob || (job == WarriorOnly && hero.getjob() == "Warrior") ||
-         (job == MageOnly && hero.getjob() == "Mage") ||
-         (job == AssassinOnly && hero.getjob() == "Assassin");
 }
 bool samePotion(const Item &a, const Item &b) {
   return a.getType() == Potion && b.getType() == Potion &&
@@ -35,21 +28,27 @@ bool samePotion(const Item &a, const Item &b) {
       a.getTier() == b.getTier() && a.getEffect() == b.getEffect() &&
       a.isLocked() == b.isLocked();
 }
-const char *effectName(ItemEffect effect) {
-  switch (effect) {
-  case ItemEffect::ManaOnAttack: return "普攻命中回蓝+3";
-  case ItemEffect::GuardRecovery: return "格挡回蓝+3";
-  case ItemEffect::SkillEfficiency: return "固定技能耗蓝-10%";
-  case ItemEffect::ControlFocus: return "减攻控制延长1回合";
-  default: return "无";
-  }
-}
+constexpr JobProfile profiles[] = {
+  {"Warrior", "战士", "战意", 200, 18, 24, 8, 20, 3, 3},
+  {"Mage", "法师", "专注", 140, 12, 40, 12, 15, 2, 8},
+  {"Assassin", "刺客", "破绽", 150, 15, 25, 20, 15, 3, 4},
+};
 }
 
-player::player(string name, int hp, int attack, int mp, int level, int exp,
-               int coin, int critRate)
-    : Character(name, hp, attack, mp), level(level), exp(exp), coin(coin),
-      free_revives(3), critRate(critRate) {}
+const JobProfile &jobProfile(Job job) { return profiles[static_cast<int>(job)]; }
+JobReq equipmentClass(Job job) {
+  switch (job) {
+  case Job::Warrior: return WarriorOnly;
+  case Job::Mage: return MageOnly;
+  case Job::Assassin: return AssassinOnly;
+  }
+  return AnyJob;
+}
+
+player::player(string name, Job job)
+    : Character(name, jobProfile(job).hp, jobProfile(job).attack, jobProfile(job).mp),
+      jobType(job), level(1), exp(0), coin(0), free_revives(3),
+      critRate(jobProfile(job).critRate) {}
 player::~player() = default;
 int player::getlevel() const { return level; }
 int player::getexp() const { return exp; }
@@ -57,34 +56,41 @@ int player::getcoin() const { return coin; }
 int player::getfreerevives() const { return free_revives; }
 int player::getcritRate() const { return critRate; }
 int player::getHighestFloor() const { return highestFloor; }
-void player::setHighestFloor(int floor) { highestFloor = max(highestFloor, clamp(floor, 1, 100)); }
+void player::setHighestFloor(int floor) { highestFloor = max(highestFloor, GameConfig::floor(floor)); }
 void player::decreaserevives() { if (free_revives > 0) --free_revives; }
 void player::resetFreeRevive() { free_revives = 3; }
+bool player::canWear(const Item &item) const {
+  return item.getJobRequirement() == AnyJob || item.getJobRequirement() == equipmentClass(jobType);
+}
 
 void player::gainexp(int amount) {
   if (amount <= 0) return;
   exp = GameConfig::addCounter(exp, amount);
   // The campaign supports 100 character levels; repeated encounters cannot grow forever.
-  while (level < 100 && exp >= level * 100) {
+  while (level < GameConfig::MaxLevel && exp >= level * 100) {
     exp -= level * 100;
     levelup();
   }
-  if (level >= 100) exp = min(exp, 9999);
+  if (level >= GameConfig::MaxLevel) exp = min(exp, 9999);
 }
 void player::gaincoin(int amount) {
   if (amount > 0)
-    coin = static_cast<int>(min(static_cast<long long>(coin) + amount, static_cast<long long>(MaxCoins)));
+    coin = static_cast<int>(min(static_cast<long long>(coin) + amount,
+                                static_cast<long long>(GameConfig::MaxCoins)));
 }
 void player::costcoin(int amount) {
   if (amount > 0 && coin >= amount) coin -= amount;
 }
 void player::levelup() {
-  if (level >= 100) return;
+  if (level >= GameConfig::MaxLevel) return;
+  const JobProfile &growth = jobProfile(jobType);
   ++level;
-  attack = GameConfig::addCounter(attack, 2);
-  max_hp = GameConfig::addCounter(max_hp, 10);
+  attack = GameConfig::addCounter(attack, growth.attackGrowth);
+  max_hp = GameConfig::addCounter(max_hp, growth.hpGrowth);
+  max_mp = GameConfig::addCounter(max_mp, growth.mpGrowth);
   sethp(hp + max(1, getRecoveryBaseHp() * 12 / 100));
   setmp(mp + max(1, max_mp / 5));
+  cout << getname() << " 升到 " << level << " 级，恢复基础生命12%及最大魔力20%。" << endl;
 }
 void player::revive() {
   clearCombatModifiers();
@@ -101,6 +107,7 @@ int player::getRecoveryBaseHp() const {
 void player::heal(int amount) {
   if (amount <= 0 || !isalive()) return;
   const int available = max(0, max_hp - hp);
+  if (available == 0) return;
   const int unsuppressed = min(available, amount);
   const int effective = static_cast<int>(static_cast<long long>(amount) * healingPercent / 100);
   const int restored = min(available, effective);
@@ -115,10 +122,10 @@ void player::guard(bool pierced) {
   if (!isalive()) return;
   guarding = true;
   guardPierced = pierced;
-  int recovered = (getjob() == "Warrior" ? 6 : 4) +
+  const int recovered = (jobType == Job::Warrior ? 6 : 4) +
       3 * equipmentEffect(static_cast<int>(ItemEffect::GuardRecovery));
   setmp(mp + recovered);
-  if (getjob() == "Warrior") addCombatResource(1);
+  if (jobType == Job::Warrior) addCombatResource(1);
   cout << "格挡本回合伤害，恢复 " << recovered << " MP。" << endl;
 }
 void player::clearCombatModifiers() {
@@ -135,7 +142,7 @@ void player::resetEncounterResources() {
   encounterWearPending = true;
   clearCombatModifiers();
 }
-void player::restoreTurnResources() { setmp(mp + (getjob() == "Mage" ? 3 : 2)); }
+void player::restoreTurnResources() { setmp(mp + (jobType == Job::Mage ? 3 : 2)); }
 
 void player::attacktarget(Character &target) { attacktargetDealt(target, attack); }
 void player::attacktargetDealt(Character &target, int baseDamage) {
@@ -145,18 +152,23 @@ void player::attacktargetDealt(Character &target, int baseDamage) {
   const int before = target.gethp();
   target.takedamage(static_cast<int>(min(damage, static_cast<long long>(GameConfig::MaxCounter))));
   if (target.gethp() < before) {
-    const int mana = (getjob() == "Mage" ? 8 : (getjob() == "Assassin" ? 5 : 3)) +
+    const int mana = (jobType == Job::Mage ? 8 : (jobType == Job::Assassin ? 5 : 3)) +
         3 * equipmentEffect(static_cast<int>(ItemEffect::ManaOnAttack));
     setmp(mp + mana);
     addCombatResource(1);
-    cout << "普攻命中：恢复 " << mana << " MP，职业资源 " << combatResource << "/2。" << endl;
+    cout << "普攻命中：恢复 " << mana << " MP，" << jobProfile(jobType).resourceName << " "
+         << combatResource << "/2。" << endl;
   }
 }
 void player::takedamage(int damage) {
   damage = max(0, damage);
   if (guarding && !guardPierced) damage = damage / 2 + damage % 2;
+  takeUnavoidableDamage(damage);
+}
+void player::takeUnavoidableDamage(int damage) {
+  damage = max(0, damage);
   hp = max(0, hp - damage);
-  cout << getname() << "受到 " << damage << " 伤害（HP " << hp << "/" << max_hp << "）。" << endl;
+  cout << getname() << " 受到 " << damage << " 伤害（HP " << hp << "/" << max_hp << "）。" << endl;
 }
 void player::finishEncounterWear() {
   if (!encounterWearPending) return;
@@ -199,15 +211,14 @@ void player::addItem(const Item &item) {
   backpack.push_back(item);
 }
 void player::printstats() const {
-  cout << "=== " << getname() << " | " << getjob() << " ===\n"
+  cout << "=== " << getname() << " | " << getJobName() << " ===\n"
        << "等级 " << level << " | HP " << hp << "/" << max_hp
        << " | MP " << mp << "/" << max_mp << " | 攻击 " << attack
        << " | 暴击 " << critRate << "%\n"
        << "EXP " << exp << " | 金币 " << coin << " | 改造材料 " << run.materials
        << " | 免费复苏 " << free_revives << "\n最高层 " << highestFloor
        << " | 技能阶数上限 " << Progression::skillRankCap(highestFloor)
-       << " | " << (getjob() == "Warrior" ? "战意" : (getjob() == "Mage" ? "专注" : "破绽"))
-       << " " << combatResource << "/2" << endl;
+       << " | " << jobProfile(jobType).resourceName << " " << combatResource << "/2" << endl;
 }
 void player::printBackpack() const {
   if (backpack.empty()) { cout << "背包空空如也！" << endl; return; }
@@ -222,10 +233,10 @@ void player::printBackpack() const {
       for (const Item &current : equipments)
         if (current.getType() == item.getType()) equipped = current.getValue();
       const int difference = item.getValue() - equipped;
-      cout << " | " << (item.getType() == Weapon ? "攻击" : "生命") << "变化 "
+      cout << " | " << item.getTierName() << " | " << (item.getType() == Weapon ? "攻击" : "生命") << "变化 "
            << (difference >= 0 ? "+" : "") << difference
-           << " | 耐久 " << item.getDurability() << " | 效果 " << effectName(item.getEffect());
-      if (!permitted(item, *this) || item.getLevelRequirement() > level || item.getDurability() <= 0)
+           << " | 耐久 " << item.getDurability() << " | 效果 " << item.getEffectDescription();
+      if (!canWear(item) || item.getLevelRequirement() > level || item.getDurability() <= 0)
         cout << " [当前不可装备]";
     }
     cout << endl;
@@ -242,19 +253,20 @@ bool player::useItem(int index) {
   if (item.getQuantity() <= 0) backpack.erase(backpack.begin() + index - 1);
   return true;
 }
-void player::equipItem(int index) {
-  if (index < 1 || index > static_cast<int>(backpack.size())) return;
+bool player::equipItem(int index) {
+  if (index < 1 || index > static_cast<int>(backpack.size())) return false;
   Item selected = backpack[index - 1];
   if (selected.getType() == Potion || selected.getLevelRequirement() > level ||
-      selected.getDurability() <= 0 || !permitted(selected, *this)) {
+      selected.getDurability() <= 0 || !canWear(selected)) {
     cout << "该物品当前不可装备。" << endl;
-    return;
+    return false;
   }
   // Remove the selected unit before returning old equipment to the bag.
   if (selected.getQuantity() == 1) backpack.erase(backpack.begin() + index - 1);
   else backpack[index - 1].setQuantity(selected.getQuantity() - 1);
   selected.setQuantity(1);
   equipItem_T(selected);
+  return true;
 }
 void player::unequipItem(int index) {
   if (index < 1 || index > static_cast<int>(equipments.size())) return;
@@ -267,7 +279,7 @@ void player::unequipItem(int index) {
 void player::equipItem_T(const Item &item, bool restoring) {
   Item selected = item; // The caller may pass a reference into a vector below.
   if (!validItem(selected) || selected.getType() == Potion || selected.getDurability() <= 0 ||
-      !permitted(selected, *this) || (!restoring && selected.getLevelRequirement() > level)) {
+      !canWear(selected) || (!restoring && selected.getLevelRequirement() > level)) {
     if (!restoring) addItem(selected);
     return;
   }
@@ -292,17 +304,21 @@ void player::showEquippedItems() const {
   if (equipments.empty()) { cout << "没有装备任何物品！" << endl; return; }
   for (int i = 0; i < static_cast<int>(equipments.size()); ++i) {
     const auto &item = equipments[i];
-    cout << i + 1 << ". " << item.getName() << " | "
+    cout << i + 1 << ". " << item.getName() << " | " << item.getTierName() << " | "
          << (item.getType() == Weapon ? "攻击+" : "生命+") << item.getValue()
-         << " | 耐久 " << item.getDurability() << " | " << effectName(item.getEffect()) << endl;
+         << " | 耐久 " << item.getDurability() << " | " << item.getEffectDescription() << endl;
   }
 }
-void player::dropItem(int index) {
-  if (index < 1 || index > static_cast<int>(backpack.size()) || backpack[index - 1].isLocked()) return;
-  const Item &item = backpack[index - 1];
-  const long long proceeds = static_cast<long long>(item.getPrice() / 3) * item.getQuantity();
-  gaincoin(static_cast<int>(min(proceeds, static_cast<long long>(MaxCoins))));
-  backpack.erase(backpack.begin() + index - 1);
+int player::sellItem(int index, int quantity) {
+  if (index < 1 || index > static_cast<int>(backpack.size())) return 0;
+  Item &item = backpack[index - 1];
+  if (item.isLocked() || quantity < 1 || quantity > item.getQuantity()) return 0;
+  const long long proceeds = static_cast<long long>(item.getPrice() / 3) * quantity;
+  const int earned = static_cast<int>(min(proceeds, static_cast<long long>(GameConfig::MaxCoins)));
+  gaincoin(earned);
+  if (quantity == item.getQuantity()) backpack.erase(backpack.begin() + index - 1);
+  else item.setQuantity(item.getQuantity() - quantity);
+  return earned;
 }
 bool player::toggleItemLock(int index) {
   if (index < 1 || index > static_cast<int>(backpack.size())) return false;
@@ -329,35 +345,39 @@ int player::salvageUnlocked() {
 bool player::modifyEquipment(int index, int effectId) {
   if (index < 1 || index > static_cast<int>(equipments.size()) || effectId < 1 || effectId > 4) return false;
   Item &item = equipments[index - 1];
-  if (static_cast<int>(item.getEffect()) == effectId || item.isLocked()) return false;
+  // Locks protect against selling and salvage; they never block upgrading worn gear.
+  if (static_cast<int>(item.getEffect()) == effectId) return false;
   const int cost = 3 + item.getTier() * 2;
   if (run.materials < cost || !item.setEffect(static_cast<ItemEffect>(effectId))) return false;
   run.materials -= cost;
   return true;
 }
 
-void player::showSkills(player &hero) const {
+void player::showSkills() const {
   for (int i = 0; i < static_cast<int>(skills.size()); ++i) {
     const skill &ability = *skills[i];
     cout << i + 1 << ". " << ability.getskillname() << " Lv." << ability.getskilllevel()
-         << " [" << ability.getSpecializationName(hero) << "]\n   "
-         << ability.getPreview(hero) << "\n   MP " << ability.getActualCost(hero)
+         << " [" << ability.getSpecializationName(*this) << "]\n   "
+         << ability.getPreview(*this) << "\n   MP " << ability.getActualCost(*this)
          << " | 冷却 " << ability.getcurrentcooldown() << "/" << ability.getcooldown()
          << " | 等级需求 " << ability.getlevelrequired() << " | 楼层需求 " << ability.getunlockfloor()
-         << " | 升级费用 " << ability.getlevelUpCost() << " | " << (ability.canUse(hero) ? "可用" : "不可用") << endl;
-    if (i < 2) {
-      const char *choices[3][2] = {
-        {"1反击：伤害80%+每层战意35%；2重斩：伤害140%，多耗3MP，不消耗战意",
-         "1坚守：伤害65%，恢复基础HP25%，多耗4MP；2振奋：伤害130%，不回血，命中回6MP"},
-        {"1蓄焰：伤害120%+每层专注30%，多耗3MP；2火花：伤害95%，少耗4MP，积累专注",
-         "1深冻：伤害70%，减攻40%持续3行动；2碎冰：伤害155%，无减攻，命中回6MP"},
-        {"1开隙：伤害80%，命中增加2层破绽；2穿甲：伤害125%，多耗3MP，穿盾且不积破绽",
-         "1伏击：伤害120%+每层破绽40%；2扰乱：伤害120%，命中回8MP，减攻15%一次行动"}
-      };
-      const int job = getjob() == "Warrior" ? 0 : (getjob() == "Mage" ? 1 : 2);
-      cout << "   专精第" << (i == 0 ? 10 : 30) << "层开放：0基础；" << choices[job][i]
-           << "。初选免费，重选费用 " << 100 + highestFloor * 5 << " 金币。" << endl;
-    }
+         << " | 升级费用 " << ability.getlevelUpCost() << " | " << (ability.canUse(*this) ? "可用" : "不可用") << endl;
+    if (i < 2)
+      cout << "   专精第" << skill::specializationFloor(i + 1) << "层开放：0基础；"
+           << ability.getSpecializationOptions(*this) << "。初选免费，重选费用 "
+           << respecCost() << " 金币。" << endl;
+  }
+}
+void player::showSkillsCompact() const {
+  for (int i = 0; i < static_cast<int>(skills.size()); ++i) {
+    const skill &ability = *skills[i];
+    cout << i + 1 << ". " << ability.getskillname() << " [" << ability.getSpecializationName(*this)
+         << "] MP " << ability.getActualCost(*this) << " | ";
+    if (ability.canUse(*this)) cout << "可用";
+    else if (ability.getcurrentcooldown() > 0) cout << "冷却 " << ability.getcurrentcooldown();
+    else if (level < ability.getlevelrequired() || highestFloor < ability.getunlockfloor()) cout << "未解锁";
+    else cout << "MP不足";
+    cout << " | " << ability.getPreview(*this) << endl;
   }
 }
 bool player::useSkill(int index, enemy &target) {
@@ -370,20 +390,23 @@ skill *player::getSkill(int index) const {
 }
 int player::getSkillCount() const { return static_cast<int>(skills.size()); }
 void player::reduceallCooldowns() { for (auto &ability : skills) ability->reducecooldown(); }
-void player::levelUpSkill(int index) {
+bool player::levelUpSkill(int index) {
   skill *ability = getSkill(index);
-  if (!ability) return;
+  if (!ability) return false;
   const int cost = ability->getlevelUpCost();
-  if (ability->levelUpSkill(level, coin, highestFloor)) costcoin(cost);
+  if (!ability->levelUpSkill(level, coin, highestFloor)) return false;
+  costcoin(cost);
+  return true;
 }
+int player::respecCost() const { return 100 + highestFloor * 5; }
 bool player::chooseSpecialization(int slot, int branch) {
   skill *ability = getSkill(slot);
   if (!ability || slot > 2 || branch < 0 || branch > 2 ||
-      highestFloor < (slot == 1 ? 10 : 30) || level < ability->getlevelrequired() ||
+      highestFloor < skill::specializationFloor(slot) || level < ability->getlevelrequired() ||
       ability->getSpecialization() == branch || encounterWearPending) return false;
   // Selecting or resetting any branch has no immediate resource or cooldown reward.
   // First choice is free; returning to branch zero costs the same as a respec.
-  const int cost = ability->getSpecialization() == 0 ? 0 : 100 + highestFloor * 5;
+  const int cost = ability->getSpecialization() == 0 ? 0 : respecCost();
   if (coin < cost || !ability->setSpecialization(branch)) return false;
   costcoin(cost);
   return true;
@@ -393,7 +416,7 @@ void player::loadStats(int newLevel, int newExp, int newCoin, int newHp, int new
                        int newFreeRevives) {
   level = clamp(newLevel, 1, 10000); // Legacy saves retain up to 10000; new progression stops at 100.
   exp = max(0, newExp);
-  coin = clamp(newCoin, 0, MaxCoins);
+  coin = clamp(newCoin, 0, GameConfig::MaxCoins);
   max_hp = clamp(newMaxHp, 1, GameConfig::MaxCounter);
   hp = clamp(newHp, 0, max_hp);
   attack = clamp(newAttack, 0, GameConfig::MaxCounter);

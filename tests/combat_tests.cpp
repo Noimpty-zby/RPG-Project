@@ -21,7 +21,7 @@ std::unique_ptr<Warrior> hero(int hp = 800, int attack = 50) {
 enemy foe(int floor = 1, bool boss = false, int attack = 100) {
   enemy e("fixture", 100000, attack, 0, 500, 500, floor);
   e.configureEncounter(floor, boss);
-  e.setdogeRate(0);
+  e.setdodgeRate(0);
   return e;
 }
 void turn(BattleSession &battle, BattleAction action) {
@@ -95,7 +95,7 @@ void testChargeCounterAndRecovery() {
   require(guardHero->gethp() == 720 && guardBattle.report().damageTaken == 80,
           "Basic guard must halve the heavy strike");
 
-  auto missHero = hero(); auto dodging = foe(10, true); dodging.setdogeRate(100);
+  auto missHero = hero(); auto dodging = foe(10, true); dodging.setdodgeRate(100);
   BattleSession missBattle(*missHero, dodging);
   turn(missBattle, {ActionType::Attack});
   require(missBattle.report().interrupts == 0 &&
@@ -208,15 +208,15 @@ void testDeathTimeoutAndBoundaryRules() {
 
   auto doomed = hero(1); auto explosive = foe(1, false, 100); explosive.resethp(1);
   giveAffix(explosive, Affix::EXPLOSIVE);
-  explosive.removeAffix(Affix::POSIONOUS);
-  explosive.setdogeRate(0);
+  explosive.removeAffix(Affix::POISONOUS);
+  explosive.setdodgeRate(0);
   BattleSession mutual(*doomed, explosive);
   turn(mutual, {ActionType::Attack});
   require(mutual.finished() && !mutual.won() && !explosive.isalive(),
           "Death from a defeated enemy's explosion must remain a loss");
 
   auto poisoned = hero(1); auto poisoner = foe();
-  giveAffix(poisoner, Affix::POSIONOUS);
+  giveAffix(poisoner, Affix::POISONOUS);
   BattleSession poison(*poisoned, poisoner, {EncounterObjective::Survive, 1});
   require(!poison.beginTurn() && poison.finished() && !poison.won() &&
               poison.turns() == 0 && poison.report().poisonDamage == 1 &&
@@ -278,6 +278,33 @@ void testCleanupAndSabotage() {
   require(core.getIntent().damagePercent == 125,
           "Campaign sabotage must weaken the core heavy strike");
 }
+
+void testAssassinCannotDodgeUnavoidableDamage() {
+  // Poison ticks and death blasts bypass the assassin's passive dodge.
+  auto assassin = std::make_unique<Assassin>("dodger");
+  assassin->loadStats(80, 0, 100, 5000, 5000, 50, 200, 200, 0, 3);
+  assassin->setHighestFloor(100);
+  auto poisoner = foe(1, false, 0);
+  giveAffix(poisoner, Affix::POISONOUS);
+  BattleSession poison(*assassin, poisoner);
+  for (int i = 0; i < 60; ++i) turn(poison, {ActionType::Guard});
+  require(poison.report().poisonDamage == 60 && poison.report().damageTaken == 60,
+          "Assassin dodge must not avoid poison ticks");
+
+  int blasts = 0;
+  for (int i = 0; i < 40; ++i) {
+    auto target = std::make_unique<Assassin>("blast");
+    target->loadStats(80, 0, 100, 5000, 5000, 50, 200, 200, 0, 3);
+    target->setHighestFloor(100);
+    auto bomber = foe(1, false, 100); bomber.resethp(1);
+    giveAffix(bomber, Affix::EXPLOSIVE);
+    bomber.removeAffix(Affix::POISONOUS);
+    BattleSession blast(*target, bomber);
+    turn(blast, {ActionType::Attack});
+    blasts += blast.report().damageTaken > 0 && blast.report().poisonDamage == 0;
+  }
+  require(blasts == 40, "Assassin dodge must not avoid death blasts, which are not poison");
+}
 } // namespace
 
 int main() {
@@ -293,6 +320,7 @@ int main() {
     testDeathTimeoutAndBoundaryRules();
     testInitiallyDeadEncounterCannotSettle();
     testCleanupAndSabotage();
+    testAssassinCannotDodgeUnavoidableDamage();
     std::cout.rdbuf(previous);
     std::cout << "combat objective tests passed\n";
   } catch (const std::exception &error) {

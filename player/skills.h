@@ -37,20 +37,14 @@ public:
   int getSpecialization() const { return specialization; }
   bool setSpecialization(int value);
   std::string getSpecializationName(const player &hero) const;
+  // Branch choices for the first two skills; empty for other slots.
+  std::string getSpecializationOptions(const player &hero) const;
+  static int specializationFloor(int slot) { return slot == 1 ? 10 : 30; }
   std::string getPreview(const player &hero) const;
   int getlevelUpCost() const;
   int getskilllevel() const;
   int getcurrentcooldown() const;
   std::string getskillname() const;
-
-  // ── Setters ──
-  void setskillid(int skillid);
-  void setlevelrequired(int levelrequired);
-  void setcostmp(int costmp);
-  void setcooldown(int cooldown);
-  void setdamage(int damage);
-  void setskillname(std::string skillname);
-  void setskilllevelup(int level);
 
   // ── 冷却控制 ──
   void reducecooldown();
@@ -59,10 +53,9 @@ public:
   void restoreProgress(int level, int cooldown);
 
   // ── 逻辑 ──
-  virtual bool canUse(player &hero) const;
+  bool canUse(const player &hero) const;
   bool canUpgrade(int playerLevel, int highestFloor) const;
   bool levelUpSkill(int playerLevel, int costcoins, int highestFloor);
-  void learnSkill(int playerlevel);
 
   virtual ~skill() = default;
   virtual bool useSkill(player &hero, enemy &target) = 0;
@@ -112,7 +105,6 @@ public:
 class Mageskill_4 : public skill {
 public:
   Mageskill_4();
-  bool canUse(player &hero) const override;
   bool useSkill(player &hero, enemy &target) override;
 };
 class Mageskill_5 : public skill {

@@ -14,7 +14,7 @@ void require(bool condition, const char *message) {
 enemy foe(int floor, bool boss = false) {
   enemy e("fixture", 1000, 100, 0, 30, 20, floor);
   e.configureEncounter(floor, boss);
-  e.setdogeRate(0);
+  e.setdodgeRate(0);
   return e;
 }
 
@@ -202,10 +202,10 @@ void testNumericAndAffixBoundaries() {
   require(e.gethp() == 500, "Negative healing must not damage an enemy");
   e.heal(std::numeric_limits<int>::max());
   require(e.gethp() == e.getmaxhp(), "Large healing must saturate without overflowing");
-  e.setdogeRate(-100);
-  require(e.getdogeRate() == 0, "Negative dodge chance must clamp to zero");
-  e.setdogeRate(std::numeric_limits<int>::max());
-  require(e.getdogeRate() == 100, "Dodge chance must not exceed one hundred");
+  e.setdodgeRate(-100);
+  require(e.getdodgeRate() == 0, "Negative dodge chance must clamp to zero");
+  e.setdodgeRate(std::numeric_limits<int>::max());
+  require(e.getdodgeRate() == 100, "Dodge chance must not exceed one hundred");
   e.resethp(-10);
   require(e.gethp() == 0 && e.getmaxhp() == 0 && !e.isalive(),
           "Negative reset HP must remain a valid dead state");
@@ -216,7 +216,7 @@ void testNumericAndAffixBoundaries() {
   std::srand(37);
   for (int roll = 0; roll < 1000; ++roll) affixed.setAffix(100);
   for (Affix affix : {Affix::STRONG, Affix::TOUGH, Affix::QUICK,
-                     Affix::EXPLOSIVE, Affix::POSIONOUS, Affix::HEALING,
+                     Affix::EXPLOSIVE, Affix::POISONOUS, Affix::HEALING,
                      Affix::SHIELDING})
     require(affixed.hasAffix(affix), "Repeated affix fixture should reach all seven unique affixes");
   require(affixed.getexp_reward() == 30 + 7 * 100 * 3 &&

@@ -23,10 +23,10 @@ void prepareEventHero(Warrior &hero, int coins = 10000, int hp = 400,
 }
 bool sameEnemy(const enemy &a, const enemy &b) {
   if (a.gethp() != b.gethp() || a.getattack() != b.getattack() ||
-      a.getdogeRate() != b.getdogeRate() || a.getexp_reward() != b.getexp_reward() ||
+      a.getdodgeRate() != b.getdodgeRate() || a.getexp_reward() != b.getexp_reward() ||
       a.getcoin_reward() != b.getcoin_reward()) return false;
   for (Affix affix : {Affix::STRONG, Affix::TOUGH, Affix::QUICK, Affix::EXPLOSIVE,
-                     Affix::POSIONOUS, Affix::HEALING, Affix::SHIELDING})
+                     Affix::POISONOUS, Affix::HEALING, Affix::SHIELDING})
     if (a.hasAffix(affix) != b.hasAffix(affix)) return false;
   return true;
 }
@@ -137,9 +137,9 @@ void testEventEnemyEffectsAndPrices() {
     const auto original = Campaign::makeEnemy(purifier, 16);
     purifier.runState().events[1] = 1;
     const auto clean = Campaign::makeEnemy(purifier, 16);
-    sawPoison |= original.hasAffix(Affix::POSIONOUS);
-    require(!clean.hasAffix(Affix::POSIONOUS) && clean.gethp() == original.gethp() &&
-                clean.getattack() == original.getattack() && clean.getdogeRate() == original.getdogeRate(),
+    sawPoison |= original.hasAffix(Affix::POISONOUS);
+    require(!clean.hasAffix(Affix::POISONOUS) && clean.gethp() == original.gethp() &&
+                clean.getattack() == original.getattack() && clean.getdodgeRate() == original.getdodgeRate(),
             "Purification must remove poison without changing the enemy roll");
   }
   require(sawPoison, "Purification test must include a naturally poisoned enemy");
@@ -147,8 +147,8 @@ void testEventEnemyEffectsAndPrices() {
   const auto normal = Campaign::makeEnemy(intel, 26), boss = Campaign::makeEnemy(intel, 30);
   const auto neighbor = Campaign::makeEnemy(intel, 20);
   require(Campaign::resolveEvent(intel, 25, 1), "Intel event fixture failed");
-  require(Campaign::makeEnemy(intel, 26).getdogeRate() == std::max(0, normal.getdogeRate() - 10) &&
-              Campaign::makeEnemy(intel, 30).getdogeRate() == std::max(0, boss.getdogeRate() - 10) &&
+  require(Campaign::makeEnemy(intel, 26).getdodgeRate() == std::max(0, normal.getdodgeRate() - 10) &&
+              Campaign::makeEnemy(intel, 30).getdodgeRate() == std::max(0, boss.getdodgeRate() - 10) &&
               sameEnemy(neighbor, Campaign::makeEnemy(intel, 20)),
           "Intel must reduce ordinary and boss dodge only within its own chapter");
   Warrior bounty("bounty"); prepareEventHero(bounty, 0);
@@ -188,7 +188,7 @@ void testEventsPersistWithoutNewFields() {
 void testLivingTimeoutIsNotADeath() {
   Warrior hero("timeout"); prepareEventHero(hero);
   enemy blocker("blocker", 1000000, 0, 0, 100, 100, 1);
-  blocker.configureEncounter(1, false); blocker.setdogeRate(0);
+  blocker.configureEncounter(1, false); blocker.setdodgeRate(0);
   BattleSession battle(hero, blocker, {EncounterObjective::Escape});
   while (battle.beginTurn()) require(battle.act({ActionType::Attack}), "Timeout fixture must submit valid actions");
   const int coins = hero.getcoin(), exp = hero.getexp(), materials = hero.runState().materials;
@@ -204,7 +204,7 @@ void testLivingTimeoutIsNotADeath() {
           "A timed-out encounter must still settle at most once");
   hero.sethp(1);
   enemy lethal("lethal", 1000000, 100, 0, 0, 0, 1);
-  lethal.configureEncounter(1, false); lethal.setdogeRate(0);
+  lethal.configureEncounter(1, false); lethal.setdodgeRate(0);
   BattleSession loss(hero, lethal);
   require(loss.beginTurn() && loss.act({ActionType::Attack}) && !hero.isalive(), "Death fixture failed");
   require(!Campaign::settleEncounter(hero, lethal, loss, 1) && hero.runState().deaths == 1 &&
@@ -284,7 +284,7 @@ int main() {
   Campaign::initialize(rewards, 1, 0);
   Campaign::chooseRoute(rewards, 1, 3);
   enemy weak("test", 1, 0, 0, 100, 100, 3);
-  weak.configureEncounter(3, false); weak.setdogeRate(0);
+  weak.configureEncounter(3, false); weak.setdodgeRate(0);
   BattleSession battle(rewards, weak);
   assert(!Campaign::settleEncounter(rewards, weak, battle, 3));
   assert(battle.beginTurn()); assert(battle.act({ActionType::Attack}));
@@ -296,7 +296,7 @@ int main() {
   assert(rewards.runState().battles == 1);
   for (int i = 0; i < 5; ++i) {
     enemy again("repeat", 1, 0, 0, 100, 100, 3);
-    again.configureEncounter(3, false); again.setdogeRate(0);
+    again.configureEncounter(3, false); again.setdodgeRate(0);
     BattleSession repeat(rewards, again);
     assert(repeat.beginTurn() && repeat.act({ActionType::Attack}));
     const int before = rewards.getcoin();

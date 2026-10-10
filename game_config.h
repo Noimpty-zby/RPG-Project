@@ -6,6 +6,8 @@ constexpr int MaxFloor = 100;
 constexpr int FloorsPerChapter = 10;
 constexpr int MaxMaterials = 9999;
 constexpr int MaxCounter = 100000000;
+constexpr int MaxCoins = 1000000000; // Matches save validation, including legacy balances.
+constexpr int MaxLevel = 100;
 inline int floor(int value) { return std::clamp(value, 1, MaxFloor); }
 inline int chapter(int value) { return (floor(value) - 1) / FloorsPerChapter; }
 inline int refreshCost(int value, int refreshes) {
@@ -14,6 +16,9 @@ inline int refreshCost(int value, int refreshes) {
 inline int restCost(int value) { return 60 + chapter(value) * 40; }
 inline int repeatRewardPercent(int attempts) {
   return attempts <= 1 ? 30 : (attempts <= 3 ? 10 : 0);
+}
+inline const char *challengeName(int challenge) {
+  return challenge == 1 ? "补给匮乏" : (challenge == 2 ? "无复苏" : "标准");
 }
 inline int addCounter(int value, int increment) {
   return static_cast<int>(std::clamp(static_cast<long long>(value) + increment,

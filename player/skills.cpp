@@ -33,7 +33,7 @@ int directDamage(const skill &ability, const player &hero) {
   const int branch = ability.getSpecialization();
   const int slot = ability.getskillid();
   const int resource = hero.getCombatResource();
-  if (hero.getjob() == "Warrior") {
+  if (hero.job() == Job::Warrior) {
     if (slot == 1) return percent(base, branch == 1 ? 80 + 35 * resource :
                                            (branch == 2 ? 140 : 100 + 15 * resource));
     if (slot == 2) return percent(base, branch == 1 ? 65 : (branch == 2 ? 130 : 100));
@@ -42,14 +42,14 @@ int directDamage(const skill &ability, const player &hero) {
       const int hpPercent = static_cast<int>(static_cast<long long>(hero.gethp()) * 100 / max(1, hero.getmaxhp()));
       return percent(base, hpPercent > 60 ? 100 : (hpPercent >= 30 ? 180 : 300));
     }
-  } else if (hero.getjob() == "Mage") {
+  } else if (hero.job() == Job::Mage) {
     if (slot == 1) return percent(base, branch == 1 ? 120 + 30 * resource :
                                            (branch == 2 ? 95 : 135 + 15 * resource));
     if (slot == 2) return percent(base, branch == 1 ? 70 : (branch == 2 ? 155 : 115));
     if (slot == 3) return base + hero.getlevel() * 2;
     if (slot == 4) return percent(ability.getActualCost(hero), 300 + 75 * (ability.getEffectiveRank() - 1));
     if (slot == 5) return percent(base, 150);
-  } else if (hero.getjob() == "Assassin") {
+  } else if (hero.job() == Job::Assassin) {
     if (slot == 1) return percent(base, branch == 1 ? 80 : (branch == 2 ? 125 : 100));
     if (slot == 2) return percent(base, branch == 1 ? 120 + 40 * resource :
                                            (branch == 2 ? 120 : 160 + 15 * resource));
@@ -81,25 +81,18 @@ int skill::getScaledDamage(const player &hero) const {
   return static_cast<int>(clamp(value, 0LL, static_cast<long long>(GameConfig::MaxCounter)));
 }
 int skill::getActualCost(const player &hero) const {
-  if (hero.getjob() == "Mage" && skillid == 4) return max(10, hero.getmp() / 2);
+  if (hero.job() == Job::Mage && skillid == 4) return max(10, hero.getmp() / 2);
   int cost = costmp;
   if (cost == 0) return 0;
-  if (specialization == 1 && skillid == 2 && hero.getjob() == "Warrior") cost += 4;
-  if (specialization == 2 && skillid == 1) cost += hero.getjob() == "Mage" ? -4 : 3;
-  if (specialization == 1 && skillid == 1 && hero.getjob() == "Mage") cost += 3;
+  if (specialization == 1 && skillid == 2 && hero.job() == Job::Warrior) cost += 4;
+  if (specialization == 2 && skillid == 1) cost += hero.job() == Job::Mage ? -4 : 3;
+  if (specialization == 1 && skillid == 1 && hero.job() == Job::Mage) cost += 3;
   // Round costs up: a one-MP skill must never become free from equipment.
   const int efficiency = 100 - 10 * hero.equipmentEffect(static_cast<int>(ItemEffect::SkillEfficiency));
   return max(1, static_cast<int>((static_cast<long long>(max(1, cost)) * efficiency + 99) / 100));
 }
 int skill::getskilllevel() const { return level; }
 string skill::getskillname() const { return skillname; }
-void skill::setskillid(int value) { skillid = value; if (skillid < 1 || skillid > 2) specialization = 0; }
-void skill::setlevelrequired(int value) { levelrequired = max(1, value); }
-void skill::setcostmp(int value) { costmp = clamp(value, 0, GameConfig::MaxCounter); }
-void skill::setcooldown(int value) { cooldown = clamp(value, 0, 100); currentcooldown = min(currentcooldown, cooldown); }
-void skill::setdamage(int value) { damage = clamp(value, 0, GameConfig::MaxCounter); }
-void skill::setskillname(string value) { skillname = std::move(value); }
-void skill::setskilllevelup(int value) { restoreProgress(value, currentcooldown); }
 bool skill::setSpecialization(int value) {
   if (value < 0 || value > 2 || (value != 0 && (skillid < 1 || skillid > 2))) return false;
   specialization = value;
@@ -119,7 +112,7 @@ void skill::restoreProgress(int rank, int remainingCooldown) {
   costmp = basecostmp == 0 ? 0 : basecostmp + (effective - 1) * 3;
   currentcooldown = clamp(remainingCooldown, 0, cooldown);
 }
-bool skill::canUse(player &hero) const {
+bool skill::canUse(const player &hero) const {
   return hero.isalive() && hero.getlevel() >= levelrequired && hero.getHighestFloor() >= getunlockfloor() &&
          hero.getmp() >= getActualCost(hero) && currentcooldown == 0;
 }
@@ -134,9 +127,6 @@ bool skill::levelUpSkill(int playerLevel, int coins, int highestFloor) {
   cout << "【技能进阶】" << skillname << " → " << level << "阶。" << endl;
   return true;
 }
-void skill::learnSkill(int playerLevel) {
-  cout << skillname << (playerLevel >= levelrequired ? "：达到等级要求。" : "：等级不足。") << endl;
-}
 string skill::getSpecializationName(const player &hero) const {
   if (specialization == 0) return "基础";
   const char *names[3][2][2] = {
@@ -144,18 +134,29 @@ string skill::getSpecializationName(const player &hero) const {
     {{"蓄焰", "火花"}, {"深冻", "碎冰"}},
     {{"开隙", "穿甲"}, {"伏击", "扰乱"}}
   };
-  const int job = hero.getjob() == "Warrior" ? 0 : (hero.getjob() == "Mage" ? 1 : 2);
-  return names[job][clamp(skillid, 1, 2) - 1][specialization - 1];
+  return names[static_cast<int>(hero.job())][clamp(skillid, 1, 2) - 1][specialization - 1];
+}
+string skill::getSpecializationOptions(const player &hero) const {
+  if (skillid < 1 || skillid > 2) return "";
+  const char *choices[3][2] = {
+    {"1反击：伤害80%+每层战意35%；2重斩：伤害140%，多耗3MP，不消耗战意",
+     "1坚守：伤害65%，恢复基础HP25%，多耗4MP；2振奋：伤害130%，不回血，命中回6MP"},
+    {"1蓄焰：伤害120%+每层专注30%，多耗3MP；2火花：伤害95%，少耗4MP，积累专注",
+     "1深冻：伤害70%，减攻40%持续3行动；2碎冰：伤害155%，无减攻，命中回6MP"},
+    {"1开隙：伤害80%，命中增加2层破绽；2穿甲：伤害125%，多耗3MP，穿盾且不积破绽",
+     "1伏击：伤害120%+每层破绽40%；2扰乱：伤害120%，命中回8MP，减攻15%一次行动"}
+  };
+  return choices[static_cast<int>(hero.job())][skillid - 1];
 }
 string skill::getPreview(const player &hero) const {
   ostringstream out;
   const int amount = directDamage(*this, hero);
-  if (hero.getjob() == "Assassin" && skillid == 3)
+  if (hero.job() == Job::Assassin && skillid == 3)
     out << "2—4次连击，每击 " << percent(getScaledDamage(hero), 55) << "；后续击穿盾";
-  else if (hero.getjob() == "Assassin" && skillid == 5)
+  else if (hero.job() == Job::Assassin && skillid == 5)
     out << "无视护盾：当前敌HP的普通35%/Boss15% + " << getdamage();
   else out << "当前预计伤害 " << amount << "（未计敌方减免/闪避）";
-  if (hero.getjob() == "Warrior") {
+  if (hero.job() == Job::Warrior) {
     if (skillid == 1 && specialization != 2) out << "；消耗战意，最多2层";
     if (skillid == 2) {
       if (specialization == 2) out << "；不回血，命中恢复6MP";
@@ -164,7 +165,7 @@ string skill::getPreview(const player &hero) const {
     if (skillid == 3) out << "；敌攻击-35%，持续 " << controlDuration(hero, 2) << " 次行动";
     if (skillid == 4) out << "；生命比例>60%/30—60%/<30%对应1/1.8/3倍";
     if (skillid == 5) out << "；恢复 " << 10 * getEffectiveRank() << " HP";
-  } else if (hero.getjob() == "Mage") {
+  } else if (hero.job() == Job::Mage) {
     if (skillid == 1 && specialization != 2) out << "；消耗专注，最多2层";
     if (skillid == 1 && specialization == 2) out << "；保留并增加1层专注";
     if (skillid == 2 && specialization != 2)
@@ -251,7 +252,6 @@ bool Mageskill_3::useSkill(player &hero, enemy &target) {
   return true;
 }
 Mageskill_4::Mageskill_4() : skill(4, 6, 0, 5, 0, 1, "奥术爆发") {}
-bool Mageskill_4::canUse(player &hero) const { return skill::canUse(hero); }
 bool Mageskill_4::useSkill(player &hero, enemy &target) {
   const int damage = directDamage(*this, hero); // Dynamic cost must be captured before payment.
   if (!beginCast(*this, hero, target)) return false;

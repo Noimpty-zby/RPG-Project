@@ -41,8 +41,7 @@ const char *eventOutcome(int type, int choice) {
   return choice == 1 ? "情报已生效：本章敌人闪避-10个百分点，最低0" : "悬赏已领取：本章Boss攻击+10%";
 }
 bool isUsable(const player &hero, const Item &item) {
-  return item.getLevelRequirement() <= hero.getlevel() &&
-    (item.getJobRequirement() == AnyJob || item.getJobRequirement() == Campaign::jobOf(hero));
+  return item.getLevelRequirement() <= hero.getlevel() && hero.canWear(item);
 }
 bool isUpgrade(const player &hero, const Item &item) {
   if (item.getType() == Potion || !isUsable(hero, item)) return false;
@@ -64,10 +63,7 @@ void giveItem(player &hero, const Item &item) {
 
 namespace Campaign {
 const Chapter &chapter(int floor) { return chapters[GameConfig::chapter(floor)]; }
-JobReq jobOf(const player &hero) {
-  return hero.getjob() == "Warrior" ? WarriorOnly :
-         hero.getjob() == "Mage" ? MageOnly : AssassinOnly;
-}
+JobReq jobOf(const player &hero) { return equipmentClass(hero.job()); }
 void seedStream(const player &hero, int floor, unsigned stream) {
   const unsigned f = static_cast<unsigned>(GameConfig::floor(floor));
   unsigned value = hero.runState().seed ^ (f * 0x9e3779b9U) ^ (stream * 0x85ebca6bU);
@@ -146,8 +142,8 @@ enemy makeEnemy(const player &hero, int floor) {
   }
   const int event = hero.runState().events[GameConfig::chapter(floor)];
   const int type = eventType(floor);
-  if (event == 1 && type == 1) monster.removeAffix(Affix::POSIONOUS);
-  if (event == 1 && type == 2) monster.setdogeRate(std::max(0, monster.getdogeRate() - 10));
+  if (event == 1 && type == 1) monster.removeAffix(Affix::POISONOUS);
+  if (event == 1 && type == 2) monster.setdodgeRate(std::max(0, monster.getdodgeRate() - 10));
   if (floor % 10 == 0) {
     if (event == 1 && type == 0) monster.resetattack(std::max(1, monster.getattack() * 90 / 100));
     if (event == 2 && type == 2) monster.resetattack(std::max(1, monster.getattack() * 110 / 100));
@@ -343,7 +339,7 @@ void printJournal(const player &hero, int floor) {
     << "\n" << routeDescription(run.routes[c]) << "\n章节进度 " << objectivesCompleted(hero, floor)
     << "/9；订单 " << (run.ordersClaimed[c] ? "已领取" : "未领取")
     << "；材料 " << run.materials << "；装备目标 " << (run.lootTarget == 1 ? "武器" : "防具")
-    << "；保底进度 " << run.pity << "\n种子 " << run.seed << "；挑战 " << run.challenge
+    << "；保底进度 " << run.pity << "\n种子 " << run.seed << "；挑战 " << GameConfig::challengeName(run.challenge)
     << "；规则 " << (run.legacyRules ? "传统存档（可选择迁移）" : "章节规则")
     << "\n累计战斗 " << run.battles << "，回合 " << run.turns << "，阵亡 " << run.deaths
     << "，药水 " << run.potionsUsed << "，装备提升 " << run.usefulDrops

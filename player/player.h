@@ -8,8 +8,23 @@
 
 class skill;
 
+enum class Job { Warrior, Mage, Assassin };
+
+// Base stats and per-level growth live in one table so new characters,
+// level-ups and legacy-save migration cannot drift apart.
+struct JobProfile {
+  const char *saveKey;     // Stable save-file identifier.
+  const char *displayName; // Shown to players.
+  const char *resourceName;
+  int hp, attack, mp, critRate;
+  int hpGrowth, attackGrowth, mpGrowth;
+};
+const JobProfile &jobProfile(Job job);
+JobReq equipmentClass(Job job);
+
 class player : public Character {
 protected:
+  Job jobType;
   int level;
   int exp;
   int coin;
@@ -27,9 +42,9 @@ protected:
   std::vector<Item> equipments;
   std::vector<std::unique_ptr<skill>> skills;
 
+  player(std::string name, Job job);
+
 public:
-  player(std::string name, int hp, int attack, int mp, int level, int exp,
-         int coin, int critRate);
   virtual ~player();
 
   // ── 基本属性 ──
@@ -44,7 +59,7 @@ public:
   // ── 经验 / 金币 / 升级 ──
   void gainexp(int exp);
   void gaincoin(int coin);
-  virtual void levelup();
+  void levelup();
   void costcoin(int amount);
 
   // ── 复活 ──
@@ -53,15 +68,16 @@ public:
   void resetFreeRevive();
 
   // ── 战斗 ──
-  virtual void attacktarget(Character &target) override;
+  void attacktarget(Character &target);
   virtual void takedamage(int damage) override;
+  // Poison and death blasts: no guard reduction and no dodge.
+  void takeUnavoidableDamage(int damage);
   void attacktargetDealt(Character &target, int damage);
   void heal(int amount);
   void setHealingPercent(int percent);
   void guard(bool pierced);
   void clearCombatModifiers();
   int getRecoveryBaseHp() const;
-  int getBaseMaxHp() const { return getRecoveryBaseHp(); }
   int getSuppressedHealingTotal() const { return suppressedHealingTotal; }
   int getCombatResource() const { return combatResource; }
   void addCombatResource(int amount);
@@ -72,8 +88,11 @@ public:
   RunState &runState() { return run; }
   const RunState &runState() const { return run; }
 
-  // ── 职业（纯虚） ──
-  virtual std::string getjob() const = 0;
+  // ── 职业 ──
+  Job job() const { return jobType; }
+  std::string getjob() const { return jobProfile(jobType).saveKey; }
+  std::string getJobName() const { return jobProfile(jobType).displayName; }
+  bool canWear(const Item &item) const;
 
   // ── 显示 ──
   void printstats() const;
@@ -82,24 +101,28 @@ public:
   void addItem(const Item &item);
   void printBackpack() const;
   bool useItem(int index);
-  void equipItem(int index);
+  bool equipItem(int index);
   void unequipItem(int index);
   void showEquippedItems() const;
   void equipItem_T(const Item &item, bool restoring = false);
-  void dropItem(int index);           // 丢弃背包物品
+  // Sells part of a stack for a third of its unit price; locked items are kept.
+  // Returns the coins earned, or 0 if nothing was sold.
+  int sellItem(int index, int quantity);
   int equipmentEffect(int effectId) const;
   bool toggleItemLock(int index);
   int salvageUnlocked();
   bool modifyEquipment(int index, int effectId);
 
   // ── 技能 ──
-  void showSkills(player &hero) const;
+  void showSkills() const;
+  void showSkillsCompact() const;
   bool useSkill(int index, enemy &target);
   void learnSkill(std::unique_ptr<skill> newSkill);
   skill *getSkill(int index) const;
   int getSkillCount() const;
   void reduceallCooldowns();
-  void levelUpSkill(int index);
+  bool levelUpSkill(int index);
+  int respecCost() const;
   bool chooseSpecialization(int slot, int branch);
 
   // ════════════════════════════════════════════════════

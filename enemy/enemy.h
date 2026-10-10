@@ -1,13 +1,15 @@
 #pragma once
 #include "character.h"
 #include <array>
+#include <string>
 #include <vector>
+
 enum class Affix {
   STRONG,
   TOUGH,
   QUICK,
   EXPLOSIVE,
-  POSIONOUS,
+  POISONOUS,
   HEALING,
   SHIELDING
 };
@@ -31,12 +33,33 @@ struct EnemyIntent {
   bool interruptible = false;
 };
 
+constexpr int AffixCount = 7;
+const char *affixName(Affix affix);
+const char *affixDescription(Affix affix);
+
+// Chapter boss attack scaling, applied once when the boss is generated.
+int bossAttackPercent(int floor);
+// Chapter-themed display name for the enemy met on a floor.
+std::string enemyNameForFloor(int floor);
+
+// Each chapter has four ordinary enemies (one per signature tactic) and one
+// boss: 50 stable entries. IDs are persisted in the player profile.
+namespace Bestiary {
+constexpr int EntriesPerChapter = 5;
+constexpr int EntryCount = 50;
+int entryForFloor(int floor);
+std::string entryName(int entry);
+std::string entryDescription(int entry);
+int entryChapter(int entry);
+bool entryIsBoss(int entry);
+} // namespace Bestiary
+
 class enemy : public Character {
 private:
   int exp_reward;
   int coin_reward;
   int level;
-  int dogeRate = 10;
+  int dodgeRate = 10;
   std::vector<Affix> affixes;
   int encounterFloor = 0;
   bool bossEncounter = false;
@@ -71,8 +94,8 @@ public:
   int getexp_reward() const;
   int getcoin_reward() const;
   int getlevel() const;
-  int getdogeRate() const;
-  void setdogeRate(int rate);
+  int getdodgeRate() const;
+  void setdodgeRate(int rate);
   Affix getRandomAffix() const;
   void setAffix(int floor);
   void resethp(int amount);
@@ -83,6 +106,7 @@ public:
   void resetall(int hp, int attack, int mp, int exp_reward, int coin_reward);
   virtual void takedamage(int damage) override;
   bool hasAffix(Affix affix) const;
+  const std::vector<Affix> &getAffixes() const { return affixes; }
   void removeAffix(Affix affix);
   void displayAffixes() const;
   void heal(int amount);

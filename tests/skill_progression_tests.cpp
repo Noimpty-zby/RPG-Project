@@ -22,7 +22,7 @@ void prepare(player &hero, int floor = 100) {
 
 enemy targetWithHp(int hp) {
   enemy target("training target", hp, 100, 0, 0, 0, 100);
-  target.setdogeRate(0);
+  target.setdodgeRate(0);
   return target;
 }
 
@@ -165,7 +165,7 @@ void testClassDamageMultipliers() {
   require(missSeed < 10000, "could not create meteor miss fixture");
   auto evasive = targetWithHp(10000);
   evasive.sethp(1000);
-  evasive.setdogeRate(50);
+  evasive.setdodgeRate(50);
   mage.getSkill(5)->resetcurrentcooltime();
   mage.setmp(mage.getmaxmp());
   std::srand(missSeed);
@@ -201,7 +201,7 @@ void testHealingAndTemporaryWeakening() {
           "lifesteal used overkill damage or ignored healing suppression");
   assassin.getSkill(4)->resetcurrentcooltime();
   auto dodgingTarget = targetWithHp(10000);
-  dodgingTarget.setdogeRate(100);
+  dodgingTarget.setdodgeRate(100);
   require(assassin.useSkill(4, dodgingTarget) && assassin.gethp() == 110,
           "lifesteal healed after a dodged attack");
 }

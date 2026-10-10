@@ -58,13 +58,15 @@ std::string BattleSession::objectiveDescription() const {
   return "击败敌人";
 }
 
-void BattleSession::dealEnemyDamage(int damage, bool poison) {
+void BattleSession::dealEnemyDamage(int damage, DamageSource source) {
   if (damage <= 0) return;
   const int before = hero.gethp();
-  hero.takedamage(damage);
+  // Attacks can be guarded or dodged; poison ticks and death blasts cannot.
+  if (source == DamageSource::Attack) hero.takedamage(damage);
+  else hero.takeUnavoidableDamage(damage);
   const int taken = std::max(0, before - hero.gethp());
   battleReport.damageTaken += taken;
-  if (poison) battleReport.poisonDamage += taken;
+  if (source == DamageSource::Poison) battleReport.poisonDamage += taken;
 }
 
 bool BattleSession::beginTurn() {
@@ -73,10 +75,10 @@ bool BattleSession::beginTurn() {
   hero.clearCombatModifiers();
   hero.restoreTurnResources();
   hero.reduceallCooldowns();
-  if (monster.hasAffix(Affix::POSIONOUS)) {
+  if (monster.hasAffix(Affix::POISONOUS)) {
     std::cout << "【剧毒】" << std::endl;
     dealEnemyDamage(std::max(1, std::min(monster.getattack() / 5,
-                                        hero.getRecoveryBaseHp() / 20)), true);
+                                        hero.getRecoveryBaseHp() / 20)), DamageSource::Poison);
     if (!hero.isalive()) return false;
   }
   intent = monster.getIntent();
@@ -154,7 +156,7 @@ bool BattleSession::act(BattleAction action) {
     if (monster.hasAffix(Affix::EXPLOSIVE)) {
       std::cout << "【死亡爆炸】" << std::endl;
       dealEnemyDamage(std::max(1, std::min(monster.getattack() / 2,
-                                          hero.getRecoveryBaseHp() / 10)));
+                                          hero.getRecoveryBaseHp() / 10)), DamageSource::Blast);
     }
   } else {
     int damagePercent = intent.damagePercent;

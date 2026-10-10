@@ -18,7 +18,7 @@ void prepare(player &hero) {
 }
 enemy target() {
   enemy result("target", 100000, 100, 0, 0, 0, 50);
-  result.setdogeRate(0);
+  result.setdodgeRate(0);
   return result;
 }
 void testGrowthAndTransactions() {
@@ -150,11 +150,16 @@ void testInventoryAndWear() {
 
   hero.addItem(Item("potion", 1, Potion, 20, 0, 30, 3));
   require(hero.toggleItemLock(1), "valid item could not be locked");
-  hero.dropItem(1); require(hero.getSaveBackpack().size() == 2, "locked gear was sold");
+  require(hero.sellItem(1, 1) == 0 && hero.getSaveBackpack().size() == 2, "locked gear was sold");
   require(hero.salvageUnlocked() == 0 && hero.getSaveBackpack().size() == 2, "salvage deleted locked gear or potion");
   hero.toggleItemLock(1); require(hero.salvageUnlocked() == 1, "unlocked gear did not salvage");
-  const int before = hero.getcoin(); hero.dropItem(1);
-  require(hero.getcoin() == before + 30, "stack sale proceeds ignored quantity");
+  const int before = hero.getcoin();
+  require(hero.sellItem(1, 0) == 0 && hero.sellItem(1, 4) == 0 && hero.getcoin() == before,
+          "invalid sale quantity accepted");
+  require(hero.sellItem(1, 2) == 20 && hero.getSaveBackpack()[0].getQuantity() == 1,
+          "partial stack sale sold the wrong amount");
+  require(hero.sellItem(1, 1) == 10 && hero.getcoin() == before + 30 && hero.getSaveBackpack().empty(),
+          "stack sale proceeds ignored quantity");
   hero.equipItem_T(Item("crafted", 1, Weapon, 30, 20, 100, 1, WarriorOnly));
   hero.runState().materials = 10;
   require(!hero.modifyEquipment(1, 2) && hero.runState().materials == 10, "unsupported effect consumed materials");
@@ -162,6 +167,13 @@ void testInventoryAndWear() {
           "valid modification failed");
   require(!hero.modifyEquipment(1, 1) && hero.runState().materials == 7, "same effect charged materials twice");
   require(!hero.modifyEquipment(0, 1) && !hero.modifyEquipment(1, 99), "invalid modification accepted");
+  hero.addItem(Item("locked plate", 1, Armor, 40, 20, 100, 1, WarriorOnly));
+  hero.toggleItemLock(static_cast<int>(hero.getSaveBackpack().size()));
+  hero.equipItem(static_cast<int>(hero.getSaveBackpack().size()));
+  require(hero.getSaveEquipments().back().isLocked() && hero.modifyEquipment(2, 3) &&
+          hero.runState().materials == 4, "a lock blocked modifying worn gear");
+  hero.unequipItem(2);
+  hero.runState().materials = 7;
   hero.addItem(Item("overflow salvage", 1, Weapon, 10, 20, 50, 1));
   hero.runState().materials = GameConfig::MaxMaterials;
   require(hero.salvageUnlocked() == 0 && !hero.getSaveBackpack().empty(), "full material capacity destroyed gear");

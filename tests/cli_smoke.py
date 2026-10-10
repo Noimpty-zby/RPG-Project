@@ -41,5 +41,33 @@ for job in (1, 2, 3):
         save.write_text(defeated.replace("CHALLENGE 0", "CHALLENGE 2"), encoding="utf-8")
         iron = run("1\n")
         assert "无复苏挑战结束" in iron and "挑战本层" not in iron
+        profile = pathlib.Path(workspace, "profile.dat")
+        assert not profile.exists() or "RECORD" not in profile.read_text(encoding="utf-8")
 
-print("CLI smoke passed: three jobs, V3 round-trip, camp, inventory, input bounds, battle cancellation, EOF, old save preservation.")
+        # Help, archive, travel and partial stack sales never touch the save.
+        save.write_text(saved, encoding="utf-8")
+        menus = run("1\n12\n1\n6\n0\n11\n1\n1\n0\n2\n3\n4\n0\n10\n1\n2\n3\n1\n2\n0\n4\n2\n")
+        assert "基础流程" in menus and "[剧毒]" in menus and "敌人图鉴：已发现" in menus
+        assert "成就：" in menus and "还没有完成的远征" in menus
+        assert "卖出数量（1-4" in menus and "×2，获得" in menus
+        assert save.read_text(encoding="utf-8") == saved
+
+        # Inspecting during a fight does not spend the turn; finishing a fight
+        # records the enemy in the profile's bestiary.
+        fought = run("1\n1\n5\n" + "1\n" * 12 + "4\n2\n")
+        assert "—— 敌人 ——" in fought and "—— 自身 ——" in fought and "目标完成" in fought
+        assert "SEEN " in profile.read_text(encoding="utf-8")
+
+        # A death that ends a no-revive run is recorded once; reloading the
+        # same save afterwards does not log the run again.
+        dying = re.sub(r"^HP \d+$", "HP 1", saved, flags=re.MULTILINE).replace("CHALLENGE 0", "CHALLENGE 2")
+        save.write_text(dying, encoding="utf-8")
+        ended = run("1\n1\n" + "3\n" * 10)
+        assert "无复苏挑战结束" in ended and "本次远征已记入档案" in ended
+        assert profile.read_text(encoding="utf-8").count("RECORD ") == 1
+        save.write_text(defeated.replace("CHALLENGE 0", "CHALLENGE 2"), encoding="utf-8")
+        run("1\n")
+        assert profile.read_text(encoding="utf-8").count("RECORD ") == 1
+
+print("CLI smoke passed: three jobs, V3 round-trip, camp, inventory, input bounds, battle cancellation, EOF, "
+      "old save preservation, help, archive, travel, inspect, stack sales, run records.")

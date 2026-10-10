@@ -3,6 +3,8 @@
 /build-*/
 /save.dat
 /save.dat.*
+/profile.dat
+/profile.dat.*
 *.tmp
 *.tmp.*
 *.bak.*

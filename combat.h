@@ -57,6 +57,7 @@ private:
   bool objectiveComplete = false;
   bool settlementClaimed = false;
   int maxTurns = 80;
-  void dealEnemyDamage(int damage, bool poison = false);
+  enum class DamageSource { Attack, Poison, Blast };
+  void dealEnemyDamage(int damage, DamageSource source = DamageSource::Attack);
   void resolveObjective(BattleAction action);
 };

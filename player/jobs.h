@@ -2,25 +2,18 @@
 #include "player.h"
 #include <string>
 
-using namespace std;
 class Warrior : public player {
 public:
-  Warrior(std::string name);
-  virtual void levelup() override;
-  virtual std::string getjob() const override;
+  explicit Warrior(std::string name);
 };
 class Mage : public player {
 public:
-  Mage(std::string name);
-  virtual void levelup() override;
-  virtual std::string getjob() const override;
+  explicit Mage(std::string name);
 };
 class Assassin : public player {
   int dodgeRate = 15;
 
 public:
-  Assassin(std::string name);
-  virtual void levelup() override;
-  virtual std::string getjob() const override;
-  virtual void takedamage(int damage) override;
+  explicit Assassin(std::string name);
+  void takedamage(int damage) override;
 };

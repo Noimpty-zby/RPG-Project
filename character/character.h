@@ -20,7 +20,6 @@ public:
   void setmp(int mp);
   void sethp(int hp);
   virtual void takedamage(int damage);
-  virtual void attacktarget(Character &target);
   bool isalive() const;
   int getmaxhp() const;
   int getmaxmp() const;

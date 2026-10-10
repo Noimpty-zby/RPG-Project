@@ -66,12 +66,6 @@ static const char *POTIONS[4] = {"小型治疗药水", "治疗药水", "优质�
                                  "神圣圣水"};
 
 namespace {
-JobReq heroJob(const player &hero) {
-  if (hero.getjob() == "Warrior") return WarriorOnly;
-  if (hero.getjob() == "Mage") return MageOnly;
-  return AssassinOnly;
-}
-
 Item makeItem(int floor, JobReq job, ItemType type, int tier, int maxLevel = 10000) {
   floor = GameConfig::floor(floor);
   if (type == Potion)
@@ -113,7 +107,7 @@ Item makeItem(int floor, JobReq job, ItemType type, int tier, int maxLevel = 100
 
 bool usableTarget(const Item &item, const player &hero, ItemType target) {
   return item.getType() == target && item.getLevelRequirement() <= hero.getlevel() &&
-         (item.getJobRequirement() == AnyJob || item.getJobRequirement() == heroJob(hero));
+         hero.canWear(item);
 }
 
 } // namespace
@@ -146,7 +140,7 @@ optional<Item> generateLoot(player &hero, int floor, bool firstClear) {
     run.pity = min(threshold, run.pity + 1);
   if (firstClear && run.pity >= threshold) {
     const int tier = Progression::equipmentTier(floor, rand() % 100);
-    result = makeItem(floor, heroJob(hero), target, tier, hero.getlevel());
+    result = makeItem(floor, equipmentClass(hero.job()), target, tier, hero.getlevel());
   } else {
     const int chance = firstClear ? 60
         : 60 * GameConfig::repeatRewardPercent(max(1, run.attempts[floor] - 1)) / 100;
@@ -154,7 +148,7 @@ optional<Item> generateLoot(player &hero, int floor, bool firstClear) {
       result = generateRandomItem(floor);
       // Most equipment belongs to the current class. Potions remain common.
       if (result->getType() != Potion && rand() % 100 < 75)
-        result = makeItem(floor, heroJob(hero), result->getType(), result->getTier(),
+        result = makeItem(floor, equipmentClass(hero.job()), result->getType(), result->getTier(),
                           hero.getlevel());
     }
   }
@@ -166,10 +160,10 @@ EnemyStats enemyStatsForFloor(int value) {
   const int floor = GameConfig::floor(value);
   const bool boss = floor % 10 == 0;
   EnemyStats stats{40 + floor * 8, 4 + floor * 3 / 2,
-                   30 + floor * 25, 8 + floor * 12, floor, boss};
+                   30 + floor * 25, 8 + floor * 10, floor, boss};
   if (boss) {
     stats.hp = stats.hp * 5 / 2;
-    stats.attack *= 2;
+    stats.attack = stats.attack * 9 / 5;
     stats.expReward *= 4;
     stats.coinReward *= 5;
     stats.level += 3;
@@ -180,14 +174,15 @@ EnemyStats enemyStatsForFloor(int value) {
 enemy generateEnemy(int value) {
   const int floor = GameConfig::floor(value);
   const auto stats = enemyStatsForFloor(floor);
-  const string name = stats.boss ? "★ BOSS of Floor " + to_string(floor) + " ★"
-                                 : "Monster of Floor " + to_string(floor);
+  const string name = stats.boss ? "★ " + enemyNameForFloor(floor) + " ★"
+                                 : enemyNameForFloor(floor);
   enemy monster(name, stats.hp, stats.attack, 0, stats.expReward, stats.coinReward, stats.level);
   monster.setAffix(floor);
+  if (stats.boss) monster.resetattack(monster.getattack() * bossAttackPercent(floor) / 100);
   if (monster.hasAffix(Affix::STRONG)) monster.resetattack(monster.getattack() * 120 / 100);
   if (monster.hasAffix(Affix::TOUGH)) monster.resethp(monster.gethp() * 120 / 100);
   if (monster.hasAffix(Affix::QUICK))
-    monster.setdogeRate(min(monster.getdogeRate() + monster.getlevel() / 2, 25));
+    monster.setdodgeRate(min(monster.getdodgeRate() + monster.getlevel() / 2, 25));
   monster.configureEncounter(floor, stats.boss);
   return monster;
 }

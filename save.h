@@ -45,8 +45,8 @@ public:
   // 检查是否存在存档文件
   static bool hasSaveFile(const std::string &filename = "save.dat");
 
-  // 删除存档文件
-  static void deleteSave(const std::string &filename = "save.dat");
+  // 写临时文件后替换目标；失败时保留原文件。存档与档案文件共用。
+  static bool writeFileAtomically(const std::string &filename, const std::string &contents);
 
 private:
   // 把 Item 序列化成一行 pipe 分隔的字符串

@@ -105,11 +105,6 @@ void validateRun(const RunState &run, int highestFloor) {
     throw runtime_error("装备空窗统计矛盾");
 }
 
-bool canEquip(const Item &item, const string &job) {
-  const auto required = item.getJobRequirement();
-  return required == AnyJob || (required == WarriorOnly && job == "Warrior") ||
-      (required == MageOnly && job == "Mage") || (required == AssassinOnly && job == "Assassin");
-}
 void validateItem(const Item &item) {
   if (item.getName().empty() || item.getName().size() > 256 ||
       item.getName().find_first_of("|\r\n") != string::npos)
@@ -257,7 +252,7 @@ bool SaveSystem::saveGame(const player &hero, int floor, const string &filename)
       throw runtime_error("角色名称无效");
     requireRange(hero.getlevel(), 1, hero.runState().legacyRules ? 10000 : 100, "等级");
     requireRange(hero.getexp(), 0, 1000000000, "经验");
-    requireRange(hero.getcoin(), 0, 1000000000, "金币");
+    requireRange(hero.getcoin(), 0, GameConfig::MaxCoins, "金币");
     requireRange(hero.getmaxhp(), 1, kMaxStat, "生命上限");
     requireRange(hero.gethp(), 0, hero.getmaxhp(), "生命");
     requireRange(hero.getattack(), 1, kMaxStat, "攻击");
@@ -287,7 +282,7 @@ bool SaveSystem::saveGame(const player &hero, int floor, const string &filename)
     int attackBonus = 0, hpBonus = 0;
     for (const auto &item : equipped) {
       if (item.getType() == Potion || item.getQuantity() != 1 || item.getDurability() <= 0 ||
-          !slots.insert(item.getType()).second || !canEquip(item, hero.getjob()))
+          !slots.insert(item.getType()).second || !hero.canWear(item))
         throw runtime_error("装备槽位或职业无效");
       output << "EQUIP " << serializeItem(item) << '\n';
       totalQuantity += item.getQuantity();
@@ -354,7 +349,7 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       else if (key == "JOB") job = value;
       else if (key == "LEVEL") level = parseNumber(value, 1, 10000, key);
       else if (key == "EXP") exp = parseNumber(value, 0, 1000000000, key);
-      else if (key == "COIN") coin = parseNumber(value, 0, 1000000000, key);
+      else if (key == "COIN") coin = parseNumber(value, 0, GameConfig::MaxCoins, key);
       else if (key == "HP") hp = parseNumber(value, 0, kMaxStat, key);
       else if (key == "MAX_HP") maxHp = parseNumber(value, 1, kMaxStat, key);
       else if (key == "ATTACK") attack = parseNumber(value, 1, kMaxStat, key);
@@ -448,7 +443,7 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
     set<ItemType> slots;
     for (const auto &item : equipped) {
       if (item.getType() == Potion || item.getQuantity() != 1 || item.getDurability() <= 0 ||
-          !slots.insert(item.getType()).second || !canEquip(item, job))
+          !slots.insert(item.getType()).second || !hero->canWear(item))
         throw runtime_error("装备槽位、数量或职业限制无效");
       if (item.getType() == Weapon) attackBonus += item.getValue();
       else hpBonus += item.getValue();
@@ -488,13 +483,10 @@ bool SaveSystem::migrateLegacy(player &hero) {
   const int highest = hero.getHighestFloor();
   const int newLevel = min(hero.getlevel(), min(100, max(1, highest * 7 / 10 + 5)));
   const int rankCap = Progression::skillRankCap(highest);
-  auto base = newHero(hero.getjob(), hero.getname());
-  const int hpGrowth = hero.getjob() == "Warrior" ? 20 : (hero.getjob() == "Mage" ? 12 : 15);
-  const int attackGrowth = hero.getjob() == "Mage" ? 2 : 3;
-  const int mpGrowth = hero.getjob() == "Warrior" ? 3 : (hero.getjob() == "Mage" ? 8 : 4);
-  int newMaxHp = base->getmaxhp() + (newLevel - 1) * hpGrowth;
-  int newAttack = base->getattack() + (newLevel - 1) * attackGrowth;
-  const int newMaxMp = base->getmaxmp() + (newLevel - 1) * mpGrowth;
+  const JobProfile &profile = jobProfile(hero.job());
+  int newMaxHp = profile.hp + (newLevel - 1) * profile.hpGrowth;
+  int newAttack = profile.attack + (newLevel - 1) * profile.attackGrowth;
+  const int newMaxMp = profile.mp + (newLevel - 1) * profile.mpGrowth;
   for (const auto &item : hero.getSaveEquipments()) {
     if (item.getType() == Armor) newMaxHp += item.getValue();
     if (item.getType() == Weapon) newAttack += item.getValue();
@@ -515,7 +507,7 @@ bool SaveSystem::migrateLegacy(player &hero) {
   }
   hero.loadStats(newLevel, min(hero.getexp(), newLevel * 100 - 1), hero.getcoin(),
                   newHp, newMaxHp, newAttack, min(newMp, newMaxMp), newMaxMp,
-                  base->getcritRate(), min(hero.getfreerevives(), 3));
+                  profile.critRate, min(hero.getfreerevives(), 3));
   auto &run = hero.runState();
   const int awarded = min(30, min(compensation, GameConfig::MaxMaterials - run.materials));
   run.materials += max(0, awarded);
@@ -525,11 +517,11 @@ bool SaveSystem::migrateLegacy(player &hero) {
   return true;
 }
 
+bool SaveSystem::writeFileAtomically(const string &filename, const string &contents) {
+  return replaceSave(filesystem::path(filename), contents);
+}
+
 bool SaveSystem::hasSaveFile(const string &filename) {
   ifstream input(filename);
   return input.good();
-}
-void SaveSystem::deleteSave(const string &filename) {
-  if (remove(filename.c_str()) == 0) cout << "[存档] 存档文件已删除。" << endl;
-  else cerr << "[存档] 删除存档失败：文件不存在或无权限。" << endl;
 }

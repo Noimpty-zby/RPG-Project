@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(rpg_core
     character/character.cpp player/player.cpp player/jobs.cpp player/skills.cpp
-    enemy/enemy.cpp item/item.cpp save.cpp combat.cpp world.cpp campaign.cpp)
+    enemy/enemy.cpp item/item.cpp save.cpp combat.cpp world.cpp campaign.cpp profile.cpp help.cpp)
 target_include_directories(rpg_core PUBLIC . character player enemy item)
 if(MSVC)
     target_compile_options(rpg_core PUBLIC /utf-8)
@@ -15,7 +15,7 @@ target_link_libraries(RPG_Game PRIVATE rpg_core)
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(test_name enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests)
+    foreach(test_name enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests profile_tests)
         add_executable(${test_name} tests/${test_name}.cpp)
         target_link_libraries(${test_name} PRIVATE rpg_core)
         if(MSVC)

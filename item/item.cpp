@@ -49,15 +49,26 @@ string Item::getTierName() const {
   }
 }
 
-string Item::getEffectName() const {
+const char *Item::effectName(ItemEffect effect) {
   switch (effect) {
   case ItemEffect::ManaOnAttack: return "普攻回蓝";
-  case ItemEffect::GuardRecovery: return "格挡恢复";
-  case ItemEffect::SkillEfficiency: return "施法节能";
-  case ItemEffect::ControlFocus: return "控制专注";
+  case ItemEffect::GuardRecovery: return "格挡回蓝";
+  case ItemEffect::SkillEfficiency: return "技能节能";
+  case ItemEffect::ControlFocus: return "控制强化";
   default: return "无";
   }
 }
+const char *Item::effectDescription(ItemEffect effect) {
+  switch (effect) {
+  case ItemEffect::ManaOnAttack: return "普攻回蓝：普攻命中额外回复3MP（仅武器）";
+  case ItemEffect::GuardRecovery: return "格挡回蓝：格挡额外回复3MP（仅防具）";
+  case ItemEffect::SkillEfficiency: return "技能节能：固定耗蓝技能消耗-10%";
+  case ItemEffect::ControlFocus: return "控制强化：减攻控制延长1次行动（战士/法师装备）";
+  default: return "无";
+  }
+}
+string Item::getEffectName() const { return effectName(effect); }
+string Item::getEffectDescription() const { return effectDescription(effect); }
 
 bool Item::supportsEffect(ItemEffect candidate) const {
   if (candidate == ItemEffect::None) return true;
