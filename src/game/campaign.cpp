@@ -1,7 +1,7 @@
 #include "game/campaign.h"
 #include "core/game_config.h"
+#include "core/random.h"
 #include <algorithm>
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -76,7 +76,7 @@ void seedStream(const player &hero, int floor, unsigned stream) {
   const unsigned f = static_cast<unsigned>(GameConfig::floor(floor));
   unsigned value = hero.runState().seed ^ (f * 0x9e3779b9U) ^ (stream * 0x85ebca6bU);
   value ^= value >> 16; value *= 0x7feb352dU; value ^= value >> 15;
-  std::srand(value);
+  Random::seed(value);
 }
 void initialize(player &hero, unsigned seed, int challenge) {
   if (hero.getlevel() != 1 || hero.getcoin() != 0 || hero.getHighestFloor() != 1 ||

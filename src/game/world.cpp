@@ -1,9 +1,9 @@
 #include "game/world.h"
 #include "core/game_config.h"
 #include "core/progression.h"
+#include "core/random.h"
 #include "player/player.h"
 #include <algorithm>
-#include <cstdlib>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -77,21 +77,21 @@ Item makeItem(int floor, JobReq job, ItemType type, int tier, int maxLevel = 100
 
   const char *name;
   if (type == Weapon) {
-    if (job == WarriorOnly) name = W_WPN[rand() % 5][tier];
-    else if (job == MageOnly) name = M_WPN[rand() % 4][tier];
-    else name = A_WPN[rand() % 4][tier];
+    if (job == WarriorOnly) name = W_WPN[Random::below(5)][tier];
+    else if (job == MageOnly) name = M_WPN[Random::below(4)][tier];
+    else name = A_WPN[Random::below(4)][tier];
   } else {
-    if (job == WarriorOnly) name = W_ARM[rand() % 4][tier];
-    else if (job == MageOnly) name = M_ARM[rand() % 3][tier];
-    else if (job == AssassinOnly) name = A_ARM[rand() % 3][tier];
-    else name = C_ARM[rand() % 2][tier];
+    if (job == WarriorOnly) name = W_ARM[Random::below(4)][tier];
+    else if (job == MageOnly) name = M_ARM[Random::below(3)][tier];
+    else if (job == AssassinOnly) name = A_ARM[Random::below(3)][tier];
+    else name = C_ARM[Random::below(2)][tier];
   }
   // 15% between quality bands, at most +/-3% inside one band.
   const int base = type == Weapon ? 8 + floor * 11 / 10 : 20 + floor * 3;
   const int center = base * (100 + tier * 15) / 100;
   const int variation = center * 3 / 100;
-  const int value = center + rand() % (variation * 2 + 1) - variation;
-  const int durability = 10 + floor / 2 + tier * 10 + rand() % 6;
+  const int value = center + Random::below(variation * 2 + 1) - variation;
+  const int durability = 10 + floor / 2 + tier * 10 + Random::below(6);
   const int price = (tier + 1) * 35 + floor * 10;
   const int required = min(max(1, maxLevel), max(1, floor / 2 - 2 + tier));
   Item item(name, required, type, value, durability, price, 1, job, tier);
@@ -100,7 +100,7 @@ Item makeItem(int floor, JobReq job, ItemType type, int tier, int maxLevel = 100
     choices.push_back(type == Weapon ? ItemEffect::ManaOnAttack : ItemEffect::GuardRecovery);
     if (job == WarriorOnly || job == MageOnly)
       choices.push_back(ItemEffect::ControlFocus);
-    item.setEffect(choices[rand() % choices.size()]);
+    item.setEffect(choices[Random::below(static_cast<int>(choices.size()))]);
   }
   return item;
 }
@@ -122,16 +122,16 @@ Item generateEliteReward(const player &hero, int floor) {
 
 Item generateTargetedItem(int floor, JobReq job, ItemType type) {
   floor = GameConfig::floor(floor);
-  const int tier = Progression::equipmentTier(floor, rand() % 100);
+  const int tier = Progression::equipmentTier(floor, Random::below(100));
   return makeItem(floor, job, type, tier);
 }
 
 Item generateRandomItem(int floor) {
   floor = GameConfig::floor(floor);
-  const int tier = Progression::equipmentTier(floor, rand() % 100);
-  const int roll = rand() % 100;
+  const int tier = Progression::equipmentTier(floor, Random::below(100));
+  const int roll = Random::below(100);
   const ItemType type = roll < 30 ? Weapon : (roll < 65 ? Armor : Potion);
-  const int jr = rand() % 100;
+  const int jr = Random::below(100);
   const JobReq job = type == Weapon
       ? (jr < 35 ? WarriorOnly : (jr < 65 ? MageOnly : AssassinOnly))
       : (jr < 35 ? WarriorOnly : (jr < 60 ? MageOnly : (jr < 85 ? AssassinOnly : AnyJob)));
@@ -147,15 +147,15 @@ optional<Item> generateLoot(player &hero, int floor, bool firstClear) {
   if (firstClear)
     run.pity = min(threshold, run.pity + 1);
   if (firstClear && run.pity >= threshold) {
-    const int tier = Progression::equipmentTier(floor, rand() % 100);
+    const int tier = Progression::equipmentTier(floor, Random::below(100));
     result = makeItem(floor, equipmentClass(hero.job()), target, tier, hero.getlevel());
   } else {
     const int chance = firstClear ? 60
         : 60 * GameConfig::repeatRewardPercent(max(1, run.attempts[floor] - 1)) / 100;
-    if (rand() % 100 < chance) {
+    if (Random::below(100) < chance) {
       result = generateRandomItem(floor);
       // Most equipment belongs to the current class. Potions remain common.
-      if (result->getType() != Potion && rand() % 100 < 75)
+      if (result->getType() != Potion && Random::below(100) < 75)
         result = makeItem(floor, equipmentClass(hero.job()), result->getType(), result->getTier(),
                           hero.getlevel());
     }

@@ -1,11 +1,11 @@
 #include "core/game_config.h"
+#include "core/random.h"
 #include "game/world.h"
 #include "player/jobs.h"
 #include "player/skills.h"
 #include "storage/profile.h"
 #include "ui/help.h"
 #include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -54,7 +54,7 @@ void testBestiaryMapping() {
     reached.insert(id);
     require(Bestiary::entryChapter(id) == GameConfig::chapter(floor), "entry chapter must match floor");
     require(Bestiary::entryIsBoss(id) == (floor % 10 == 0), "only floor 10s map to bosses");
-    std::srand(static_cast<unsigned>(floor));
+    Random::seed(static_cast<unsigned>(floor));
     const enemy monster = generateEnemy(floor);
     require(monster.getname().find(Bestiary::entryName(id)) != std::string::npos,
             "generated enemies must use their themed bestiary name");

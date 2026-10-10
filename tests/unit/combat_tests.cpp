@@ -1,7 +1,7 @@
+#include "core/random.h"
 #include "game/combat.h"
 #include "player/jobs.h"
 #include "player/skills.h"
-#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -311,7 +311,7 @@ int main() {
   std::ostringstream quiet;
   auto *previous = std::cout.rdbuf(quiet.rdbuf());
   try {
-    std::srand(42);
+    Random::seed(42);
     testInvalidActionsAndResources();
     testChargeCounterAndRecovery();
     testSuppressionAndShatterCounters();

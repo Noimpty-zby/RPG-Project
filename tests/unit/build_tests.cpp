@@ -2,7 +2,6 @@
 #include "player/jobs.h"
 #include "player/skills.h"
 #include <climits>
-#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <sstream>

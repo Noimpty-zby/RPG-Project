@@ -1,9 +1,9 @@
 #include "player/player.h"
 #include "core/game_config.h"
 #include "core/progression.h"
+#include "core/random.h"
 #include "player/skills.h"
 #include <algorithm>
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 
@@ -151,7 +151,7 @@ void player::attacktarget(Character &target) { attacktargetDealt(target, attack)
 void player::attacktargetDealt(Character &target, int baseDamage) {
   if (!isalive() || !target.isalive() || baseDamage < 0) return;
   long long damage = baseDamage;
-  if (rand() % 100 < clamp(critRate, 0, 100)) damage *= 2;
+  if (Random::below(100) < clamp(critRate, 0, 100)) damage *= 2;
   const int before = target.gethp();
   target.takedamage(static_cast<int>(min(damage, static_cast<long long>(GameConfig::MaxCounter))));
   if (target.gethp() < before) {

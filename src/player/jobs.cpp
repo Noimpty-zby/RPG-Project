@@ -1,6 +1,6 @@
 #include "player/jobs.h"
+#include "core/random.h"
 #include "player/skills.h"
-#include <cstdlib>
 #include <iostream>
 #include <memory>
 
@@ -27,7 +27,7 @@ Assassin::Assassin(std::string name) : player(std::move(name), Job::Assassin) {
 }
 void Assassin::takedamage(int damage) {
   if (damage <= 0) return;
-  if (std::rand() % 100 < dodgeRate) {
+  if (Random::below(100) < dodgeRate) {
     std::cout << "【鬼步】闪避！" << std::endl;
     return;
   }

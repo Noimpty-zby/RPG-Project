@@ -9,7 +9,7 @@ compiler="${CXX:-g++}"
 flags=(-std=c++17 -O2 -Wall -Wextra -Wpedantic -Isrc)
 if [[ "${SANITIZE:-0}" == 1 ]]; then flags+=(-O1 -g -fsanitize=undefined -fno-sanitize-recover=all); fi
 if [[ "${SANITIZE:-0}" == address ]]; then flags+=(-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all); fi
-sources=(src/character/character.cpp src/player/player.cpp src/player/jobs.cpp src/player/skills.cpp
+sources=(src/core/random.cpp src/character/character.cpp src/player/player.cpp src/player/jobs.cpp src/player/skills.cpp
          src/enemy/enemy.cpp src/item/item.cpp src/game/campaign.cpp src/game/combat.cpp src/game/world.cpp
          src/storage/save.cpp src/storage/profile.cpp src/ui/help.cpp)
 objects=()
@@ -19,7 +19,7 @@ for source in "${sources[@]}"; do
   objects+=("$object")
 done
 "$compiler" "${flags[@]}" src/main.cpp "${objects[@]}" -o "$output/RPG_Game"
-for test_name in enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests profile_tests; do
+for test_name in random_tests enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests profile_tests; do
   "$compiler" "${flags[@]}" "tests/unit/$test_name.cpp" "${objects[@]}" -o "$output/$test_name"
   "$output/$test_name"
 done

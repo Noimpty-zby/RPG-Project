@@ -1,5 +1,6 @@
 #include "core/game_config.h"
 #include "core/progression.h"
+#include "core/random.h"
 #include "game/campaign.h"
 #include "player/jobs.h"
 #include "storage/save.h"
@@ -234,9 +235,9 @@ void testEliteEncounters() {
     const enemy elite = Campaign::makeEnemy(hero, floor);
     require(elite.getAffixes().size() >= 2 && elite.getname().rfind("精英·", 0) == 0,
             "elites carry at least two affixes and a visible title");
-    std::srand(static_cast<unsigned>(floor));
+    Random::seed(static_cast<unsigned>(floor));
     const enemy plain = generateEnemy(floor);
-    std::srand(static_cast<unsigned>(floor));
+    Random::seed(static_cast<unsigned>(floor));
     const enemy strong = generateEnemy(floor, true);
     require(strong.getmaxhp() > plain.getmaxhp() && strong.getattack() >= plain.getattack() &&
                 strong.getexp_reward() > plain.getexp_reward(),

@@ -6,6 +6,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Game rules and data, shared by the terminal game, tests and simulations.
 add_library(rpg_core
+    src/core/random.cpp
     src/character/character.cpp
     src/player/player.cpp src/player/jobs.cpp src/player/skills.cpp
     src/enemy/enemy.cpp
@@ -22,7 +23,7 @@ target_link_libraries(RPG_Game PRIVATE rpg_core)
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(test_name enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests profile_tests)
+    foreach(test_name random_tests enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests profile_tests)
         add_executable(${test_name} tests/unit/${test_name}.cpp)
         target_link_libraries(${test_name} PRIVATE rpg_core)
         if(MSVC)

@@ -1,10 +1,10 @@
 #include "core/progression.h"
+#include "core/random.h"
 #include "enemy/enemy.h"
 #include "item/item.h"
 #include "player/jobs.h"
 #include "player/skills.h"
 #include <array>
-#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -145,9 +145,9 @@ void testClassDamageMultipliers() {
   skill *combo = assassin.getSkill(3);
   combo->restoreProgress(5, 0);
   const int singleHit = combo->getScaledDamage(assassin) * 55 / 100;
-  std::srand(17);
-  const int hits = 2 + std::rand() % 3;
-  std::srand(17);
+  Random::seed(17);
+  const int hits = 2 + Random::below(3);
+  Random::seed(17);
   target = targetWithHp(10000);
   require(assassin.useSkill(3, target) &&
               target.gethp() == 10000 - singleHit * hits,
@@ -157,9 +157,9 @@ void testClassDamageMultipliers() {
   // not independently trigger its low-health follow-up.
   unsigned missSeed = 0;
   for (; missSeed < 10000; ++missSeed) {
-    std::srand(missSeed);
-    const bool firstMiss = std::rand() % 100 < 50;
-    const bool nextHit = std::rand() % 100 >= 50;
+    Random::seed(missSeed);
+    const bool firstMiss = Random::below(100) < 50;
+    const bool nextHit = Random::below(100) >= 50;
     if (firstMiss && nextHit) break;
   }
   require(missSeed < 10000, "could not create meteor miss fixture");
@@ -168,7 +168,7 @@ void testClassDamageMultipliers() {
   evasive.setdodgeRate(50);
   mage.getSkill(5)->resetcurrentcooltime();
   mage.setmp(mage.getmaxmp());
-  std::srand(missSeed);
+  Random::seed(missSeed);
   require(mage.useSkill(5, evasive) && evasive.gethp() == 1000,
           "missed meteor triggered an execution follow-up");
 }
@@ -216,7 +216,7 @@ void testDamageAndBossIdentity() {
           "weapon attack does not increase skill damage");
 
   auto shielded = targetWithHp(10000);
-  std::srand(1);
+  Random::seed(1);
   for (int attempt = 0; attempt < 1000 && !shielded.hasAffix(Affix::SHIELDING);
        ++attempt)
     shielded.setAffix(100);

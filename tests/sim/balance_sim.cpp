@@ -1,11 +1,11 @@
 #include "core/progression.h"
+#include "core/random.h"
 #include "game/combat.h"
 #include "game/world.h"
 #include "player/jobs.h"
 #include "player/skills.h"
 #include <algorithm>
 #include <array>
-#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -40,7 +40,7 @@ struct Fixture {
 };
 
 Fixture generateFixture(Job job, int floor, unsigned int seed) {
-  std::srand(seed);
+  Random::seed(seed);
   enemy monster = generateEnemy(floor);
   std::optional<Item> weapon, armor, potion;
   // Take the first eligible generated item of each type, not the best of N.
@@ -237,7 +237,7 @@ struct Result {
 Result simulate(Job job, int floor, const Fixture &fixture, bool aware) {
   auto hero = prepareHero(job, floor, fixture);
   enemy monster = fixture.monster;
-  std::srand(fixture.combatSeed);
+  Random::seed(fixture.combatSeed);
   BattleSession battle(*hero, monster);
   Policy policy{job, aware, monster.getattack()};
   int potions = 0;

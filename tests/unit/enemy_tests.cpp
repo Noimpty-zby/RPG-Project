@@ -1,5 +1,5 @@
+#include "core/random.h"
 #include "enemy/enemy.h"
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <set>
@@ -157,7 +157,7 @@ void testPressureAndSabotage() {
           "Disrupt objectives must provide an actual interruption opportunity");
 
   auto boss = foe(60, true);
-  std::srand(1);
+  Random::seed(1);
   for (int i = 0; i < 1000 && !boss.hasAffix(Affix::SHIELDING); ++i)
     boss.setAffix(100);
   require(boss.hasAffix(Affix::SHIELDING), "Shield fixture generation failed");
@@ -213,7 +213,7 @@ void testNumericAndAffixBoundaries() {
   require(!e.isalive(), "Healing must not revive a defeated enemy");
 
   auto affixed = foe(100);
-  std::srand(37);
+  Random::seed(37);
   for (int roll = 0; roll < 1000; ++roll) affixed.setAffix(100);
   for (Affix affix : {Affix::STRONG, Affix::TOUGH, Affix::QUICK,
                      Affix::EXPLOSIVE, Affix::POISONOUS, Affix::HEALING,

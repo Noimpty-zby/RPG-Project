@@ -200,12 +200,12 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
 }
 // Usage: campaign_sim [--check] [--seeds N] [--report]
 //   --check   enforce the regression gates below (exit 1 on failure)
-//   --seeds N run seeds 1..N (default 8)
+//   --seeds N run seeds 1..N (default 24)
 //   --report  print standard-mode pacing (ordinary/elite fights, camp spending,
 //             first-attempt boss win rates) instead of CSV
 int main(int argc, char **argv) {
   bool check = false, report = false;
-  unsigned seeds = 8;
+  unsigned seeds = 24;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--check") check = true;

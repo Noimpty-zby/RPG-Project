@@ -1,7 +1,7 @@
 #include "enemy/enemy.h"
 #include "core/game_config.h"
+#include "core/random.h"
 #include <algorithm>
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 
@@ -12,7 +12,7 @@ enemy::enemy(string name, int hp, int attack, int mp, int exp_reward,
       coin_reward(coin_reward), level(level), baseAttack(attack) {}
 int enemy::getexp_reward() const { return exp_reward; }
 void enemy::takedamage(int damage) {
-  int dodgeChance = rand() % 100;
+  int dodgeChance = Random::below(100);
   if (dodgeChance < dodgeRate) {
     cout << getname() << "闪避了攻击！" << endl;
     return; // 闪避成功，不受伤害
@@ -45,7 +45,7 @@ int enemy::getdodgeRate() const { return dodgeRate; }
 void enemy::setdodgeRate(int rate) { dodgeRate = clamp(rate, 0, 100); }
 Affix enemy::getRandomAffix() const {
   // 重新设计概率权重：危险词缀稀有但恐怖，普通词缀常见
-  int r = rand() % 100;
+  int r = Random::below(100);
   if (r < 25)
     return Affix::STRONG; // 25% 力量：攻击提升
   else if (r < 45)
@@ -84,7 +84,7 @@ void enemy::setAffix(int floor) {
   // 每次有 40% 基础概率触发词缀，高楼层概率更高
   for (int i = 0; i < generate_chance; i++) {
     int threshold = min(40 + floor / 5, 70); // 40%~70%，随楼层增加
-    if ((rand() % 100) < threshold) addAffix(getRandomAffix());
+    if ((Random::below(100)) < threshold) addAffix(getRandomAffix());
   }
 }
 bool enemy::addAffix(Affix affix) {

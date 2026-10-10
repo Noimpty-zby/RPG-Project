@@ -1,7 +1,7 @@
+#include "core/random.h"
 #include "game/world.h"
 #include "player/jobs.h"
 #include <array>
-#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -43,7 +43,7 @@ void itemIdentityAndEffects() {
 }
 
 void targetedGeneration() {
-  std::srand(9471);
+  Random::seed(9471);
   std::array<bool, 4> observed{};
   for (int floor : {1, 19, 20, 44, 45, 69, 70, 84, 85, 100}) {
     for (JobReq job : {WarriorOnly, MageOnly, AssassinOnly}) {

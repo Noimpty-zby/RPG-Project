@@ -1,9 +1,9 @@
 #include "player/skills.h"
 #include "core/game_config.h"
 #include "core/progression.h"
+#include "core/random.h"
 #include "player/player.h"
 #include <algorithm>
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -295,7 +295,7 @@ bool Assassinskill_2::useSkill(player &hero, enemy &target) {
 Assassinskill_3::Assassinskill_3() : skill(3, 4, 24, 4, 45, 1, "连环刺") {}
 bool Assassinskill_3::useSkill(player &hero, enemy &target) {
   if (!beginCast(*this, hero, target)) return false;
-  const int hits = 2 + rand() % 3;
+  const int hits = 2 + Random::below(3);
   const int each = percent(getScaledDamage(hero), 55);
   for (int hit = 0; hit < hits && target.isalive(); ++hit) strike(*this, target, each, hit != 0);
   return true;
