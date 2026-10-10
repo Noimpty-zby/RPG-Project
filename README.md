@@ -4,6 +4,8 @@
 
 本仓库保留游戏源码、构建配置、游戏测试和 CI。编译输出、编辑器缓存、个人存档及档案不纳入版本控制。
 
+除了终端版，`web/` 里还有一个可视化的浏览器版本：俯视探索楼层、横版回合战斗、像素美术与技能特效，规则与 C++ 版逐位一致，可以直接部署到 GitHub Pages。见下方「网页版」。
+
 ## 快速开始
 
 需要支持 C++17 的编译器。完整测试另外需要 Python 3；游戏本身没有第三方运行库依赖。
@@ -33,6 +35,41 @@ wsl -d Ubuntu-22.04 -- ./build-local/RPG_Game
 ```
 
 脚本会编译游戏、运行核心测试及终端回归，并生成两份模拟 CSV。输出位于已忽略的 `build-local/`。
+
+## 网页版
+
+`web/` 是同一款游戏的可视化版本，纯 HTML/CSS/JavaScript（ES 模块），不需要构建步骤，也没有第三方依赖：
+
+- **地图**：每层按章节主题生成俯视地图（十章各有地块、墙面、装饰、氛围粒子，部分章节有光照）。入口有传送石（回访楼层、存档）、营火（休息、订单、保底、强化、修理、改造、专精）、商人；第 5 层起会遇到章节同伴（事件）；守卫站在封印的楼梯前，首通后楼梯解封，战利品留在宝箱里。
+- **战斗**：横版回合制。敌人头顶显示意图，指令栏用数字键 1–5（普攻、技能、格挡、药水、查看）；15 个技能各有特效，另有打击顿帧、震屏、伤害数字、闪避、打断、Boss 双倍体型等表现。
+- **美术与音效**：人物、50 种敌人、地块和图标全部由代码按调色板绘制（`web/js/engine/`），音效与音乐由 Web Audio 合成，没有图片或音频文件。
+- **存档**：保存在浏览器 localStorage。营火旁的传送石或菜单里可以手动存档；每场战斗结算和换层时写入自动存档。远征档案（图鉴、成就、记录）跨存档保留。
+- **操作**：方向键 / WASD 移动，空格 / Enter 交互，Esc 打开菜单；手机上显示虚拟方向键和交互键，战斗界面会按横竖屏调整布局。
+
+### 本地运行
+
+ES 模块需要通过 HTTP 加载，不能直接双击 `index.html`：
+
+```sh
+python3 -m http.server 8000 --directory web
+# 打开 http://localhost:8000
+```
+
+`web/dev/gallery.html` 会列出所有人物、NPC 和敌人精灵，调整美术时可以直接查看。
+
+### 规则一致性
+
+`web/js/rules/` 是 `src/` 规则层的逐行移植（随机数、职业、技能、敌人意图、章节、掉落、结算），只把 `std::cout` 换成带结构化数据的事件，供战斗画面播放动画；画面用的随机数（地图布局、粒子）使用独立的生成器，不会影响规则的随机序列。因此同一个种子在网页版和终端版里生成相同的远征。
+
+```sh
+bash tools/web_test.sh
+```
+
+脚本编译 C++ 的 `campaign_sim`，再用 Node 运行 JS 移植版：PCG32 黄金序列、`random_tests` 的整局生成指纹，以及 1,296 次连续远征的 CSV 必须与 C++ 输出逐字节相同；另有 JSON 存档往返与校验、档案解析和成就测试。CI 的 `web-rules` 任务运行同一脚本。**修改 `src/` 的规则时，需要同步修改 `web/js/rules/` 中对应的文件，否则这项检查会失败。**
+
+### 部署到 GitHub Pages
+
+`.github/workflows/pages.yml` 在 `main` 分支相关文件变化时（或手动触发）先运行 `tools/web_test.sh`，再把 `web/`（不含测试）发布到 Pages。首次使用需要在仓库 Settings → Pages 中把 Source 设为 **GitHub Actions**。发布后的地址形如 `https://<用户名>.github.io/RPG-Project/`。默认的 `github-pages` 环境只允许默认分支部署；如果想在合并前从其他分支预览，需要在 Settings → Environments → github-pages 中添加该分支。
 
 ## 怎么玩
 
@@ -385,7 +422,7 @@ src/
 │   ├── combat.h/.cpp     共享回合引擎、目标与战斗报告
 │   └── world.h/.cpp      敌人数值、装备生成、掉落保底
 ├── storage/              持久化
-│   ├── save.h/.cpp       存档：V1/V2 兼容与 V3 读写
+│   ├── save.h/.cpp       存档：V1–V3 兼容与 V4 读写
 │   └── profile.h/.cpp    跨局档案：图鉴、成就、远征记录
 └── ui/
     └── help.h/.cpp       游戏内帮助主题
@@ -394,9 +431,19 @@ tests/
 ├── sim/                  balance_sim（独立遭遇）与 campaign_sim（连续远征）
 └── cli_smoke.py          真实终端冒烟测试
 tools/test.sh             独立于 CMake 的构建验证入口
-.github/workflows/        游戏构建与回归 CI
+tools/web_test.sh         网页版与 C++ 规则的一致性检查
+.github/workflows/        游戏构建与回归 CI、GitHub Pages 部署
+web/
+├── index.html, css/      页面与界面样式
+├── js/rules/             src/ 规则层的 JavaScript 移植（无 DOM，可在 Node 中运行）
+├── js/engine/            画布、输入、像素绘制、人物/敌人/地块精灵、粒子特效、合成音效
+├── js/scenes/            标题、俯视探索、横版战斗、战斗背景
+├── js/ui/                HUD、菜单、战斗界面
+├── js/game.js, main.js   游戏流程（对应 main.cpp）与入口
+├── tests/                Node 测试：与 C++ 的一致性、存档与档案
+└── dev/gallery.html      精灵预览页
 ```
 
 头文件统一以 `src/` 为根引用，例如 `#include "game/campaign.h"`。
 
-调整职业属性从 `src/player/player.cpp` 的 `jobProfile` 表入手；调整成长从 `src/core/progression.h` 和 `src/player/skills.cpp` 入手；调整经济从 `src/core/game_config.h` 入手（休息、刷新、强化、修理的费用公式都在这里）；调整敌人强度从 `src/game/world.h` 的 `EnemyTuning` 入手（普通、精英、目标守卫的倍率）；掉落在 `src/game/world.cpp`；调整敌人招式伤害从 `src/enemy/enemy.h` 的 `IntentTuning` 入手；调整 Boss 配置从 `src/enemy/enemy.cpp` 入手；调整章节从 `src/game/campaign.cpp` 入手。增加持久状态时，必须同步更新 `src/core/run_state.h`、`src/storage/save.cpp` 和保存/读取回归。新增源文件时，同时加入 `CMakeLists.txt` 和 `tools/test.sh` 的源文件列表。
+调整职业属性从 `src/player/player.cpp` 的 `jobProfile` 表入手；调整成长从 `src/core/progression.h` 和 `src/player/skills.cpp` 入手；调整经济从 `src/core/game_config.h` 入手（休息、刷新、强化、修理的费用公式都在这里）；调整敌人强度从 `src/game/world.h` 的 `EnemyTuning` 入手（普通、精英、目标守卫的倍率）；掉落在 `src/game/world.cpp`；调整敌人招式伤害从 `src/enemy/enemy.h` 的 `IntentTuning` 入手；调整 Boss 配置从 `src/enemy/enemy.cpp` 入手；调整章节从 `src/game/campaign.cpp` 入手。增加持久状态时，必须同步更新 `src/core/run_state.h`、`src/storage/save.cpp` 和保存/读取回归（网页版对应 `web/js/rules/run_state.js` 与 `save.js`）。新增源文件时，同时加入 `CMakeLists.txt`、`tools/test.sh` 和 `tools/web_test.sh` 的源文件列表。规则改动要同步到 `web/js/rules/`，并以 `bash tools/web_test.sh` 验证。

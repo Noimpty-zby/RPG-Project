@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#181425">
+  <meta name="description" content="Aincrad：百层远征 —— 像素风回合制 RPG。十个章节、三种职业、会根据你的行动改变意图的敌人。">
+  <title>Aincrad：百层远征</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23181425'/%3E%3Cpath d='M8 1 L11 8 L8 15 L5 8Z' fill='%232ce8f5'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game" aria-label="游戏画面"></canvas>
+
+  <div id="hud" class="hidden" aria-live="polite">
+    <div class="hud-card" id="hud-hero"></div>
+    <div class="hud-card" id="hud-floor"></div>
+  </div>
+  <div id="hud-buttons" class="hidden">
+    <button class="icon-btn" id="btn-menu" title="菜单 (Esc)">☰</button>
+    <button class="icon-btn" id="btn-sound" title="声音">♪</button>
+  </div>
+  <div id="prompt" class="hidden"></div>
+
+  <div id="touch" class="hidden">
+    <div class="dpad">
+      <button data-key="up" aria-label="上">▲</button>
+      <button data-key="left" aria-label="左">◀</button>
+      <button data-key="right" aria-label="右">▶</button>
+      <button data-key="down" aria-label="下">▼</button>
+    </div>
+    <button class="touch-action" data-key="action" aria-label="交互">交互</button>
+  </div>
+
+  <div id="battle-ui" class="hidden"></div>
+  <div id="screen" class="hidden"></div>
+  <div id="modals"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="fade"></div>
+
+  <noscript><p class="noscript">这个游戏需要启用 JavaScript。</p></noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

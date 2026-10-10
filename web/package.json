@@ -1,0 +1,9 @@
+{
+  "name": "aincrad-web",
+  "private": true,
+  "type": "module",
+  "description": "Browser version of Aincrad. No build step: the folder is served as-is.",
+  "scripts": {
+    "test": "node tests/parity_test.mjs && node tests/rules_test.mjs"
+  }
+}

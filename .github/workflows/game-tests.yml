@@ -21,3 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - run: SANITIZE=1 bash tools/test.sh
+  web-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: bash tools/web_test.sh
