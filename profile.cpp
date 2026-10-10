@@ -101,9 +101,18 @@ Profile Profile::load(const string &path, string *warning) {
   profile.path = path;
   error_code error;
   if (!filesystem::exists(path, error)) return profile;
-  ifstream input(path, ios::binary);
   ostringstream text;
-  text << input.rdbuf();
+  {
+    // Close the file before any rename below: Windows cannot rename a file
+    // that is still open.
+    ifstream input(path, ios::binary);
+    if (!input) {
+      profile.canWrite = false;
+      if (warning) *warning = "档案无法读取，本次不会写入：" + path;
+      return profile;
+    }
+    text << input.rdbuf();
+  }
   try {
     Profile parsed = parse(text.str());
     parsed.path = path;
