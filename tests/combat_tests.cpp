@@ -1,126 +1,303 @@
 #include "combat.h"
 #include "jobs.h"
 #include "skills.h"
-#include "world.h"
-#include <cassert>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
-static std::unique_ptr<Warrior> hero() {
+namespace {
+void require(bool condition, const char *message) {
+  if (!condition) throw std::runtime_error(message);
+}
+std::unique_ptr<Warrior> hero(int hp = 800, int attack = 50) {
   auto h = std::make_unique<Warrior>("test");
-  h->loadStats(80, 0, 100000, 4000, 5000, 100, 1000, 1000, 0, 3);
+  h->loadStats(80, 0, 100, hp, 1000, attack, 200, 200, 0, 3);
   h->setHighestFloor(100);
   return h;
 }
-
-static enemy foe(int floor) {
-  enemy e("test enemy", 100000, 100, 0, 1, 1, floor);
+enemy foe(int floor = 1, bool boss = false, int attack = 100) {
+  enemy e("fixture", 100000, attack, 0, 500, 500, floor);
+  e.configureEncounter(floor, boss);
   e.setdogeRate(0);
-  e.configureEncounter(floor, false);
   return e;
 }
+void turn(BattleSession &battle, BattleAction action) {
+  require(battle.beginTurn(), "Expected a live action window");
+  require(battle.act(action), "Expected an available action");
+}
+void givePotion(player &h, int quantity = 3) {
+  h.addItem(Item("fixture potion", 1, Potion, 200, 0, 1, quantity, AnyJob));
+}
+void giveAffix(enemy &e, Affix affix) {
+  for (int i = 0; i < 1000 && !e.hasAffix(affix); ++i) e.setAffix(100);
+  require(e.hasAffix(affix), "Affix fixture generation failed");
+}
+
+void testInvalidActionsAndResources() {
+  auto h = hero(); auto e = foe();
+  h->setmp(0);
+  h->getSkill(1)->resetcooldown();
+  BattleSession b(*h, e);
+  require(!b.claimSettlement(), "Live encounters cannot claim rewards");
+  require(!b.act({ActionType::Attack}), "An action requires beginTurn");
+  require(b.beginTurn(), "Initial beginTurn failed");
+  const int mp = h->getmp(), hp = h->gethp();
+  const int cooldown = h->getSkill(1)->getcurrentcooldown();
+  require(mp == 2, "Passive Warrior recovery must be two MP, not eight");
+  for (int i = 0; i < 10; ++i) {
+    require(!b.act({ActionType::Skill, 99}) && !b.act({ActionType::Potion, 99}) &&
+                !b.act({static_cast<ActionType>(99), 0}),
+            "Invalid actions must be rejected");
+    require(b.beginTurn(), "A failed choice must retain the action window");
+    require(b.turns() == 0 && h->getmp() == mp && h->gethp() == hp &&
+                h->getSkill(1)->getcurrentcooldown() == cooldown,
+            "Retries must not farm MP, cooldowns or advance time");
+  }
+  require(b.act({ActionType::Attack}), "Basic attack failed");
+  require(b.turns() == 1 && h->getmp() == mp + 3,
+          "A successful basic attack should earn class resources");
+  require(b.beginTurn() && h->getmp() == mp + 5,
+          "Only the next actual turn should restore passive MP again");
+  require(h->getcoin() == 100 && h->getexp() == 0,
+          "The battle engine must not award currency or experience");
+
+  auto full = hero(1000); auto fullEnemy = foe(); givePotion(*full, 1);
+  BattleSession fullBattle(*full, fullEnemy);
+  fullBattle.beginTurn();
+  require(!fullBattle.act({ActionType::Potion, 1}) && fullBattle.turns() == 0 &&
+              full->getSaveBackpack()[0].getQuantity() == 1,
+          "A full-HP potion attempt must not consume an item or a turn");
+}
+
+void testChargeCounterAndRecovery() {
+  auto h = hero(); auto e = foe(10, true);
+  BattleSession b(*h, e);
+  require(e.getIntent().kind == EnemyIntentKind::Charge,
+          "Chapter one should show its charge before striking");
+  const int hp = h->gethp();
+  turn(b, {ActionType::Attack});
+  require(h->gethp() == hp && b.report().interrupts == 1 &&
+              e.getIntent().kind == EnemyIntentKind::Recover,
+          "A basic hit must interrupt charge and earn a safe recovery turn");
+  turn(b, {ActionType::Guard});
+  require(h->gethp() == hp && e.getIntent().kind != EnemyIntentKind::Recover,
+          "Recovery must last exactly one earned window");
+
+  auto guardHero = hero(); auto charging = foe(10, true);
+  BattleSession guardBattle(*guardHero, charging);
+  turn(guardBattle, {ActionType::Guard});
+  require(charging.getIntent().kind == EnemyIntentKind::HeavyStrike,
+          "An unbroken charge must become the advertised heavy strike");
+  turn(guardBattle, {ActionType::Guard});
+  require(guardHero->gethp() == 720 && guardBattle.report().damageTaken == 80,
+          "Basic guard must halve the heavy strike");
+
+  auto missHero = hero(); auto dodging = foe(10, true); dodging.setdogeRate(100);
+  BattleSession missBattle(*missHero, dodging);
+  turn(missBattle, {ActionType::Attack});
+  require(missBattle.report().interrupts == 0 &&
+              dodging.getIntent().kind == EnemyIntentKind::HeavyStrike,
+          "A missed attack must not count as an interruption");
+}
+
+void testSuppressionAndShatterCounters() {
+  auto h = hero(500); auto priest = foe(20, true); givePotion(*h);
+  BattleSession b(*h, priest);
+  turn(b, {ActionType::Potion, 1});
+  require(h->gethp() == 520 && b.report().suppressedHealing == 100 &&
+              b.report().potionsUsed == 1 && b.turns() == 1,
+          "Suppression must halve actual healing and potion use must cost a turn");
+  h->heal(100);
+  require(h->gethp() == 620, "Suppression must not leak outside its action");
+
+  auto basic = hero(); auto secondPriest = foe(20, true);
+  BattleSession basicBattle(*basic, secondPriest);
+  turn(basicBattle, {ActionType::Guard});
+  require(basic->gethp() == 760 && basicBattle.report().suppressedHealing == 0,
+          "Ordinary guard must offer a basic response to suppression");
+
+  auto guardHero = hero(); auto breaker = foe(30, true); guardHero->setmp(0);
+  BattleSession guardBattle(*guardHero, breaker);
+  turn(guardBattle, {ActionType::Guard});
+  require(guardHero->gethp() == 720 && guardHero->getmp() == 8 &&
+              guardBattle.report().guards == 1,
+          "Shatter bypasses guard reduction but must retain guard resource gains");
+
+  auto controlHero = hero(); auto controlled = foe(30, true);
+  controlled.weakenAttack(50, 2);
+  BattleSession controlBattle(*controlHero, controlled);
+  turn(controlBattle, {ActionType::Attack});
+  require(controlHero->gethp() == 760,
+          "Temporary weakening must still mitigate shatter damage");
+}
+
+enemy predictableEnemy() {
+  auto reader = foe(40, true);
+  for (int i = 0; i < 30 && reader.getIntent().kind != EnemyIntentKind::ReadPattern; ++i)
+    reader.finishTurn(0);
+  require(reader.getIntent().kind == EnemyIntentKind::ReadPattern &&
+              reader.getIntent().predictedAction == 0,
+          "Reader fixture did not learn repeated attacks");
+  return reader;
+}
+
+void testReadCounterAndReport() {
+  auto h = hero(); auto reader = predictableEnemy();
+  BattleSession b(*h, reader);
+  turn(b, {ActionType::Guard});
+  require(h->gethp() == 762 && b.report().readPunishments == 0,
+          "Changing a predicted attack to basic guard must avoid the punishment");
+  auto repeated = hero(); auto readerAgain = predictableEnemy();
+  BattleSession punished(*repeated, readerAgain);
+  turn(punished, {ActionType::Attack});
+  require(repeated->gethp() == 650 && punished.report().readPunishments == 1 &&
+              punished.report().damageTaken == 150,
+          "Matching a displayed prediction must be counted and resolved");
+}
+
+void testObjectivesAndSettlement() {
+  auto h = hero(); auto e = foe(1, false, 0);
+  BattleSession survive(*h, e, {EncounterObjective::Survive, 2});
+  turn(survive, {ActionType::Guard});
+  require(!survive.finished(), "Survival must count actual completed turns");
+  turn(survive, {ActionType::Guard});
+  require(survive.finished() && survive.won() && e.isalive(),
+          "Survival should succeed without requiring an enemy kill");
+  require(survive.claimSettlement() && !survive.claimSettlement(),
+          "A completed encounter can be settled only once");
+  require(!survive.beginTurn() && !survive.act({ActionType::Attack}),
+          "A won objective must not accept extra actions");
+
+  auto disruptHero = hero(); auto disruptEnemy = foe(2, false, 0);
+  BattleSession disrupt(*disruptHero, disruptEnemy, {EncounterObjective::Disrupt});
+  while (!disrupt.finished())
+    turn(disrupt, {disruptEnemy.getIntent().interruptible ? ActionType::Attack
+                                                        : ActionType::Guard});
+  require(disrupt.won() && disrupt.report().interrupts == 2 && disruptEnemy.isalive(),
+          "Disrupt must complete after two actual basic-attack interruptions");
+
+  auto escaping = hero(); auto pursuer = foe(1, false, 0);
+  BattleSession escape(*escaping, pursuer, {EncounterObjective::Escape});
+  turn(escape, {ActionType::Guard});
+  turn(escape, {ActionType::Guard});
+  require(!escape.finished(), "Escape must not complete before three turns");
+  turn(escape, {ActionType::Attack});
+  require(!escape.finished(), "Escape must require the deliberate guard action");
+  turn(escape, {ActionType::Guard});
+  require(escape.won() && escape.turns() == 4,
+          "Guard after the third turn should complete an escape");
+
+  for (auto objective : {EncounterObjective::Defeat, EncounterObjective::Survive,
+                         EncounterObjective::Disrupt, EncounterObjective::Escape}) {
+    auto killer = hero(); auto weak = foe(1, false, 0); weak.resethp(1);
+    BattleSession kill(*killer, weak, {objective});
+    turn(kill, {ActionType::Attack});
+    require(kill.won(), "A kill should satisfy each supported encounter objective");
+  }
+}
+
+void testDeathTimeoutAndBoundaryRules() {
+  auto dying = hero(20); auto lethal = foe();
+  BattleSession survival(*dying, lethal, {EncounterObjective::Survive, 1});
+  turn(survival, {ActionType::Guard});
+  require(survival.finished() && !survival.won(),
+          "Death on the survival target turn must take priority over success");
+
+  auto doomed = hero(1); auto explosive = foe(1, false, 100); explosive.resethp(1);
+  giveAffix(explosive, Affix::EXPLOSIVE);
+  explosive.removeAffix(Affix::POSIONOUS);
+  explosive.setdogeRate(0);
+  BattleSession mutual(*doomed, explosive);
+  turn(mutual, {ActionType::Attack});
+  require(mutual.finished() && !mutual.won() && !explosive.isalive(),
+          "Death from a defeated enemy's explosion must remain a loss");
+
+  auto poisoned = hero(1); auto poisoner = foe();
+  giveAffix(poisoner, Affix::POSIONOUS);
+  BattleSession poison(*poisoned, poisoner, {EncounterObjective::Survive, 1});
+  require(!poison.beginTurn() && poison.finished() && !poison.won() &&
+              poison.turns() == 0 && poison.report().poisonDamage == 1 &&
+              poison.report().damageTaken == 1 && poison.claimSettlement() &&
+              !poison.claimSettlement(),
+          "Poison death before acting must not count an effective turn");
+
+  auto stuck = hero(); auto harmless = foe(1, false, 0);
+  BattleSession timeout(*stuck, harmless, {EncounterObjective::Escape});
+  while (!timeout.finished()) turn(timeout, {ActionType::Attack});
+  require(timeout.report().timeout && !timeout.won() && timeout.turns() == 15 &&
+              timeout.claimSettlement() && !timeout.claimSettlement(),
+          "Unfulfilled objectives must time out and settle failure once");
+
+  auto shortHero = hero(); auto shortEnemy = foe(1, false, 0);
+  BattleSession shortGoal(*shortHero, shortEnemy, {EncounterObjective::Survive, -99, -5});
+  turn(shortGoal, {ActionType::Guard});
+  require(shortGoal.won(), "Invalid survival target must clamp to one turn");
+  auto longHero = hero(); auto longEnemy = foe(1, false, 0);
+  BattleSession longGoal(*longHero, longEnemy, {EncounterObjective::Survive, 999, 999});
+  require(longGoal.turnLimit() == 35, "Oversized survival target must stay bounded");
+}
+
+void testInitiallyDeadEncounterCannotSettle() {
+  for (int state = 0; state < 3; ++state) {
+    auto h = hero(state == 1 || state == 2 ? 0 : 800);
+    auto e = foe();
+    if (state == 0 || state == 2) e.sethp(0);
+    h->equipItem_T(Item("unworn blade", 1, Weapon, 10, 5, 10, 1, WarriorOnly));
+    h->addCombatResource(2);
+    BattleSession invalid(*h, e);
+    require(invalid.finished() && !invalid.won() && !invalid.claimSettlement() &&
+                !invalid.beginTurn() && !invalid.act({ActionType::Attack}),
+            "Initially dead participants must not create a claimable encounter");
+    require(h->getCombatResource() == 2,
+            "Invalid encounter entry must not reset existing class resources");
+    h->finishEncounterWear();
+    require(h->getSaveEquipments()[0].getDurability() == 5,
+            "Invalid encounter entry must not schedule equipment wear");
+    h->sethp(800);
+    e.sethp(100);
+    require(invalid.finished() && !invalid.won() && !invalid.claimSettlement(),
+            "Reviving participants must not reactivate an invalid session");
+  }
+}
+
+void testCleanupAndSabotage() {
+  auto h = hero(500); auto e = foe(20, true);
+  { BattleSession b(*h, e); b.beginTurn(); }
+  h->heal(100);
+  require(h->gethp() == 600, "Abandoned action windows must clear suppression");
+  auto saboteur = hero(); auto core = foe(60, true);
+  giveAffix(core, Affix::SHIELDING);
+  BattleSession sabotage(*saboteur, core,
+                         {EncounterObjective::Defeat, 4, 0, true});
+  require(!core.hasAffix(Affix::SHIELDING),
+          "Encounter rules must apply campaign sabotage to the shield source");
+  turn(sabotage, {ActionType::Guard});
+  require(core.getIntent().damagePercent == 125,
+          "Campaign sabotage must weaken the core heavy strike");
+}
+} // namespace
 
 int main() {
   std::ostringstream quiet;
-  auto old = std::cout.rdbuf(quiet.rdbuf());
-  std::srand(42);
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; auto e = foe(40);
-    h.setmp(0); h.getSkill(1)->resetcooldown();
-    BattleSession b(h, e);
-    assert(b.beginTurn());
-    int mp = h.getmp(), cd = h.getSkill(1)->getcurrentcooldown();
-    for (int i = 0; i < 10; ++i) {
-      assert(!b.act({ActionType::Skill, 99}));
-      assert(!b.act({ActionType::Potion, 99}));
-      assert(b.beginTurn());
-      assert(h.getmp() == mp && h.getSkill(1)->getcurrentcooldown() == cd);
-      assert(b.turns() == 0 && e.getIntent().kind == EnemyIntentKind::Attack);
-    }
-    assert(b.act({ActionType::Attack}));
-    assert(b.turns() == 1 && e.getIntent().kind == EnemyIntentKind::Wound);
-    assert(b.beginTurn());
-    assert(h.getmp() == mp + 8 && h.getSkill(1)->getcurrentcooldown() == cd - 1);
+  auto *previous = std::cout.rdbuf(quiet.rdbuf());
+  try {
+    std::srand(42);
+    testInvalidActionsAndResources();
+    testChargeCounterAndRecovery();
+    testSuppressionAndShatterCounters();
+    testReadCounterAndReport();
+    testObjectivesAndSettlement();
+    testDeathTimeoutAndBoundaryRules();
+    testInitiallyDeadEncounterCannotSettle();
+    testCleanupAndSabotage();
+    std::cout.rdbuf(previous);
+    std::cout << "combat objective tests passed\n";
+  } catch (const std::exception &error) {
+    std::cout.rdbuf(previous);
+    std::cerr << "combat objective tests failed: " << error.what() << '\n';
+    return 1;
   }
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; auto e = foe(41);
-    BattleSession b(h, e);
-    b.beginTurn(); int hp = h.gethp();
-    assert(b.act({ActionType::Guard}));
-    assert(h.gethp() == hp - 50);
-    assert(e.getIntent().kind == EnemyIntentKind::Shatter);
-    b.beginTurn(); hp = h.gethp();
-    assert(b.act({ActionType::Guard}));
-    assert(h.gethp() == hp - 80);
-    b.beginTurn(); hp = h.gethp();
-    b.act({ActionType::Attack});
-    assert(h.gethp() == hp); // recovery provides an explicit safe action window
-  }
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; auto e = foe(40);
-    BattleSession b(h, e);
-    b.beginTurn(); b.act({ActionType::Attack});
-    b.beginTurn(); int hp = h.gethp();
-    assert(b.act({ActionType::Skill, 2}));
-    assert(h.gethp() == hp + 375 - 100); // 15% heal, suppressed by 50%
-    hp = h.gethp(); h.heal(100);
-    assert(h.gethp() == hp + 100); // no leaked suppression outside the action
-  }
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; auto e = foe(40);
-    h.addItem(Item("potion", 1, Potion, 200, 0, 1, 2, AnyJob));
-    BattleSession b(h, e);
-    b.beginTurn(); b.act({ActionType::Attack});
-    b.beginTurn(); int hp = h.gethp();
-    assert(b.act({ActionType::Potion, 1}));
-    assert(h.gethp() == hp); // +100 healing, -100 attack; item consumes turn
-    assert(h.getSaveBackpack()[0].getQuantity() == 1 && b.turns() == 2);
-    b.beginTurn(); hp = h.gethp();
-    assert(b.act({ActionType::Potion, 1}));
-    assert(h.gethp() == hp + 200);
-    assert(h.getSaveBackpack().empty());
-  }
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; auto e = foe(40);
-    { BattleSession b(h, e); b.beginTurn(); b.act({ActionType::Attack}); b.beginTurn(); }
-    int hp = h.gethp(); h.heal(100);
-    assert(h.gethp() == hp + 100); // interrupted battle cleanup
-  }
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; auto e = foe(42);
-    BattleSession b(h, e);
-    // A stable attack/guard cycle becomes predictable; changing it wins a window.
-    for (int i = 0; i < 4; ++i) {
-      b.beginTurn(); b.act({i % 2 ? ActionType::Guard : ActionType::Attack});
-    }
-    assert(e.getIntent().kind == EnemyIntentKind::ReadPattern);
-    assert(e.getIntent().predictedAction == 0);
-    b.beginTurn(); int hp = h.gethp();
-    assert(b.act({ActionType::Skill, 1}));
-    assert(h.gethp() == hp - 75);
-  }
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; int hp = h.gethp();
-    Item armor("armor", 1, Armor, 100, 100, 1, 1, WarriorOnly);
-    h.equipItem_T(armor);
-    assert(h.gethp() == hp && h.getmaxhp() == 5100);
-    h.unequipItem(1); h.equipItem(1);
-    assert(h.gethp() == hp && h.getmaxhp() == 5100);
-    Warrior low("low"); low.gaincoin(10000);
-    int coins = low.getcoin(); low.levelUpSkill(1);
-    assert(low.getcoin() == coins && low.getSkill(1)->getskilllevel() == 1);
-    low.equipItem_T(Item("late weapon", 99, Weapon, 500, 100, 1, 1, WarriorOnly));
-    assert(low.getSaveEquipments().empty() && low.getSaveBackpack().size() == 1);
-  }
-  {
-    auto ownedHero = hero(); auto &h = *ownedHero; auto e = foe(40);
-    h.sethp(h.getmaxhp());
-    h.addItem(Item("potion", 1, Potion, 200, 0, 1, 1, AnyJob));
-    BattleSession b(h, e); b.beginTurn();
-    assert(!b.act({ActionType::Potion, 1}));
-    assert(b.turns() == 0 && h.getSaveBackpack()[0].getQuantity() == 1);
-  }
-  std::cout.rdbuf(old);
-  std::cout << "combat tests passed\n";
 }

@@ -1,206 +1,256 @@
 #include "enemy.h"
+#include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
 namespace {
-void expect(bool condition, const std::string &message) {
-  if (!condition)
-    throw std::runtime_error(message);
+void require(bool condition, const char *message) {
+  if (!condition) throw std::runtime_error(message);
+}
+enemy foe(int floor, bool boss = false) {
+  enemy e("fixture", 1000, 100, 0, 30, 20, floor);
+  e.configureEncounter(floor, boss);
+  e.setdogeRate(0);
+  return e;
 }
 
-enemy makeEnemy(int floor, bool boss = false, int attack = 100) {
-  enemy target("Test enemy", 500, attack, 0, 30, 20, floor);
-  target.configureEncounter(floor, boss);
-  return target;
-}
-
-void testEncounterBoundaries() {
-  enemy legacy("Legacy", 5000, 100, 0, 30, 20, 80);
-  expect(!legacy.isBoss(), "High HP must not imply boss status");
-  for (int i = 0; i < 9; ++i) {
-    expect(legacy.getIntent().kind == EnemyIntentKind::Attack,
-           "An unconfigured enemy must preserve its ordinary attacks");
+void testProfilesAndBoundaries() {
+  enemy legacy("legacy", 5000, 100, 0, 1, 1, 100);
+  require(!legacy.isBoss(), "HP must not imply boss status");
+  for (int i = 0; i < 10; ++i) {
+    require(legacy.getIntent().kind == EnemyIntentKind::Attack,
+            "Unconfigured enemies must remain compatible");
     legacy.finishTurn(0);
   }
-
-  auto earlyBoss = makeEnemy(39, true);
-  expect(earlyBoss.isBoss(), "Boss status must be explicit even with low HP");
-  for (int i = 0; i < 9; ++i) {
-    const auto intent = earlyBoss.getIntent();
-    expect(intent.kind == EnemyIntentKind::Attack &&
-               intent.damagePercent == 100 && intent.healingPercent == 100,
-           "Tactics must not change encounters below floor 40");
-    earlyBoss.finishTurn(0);
+  std::set<std::string> profiles;
+  for (int floor = 10; floor <= 100; floor += 10) {
+    auto boss = foe(floor, true);
+    profiles.insert(boss.getEncounterTitle());
+    require(!boss.getTacticalHint().empty() && boss.isBoss(),
+            "Each chapter boss needs a visible tactical objective");
+    require(boss.getattack() == 100 && boss.getmaxhp() == 1000,
+            "Boss configuration must not inflate base stats");
   }
-  auto tactical = makeEnemy(40);
-  expect(tactical.getattack() == 100 && tactical.gethp() == 500 &&
-             tactical.getexp_reward() == 30 && tactical.getcoin_reward() == 20,
-         "Configuring tactics must not inflate baseline stats or rewards");
+  require(profiles.size() == 10, "All ten chapter boss profiles must be named");
+  auto outside = foe(1000, true);
+  require(outside.getEncounterTitle() == foe(100, true).getEncounterTitle(),
+          "Chapter lookup must clamp upper boundaries");
+  auto low = foe(-4, true);
+  require(low.getIntent().kind == EnemyIntentKind::Attack,
+          "Negative floors must not index a profile out of range");
+  for (int floor : {1, 2, 3, 4}) {
+    auto normal = foe(floor);
+    require(normal.getIntent().kind == EnemyIntentKind::Attack,
+            "Ordinary foes must allow an opening action");
+    normal.finishTurn(0);
+    require(normal.getIntent().kind != EnemyIntentKind::Attack,
+            "Even early ordinary enemies need a visible small tactical problem");
+  }
 }
 
-void testThreeTurnRhythm() {
-  auto wound = makeEnemy(40);
-  expect(wound.getIntent().kind == EnemyIntentKind::Attack,
-         "Cycle must begin with an ordinary attack");
-  wound.finishTurn(0);
-  auto intent = wound.getIntent();
-  expect(intent.kind == EnemyIntentKind::Wound &&
-             intent.healingPercent == 50 && intent.damagePercent == 100,
-         "Wound must halve healing for only its telegraphed action");
-  wound.finishTurn(1);
-  intent = wound.getIntent();
-  expect(intent.kind == EnemyIntentKind::Recover &&
-             intent.damagePercent == 0 && intent.healingPercent == 100 &&
-             !intent.piercesGuard,
-         "Recovery must be a healing window without an enemy attack");
-  wound.finishTurn(-2);
-  expect(wound.getIntent().kind == EnemyIntentKind::Attack,
-         "Recovery must return to the start of the cycle");
+void testChargeAndEarnedRecovery() {
+  auto e = foe(10, true);
+  auto intent = e.getIntent();
+  require(intent.kind == EnemyIntentKind::Charge && intent.interruptible &&
+              intent.damagePercent == 0,
+          "Charge must be visible and interruptible before the heavy strike");
+  e.finishTurn(-1);
+  require(e.getIntent().kind == EnemyIntentKind::HeavyStrike &&
+              e.getIntent().damagePercent == 160 && !e.getIntent().piercesGuard,
+          "Ignoring charge must lead to a blockable heavy strike");
+  e.finishTurn(-1);
+  require(e.getIntent().kind == EnemyIntentKind::Recover &&
+              e.getIntent().damagePercent == 0,
+          "Heavy strike must create a recovery window");
+  e.finishTurn(1);
+  require(e.getIntent().kind != EnemyIntentKind::Recover,
+          "Recovery must not repeat indefinitely");
 
-  auto shatter = makeEnemy(41);
-  shatter.finishTurn(-1);
-  intent = shatter.getIntent();
-  expect(intent.kind == EnemyIntentKind::Shatter &&
-             intent.damagePercent == 80 && intent.piercesGuard &&
-             intent.healingPercent == 100,
-         "Shatter must trade damage for bypassing guard");
+  e.configureEncounter(10, true);
+  require(e.interruptCharge(), "Charge should accept an interruption");
+  e.finishTurn(0, false, EnemyIntentKind::Charge);
+  require(e.getIntent().kind == EnemyIntentKind::Recover,
+          "A successful interruption must cancel the next heavy strike");
+  e.finishTurn(1);
+  require(!e.interruptCharge(), "Ordinary attacks are not interruptible");
+  require(e.getIntent().kind == EnemyIntentKind::Attack,
+          "Interrupted enemy must not jump back into heavy strike");
+
+  // Crossing a health threshold during an ordinary hit cannot retroactively
+  // turn that already-telegraphed attack into a charge.
+  auto threshold = foe(1);
+  const auto cached = threshold.getIntent();
+  threshold.sethp(300);
+  threshold.finishTurn(0, false, cached.kind);
+  require(threshold.getIntent().kind == EnemyIntentKind::Charge,
+          "A new low-HP charge must still receive its own warning turn");
 }
 
-void testReadPattern() {
-  auto reader = makeEnemy(42);
-  reader.finishTurn(1);
-  auto intent = reader.getIntent();
-  expect(intent.kind == EnemyIntentKind::ReadPattern &&
-             intent.predictedAction == -99 && intent.damagePercent == 75,
-         "An unseen transition must not fabricate a prediction");
+void testConditionalReactions() {
+  auto priest = foe(20, true);
+  require(priest.getIntent().kind == EnemyIntentKind::Wound,
+          "Priest should teach suppression in its opening");
+  priest.finishTurn(1);
+  priest.finishTurn(1);
+  priest.finishTurn(1);
+  auto noHeal = priest;
+  priest.finishTurn(-2, true);
+  noHeal.finishTurn(0, false);
+  require(priest.getIntent().kind == EnemyIntentKind::Wound &&
+              noHeal.getIntent().kind == EnemyIntentKind::Attack,
+          "Suppression must react to healing, not a universal three-turn cycle");
 
-  // At turn 8, action 1 has led to action 2 twice and action 3 once.
-  reader.configureEncounter(42, false);
-  for (int action : {1, 2, 1, 3, 1, 2, 1})
-    reader.finishTurn(action);
-  intent = reader.getIntent();
-  expect(intent.kind == EnemyIntentKind::ReadPattern &&
-             intent.predictedAction == 2 && intent.damagePercent == 75,
-         "Reader must predict the most frequent successor of the last action");
-  expect(reader.getIntent().predictedAction == 2,
-         "Reading the intent must not mutate prediction history");
+  auto breaker = foe(30, true);
+  breaker.finishTurn(1);
+  breaker.finishTurn(1);
+  breaker.finishTurn(1);
+  breaker.finishTurn(-1);
+  require(breaker.getIntent().kind == EnemyIntentKind::Shatter &&
+              breaker.getIntent().piercesGuard &&
+              breaker.getIntent().damagePercent == 80,
+          "Shield breaker must respond to defensive habits");
 
+  auto reader = foe(40, true);
+  bool sawRead = false;
+  for (int i = 0; i < 20; ++i) {
+    const auto intent = reader.getIntent();
+    if (intent.kind == EnemyIntentKind::ReadPattern) {
+      require(intent.predictedAction == 0 || intent.predictedAction == -1,
+              "Reader must predict a learned successor, not invent an action");
+      sawRead = true;
+      break;
+    }
+    reader.finishTurn(i % 2 ? -1 : 0);
+  }
+  require(sawRead, "Repeated attack/guard patterns should eventually be read");
+  const auto before = reader.getIntent();
   reader.finishTurn(-99);
   reader.finishTurn(6);
-  expect(reader.getIntent().kind == EnemyIntentKind::ReadPattern &&
-             reader.getIntent().predictedAction == 2,
-         "Failed or invalid actions must not advance the turn or history");
-
-  // Cover every documented action ID, including guard and potion transitions.
-  for (int action = -2; action <= 5; ++action) {
-    reader.configureEncounter(42, false);
-    for (int i = 0; i < 4; ++i)
-      reader.finishTurn(action);
-    expect(reader.getIntent().predictedAction == action,
-           "All documented action IDs must be learnable");
-    std::ostringstream display;
-    auto *previous = std::cout.rdbuf(display.rdbuf());
-    reader.displayIntent();
-    std::cout.rdbuf(previous);
-    const std::string expected =
-        action == -2 ? "使用药水"
-        : action == -1 ? "格挡"
-        : action == 0  ? "普通攻击"
-                       : "技能槽 " + std::to_string(action);
-    expect(display.str().find(expected) != std::string::npos,
-           "Prediction tell must name the corresponding player action");
-  }
-  reader.configureEncounter(42, false);
-  reader.finishTurn(0);
-  expect(reader.getIntent().predictedAction == -99,
-         "Reconfiguring an encounter must clear learned transitions");
+  require(reader.getIntent().kind == before.kind &&
+              reader.getIntent().predictedAction == before.predictedAction,
+          "Invalid actions must not advance intent or learning");
+  reader.configureEncounter(40, true);
+  require(reader.getIntent().predictedAction == -99,
+          "New encounters must clear learned transitions");
 }
 
-void testLateBossRotation() {
-  auto boss = makeEnemy(60, true);
-  const EnemyIntentKind specials[] = {
-      EnemyIntentKind::Wound, EnemyIntentKind::Shatter,
-      EnemyIntentKind::ReadPattern, EnemyIntentKind::Wound};
-  for (auto expected : specials) {
-    expect(boss.getIntent().kind == EnemyIntentKind::Attack,
-           "Mixed boss cycles must retain the ordinary opening");
-    boss.finishTurn(0);
-    expect(boss.getIntent().kind == expected,
-           "Floor 60+ bosses must rotate their three specialties");
-    boss.finishTurn(1);
-    expect(boss.getIntent().kind == EnemyIntentKind::Recover,
-           "Mixed bosses must retain the recovery window");
-    boss.finishTurn(0);
+void testPressureAndSabotage() {
+  auto easy = foe(20, true), hard = foe(20, true);
+  hard.setTacticalPressure(2);
+  int easySpecials = 0, hardSpecials = 0;
+  for (int i = 0; i < 20; ++i) {
+    easySpecials += easy.getIntent().kind == EnemyIntentKind::Wound;
+    hardSpecials += hard.getIntent().kind == EnemyIntentKind::Wound;
+    easy.finishTurn(1);
+    hard.finishTurn(1);
   }
+  require(hardSpecials > easySpecials && hard.getattack() == easy.getattack(),
+          "Difficulty must add tactical pressure without stat inflation");
 
-  auto ordinary = makeEnemy(60, false);
-  ordinary.finishTurn(0);
-  expect(ordinary.getIntent().kind == EnemyIntentKind::ReadPattern,
-         "High-floor non-boss enemies must retain their single specialty");
-  auto earlierBoss = makeEnemy(59, true);
-  earlierBoss.finishTurn(0);
-  expect(earlierBoss.getIntent().kind == EnemyIntentKind::Shatter,
-         "Bosses below floor 60 must retain their single specialty");
+  auto disrupted = foe(1);
+  disrupted.setObjectivePressure(true);
+  require(disrupted.getIntent().kind == EnemyIntentKind::Charge,
+          "Disrupt objectives must provide an actual interruption opportunity");
+
+  auto boss = foe(60, true);
+  std::srand(1);
+  for (int i = 0; i < 1000 && !boss.hasAffix(Affix::SHIELDING); ++i)
+    boss.setAffix(100);
+  require(boss.hasAffix(Affix::SHIELDING), "Shield fixture generation failed");
+  boss.applySabotage();
+  require(!boss.hasAffix(Affix::SHIELDING), "Sabotage must remove the shield source");
+  boss.finishTurn(1);
+  require(boss.getIntent().kind == EnemyIntentKind::HeavyStrike &&
+              boss.getIntent().damagePercent == 125,
+          "Sabotage must also weaken the boss core, even beyond removing a shield");
 }
 
 void testTemporaryWeakening() {
-  auto target = makeEnemy(40);
-  target.weakenAttack(35, 2);
-  expect(target.getattack() == 65, "Weakening must use the base attack");
-  target.weakenAttack(35, 2);
-  expect(target.getattack() == 65, "Repeated weakening must not compound");
-  target.finishTurn(0);
-  expect(target.getattack() == 65,
-         "Two-turn weakening must remain after the first resolved turn");
-  target.finishTurn(1);
-  expect(target.getattack() == 100,
-         "Expired weakening must restore the exact original baseline");
+  auto e = foe(1);
+  e.weakenAttack(35, 2);
+  e.weakenAttack(35, 2);
+  require(e.getattack() == 65, "Weakening must not compound");
+  e.finishTurn(1);
+  require(e.getattack() == 65, "Weakening expired before its second enemy action");
+  e.finishTurn(1);
+  require(e.getattack() == 100, "Weakening must restore its baseline");
+  e.weakenAttack(100, 2);
+  require(e.getattack() == 40, "Weakening must cap at sixty percent");
+  e.resetattack(240);
+  e.finishTurn(1);
+  require(e.getattack() == 240, "Resetting attack must clear stale weakening");
+  e.weakenAttack(-1, 2);
+  e.weakenAttack(40, 0);
+  require(e.getattack() == 240, "Invalid weakening must do nothing");
+  e.resetattack(std::numeric_limits<int>::max());
+  e.weakenAttack(60, 1);
+  require(e.getattack() == static_cast<int>(static_cast<long long>(std::numeric_limits<int>::max()) * 40 / 100),
+          "Large attack baselines must not overflow while weakened");
+  e.finishTurn(0);
+  require(e.getattack() == std::numeric_limits<int>::max(),
+          "A large attack baseline must restore exactly");
+}
 
-  target.weakenAttack(100, 2);
-  expect(target.getattack() == 40, "Weakening must be capped at 60 percent");
-  target.weakenAttack(10, 3);
-  expect(target.getattack() == 40,
-         "A weaker refresh must not overwrite an active stronger debuff");
-  target.finishTurn(0);
-  target.finishTurn(0);
-  expect(target.getattack() == 40, "A refresh must retain the longer duration");
-  target.finishTurn(0);
-  expect(target.getattack() == 100, "Refreshed weakening must still expire");
+void testNumericAndAffixBoundaries() {
+  auto e = foe(1);
+  e.sethp(500);
+  e.heal(-1);
+  require(e.gethp() == 500, "Negative healing must not damage an enemy");
+  e.heal(std::numeric_limits<int>::max());
+  require(e.gethp() == e.getmaxhp(), "Large healing must saturate without overflowing");
+  e.setdogeRate(-100);
+  require(e.getdogeRate() == 0, "Negative dodge chance must clamp to zero");
+  e.setdogeRate(std::numeric_limits<int>::max());
+  require(e.getdogeRate() == 100, "Dodge chance must not exceed one hundred");
+  e.resethp(-10);
+  require(e.gethp() == 0 && e.getmaxhp() == 0 && !e.isalive(),
+          "Negative reset HP must remain a valid dead state");
+  e.heal(std::numeric_limits<int>::max());
+  require(!e.isalive(), "Healing must not revive a defeated enemy");
 
-  target.weakenAttack(50, 2);
-  target.resetattack(240);
-  expect(target.getattack() == 240,
-         "Setting a new baseline must clear temporary weakening");
-  target.finishTurn(0);
-  expect(target.getattack() == 240,
-         "An old debuff must not restore a stale baseline");
-  target.weakenAttack(50, 2);
-  expect(target.getattack() == 120, "New weakening must use the updated baseline");
-  target.configureEncounter(60, true);
-  expect(target.getattack() == 240,
-         "Encounter reset must remove weakening and preserve its baseline");
-  target.weakenAttack(-1, 2);
-  target.weakenAttack(40, 0);
-  expect(target.getattack() == 240, "Invalid weakening must be a no-op");
-  auto harmless = makeEnemy(40, false, 0);
-  harmless.weakenAttack(50, 2);
-  expect(harmless.getattack() == 0, "Weakening must not create attack damage");
+  auto affixed = foe(100);
+  std::srand(37);
+  for (int roll = 0; roll < 1000; ++roll) affixed.setAffix(100);
+  for (Affix affix : {Affix::STRONG, Affix::TOUGH, Affix::QUICK,
+                     Affix::EXPLOSIVE, Affix::POSIONOUS, Affix::HEALING,
+                     Affix::SHIELDING})
+    require(affixed.hasAffix(affix), "Repeated affix fixture should reach all seven unique affixes");
+  require(affixed.getexp_reward() == 30 + 7 * 100 * 3 &&
+              affixed.getcoin_reward() == 20 + 7 * 100 * 2,
+          "Repeated affix rolls must reward each unique affix only once");
+  std::ostringstream visible;
+  auto *previous = std::cout.rdbuf(visible.rdbuf());
+  affixed.displayAffixes();
+  std::cout.rdbuf(previous);
+  for (const char *label : {"[强力]", "[坚韧]", "[迅捷]", "[爆炸]", "[剧毒]", "[治疗]", "[护盾]"}) {
+    const auto first = visible.str().find(label);
+    require(first != std::string::npos && visible.str().find(label, first + 1) == std::string::npos,
+            "Affix display must not repeat a duplicate effect");
+  }
+  enemy large("large", 100, 100, 0, std::numeric_limits<int>::max() - 1,
+              std::numeric_limits<int>::max() - 1, std::numeric_limits<int>::max());
+  for (int roll = 0; roll < 100; ++roll) large.setAffix(100);
+  require(large.getexp_reward() == std::numeric_limits<int>::max() &&
+              large.getcoin_reward() == std::numeric_limits<int>::max(),
+          "Affix reward arithmetic must saturate at the integer limit");
 }
 } // namespace
 
 int main() {
   try {
-    testEncounterBoundaries();
-    testThreeTurnRhythm();
-    testReadPattern();
-    testLateBossRotation();
+    testProfilesAndBoundaries();
+    testChargeAndEarnedRecovery();
+    testConditionalReactions();
+    testPressureAndSabotage();
     testTemporaryWeakening();
-    std::cout << "Enemy tactic tests passed.\n";
-    return 0;
+    testNumericAndAffixBoundaries();
+    std::cout << "enemy tactics tests passed\n";
   } catch (const std::exception &error) {
-    std::cerr << "Enemy tactic test failed: " << error.what() << '\n';
+    std::cerr << "enemy tactics tests failed: " << error.what() << '\n';
     return 1;
   }
 }

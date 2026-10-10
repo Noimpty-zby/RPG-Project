@@ -1,3 +1,0 @@
-D:\vscodemingw\bin\cmake.exe -E rm -f CMakeFiles\RPG_Game.dir/objects.a
-D:\vscodemingw\mingw64\bin\ar.exe qc CMakeFiles\RPG_Game.dir/objects.a @CMakeFiles\RPG_Game.dir\objects1.rsp
-D:\vscodemingw\mingw64\bin\g++.exe -g -Wl,--whole-archive CMakeFiles\RPG_Game.dir/objects.a -Wl,--no-whole-archive -o RPG_Game.exe -Wl,--out-implib,libRPG_Game.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\RPG_Game.dir\linkLibs.rsp

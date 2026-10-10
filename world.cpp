@@ -1,8 +1,12 @@
 #include "world.h"
 #include "progression.h"
+#include "game_config.h"
+#include "player.h"
 #include <algorithm>
 #include <cstdlib>
 #include <string>
+#include <stdexcept>
+#include <vector>
 
 using namespace std;
 
@@ -61,114 +65,129 @@ static const char *C_ARM[2][4] = {
 static const char *POTIONS[4] = {"小型治疗药水", "治疗药水", "优质治疗药水",
                                  "神圣圣水"};
 
-// ──────────────────────────────────────────────────────────────
-//  generateRandomItem：带职业限制 + 品质分级
-// ──────────────────────────────────────────────────────────────
-Item generateRandomItem(int floor) {
-  // 阶段性开放品质；后半程仍保留掉落选择。
-  int r = rand() % 100;
-  int t = Progression::equipmentTier(floor, r);
-
-  // ── 类型：30%武器 / 35%防具 / 35%药水 ──
-  int roll = rand() % 100;
-  bool isWeapon = (roll < 30);
-  bool isArmor = (roll < 65 && !isWeapon);
-  // else: 药水
-
-  if (!isWeapon && !isArmor) {
-    int potVal = 30 + (t + 1) * 15 + floor * 3;
-    int price = (t + 1) * 20 + floor * 5;
-    return Item(POTIONS[t], 1, Potion, potVal, 0, price, 1, AnyJob);
-  }
-
-  // ── 数值 ──
-  // 武器攻击加成：参考同层怪物攻击的30~50%，让装备有明显提升
-  int baseAtk = (t + 1) * 5 + floor * 2;
-  int atkVal = baseAtk + rand() % max(1, baseAtk / 3);
-  // 防具HP加成：比武器高，能扛1~2刀
-  int baseHp = (t + 1) * 10 + floor * 4;
-  int hpVal = baseHp + rand() % max(1, baseHp / 3);
-  // 耐久/价格/等级需求
-  int dur = (t + 1) * 10 + floor / 2 + rand() % 6;
-  int price = (t + 1) * 35 + floor * 10;
-  int levelReq = max(1, floor / 2 - 2 + t);
-
-  // ── 职业归属 ──
-  // 武器：战士35% / 法师30% / 刺客35%
-  // 防具：战士35% / 法师25% / 刺客25% / 通用15%
-  int jr = rand() % 100;
-  JobReq job;
-  if (isWeapon) {
-    job = (jr < 35) ? WarriorOnly : (jr < 65) ? MageOnly : AssassinOnly;
-  } else {
-    job = (jr < 35)   ? WarriorOnly
-          : (jr < 60) ? MageOnly
-          : (jr < 85) ? AssassinOnly
-                      : AnyJob;
-  }
-
-  if (isWeapon) {
-    const char *name;
-    if (job == WarriorOnly)
-      name = W_WPN[rand() % 5][t];
-    else if (job == MageOnly)
-      name = M_WPN[rand() % 4][t];
-    else
-      name = A_WPN[rand() % 4][t];
-    return Item(name, levelReq, Weapon, atkVal, dur, price, 1, job);
-  } else {
-    const char *name;
-    if (job == WarriorOnly)
-      name = W_ARM[rand() % 4][t];
-    else if (job == MageOnly)
-      name = M_ARM[rand() % 3][t];
-    else if (job == AssassinOnly)
-      name = A_ARM[rand() % 3][t];
-    else
-      name = C_ARM[rand() % 2][t];
-    return Item(name, levelReq, Armor, hpVal, dur, price, 1, job);
-  }
+namespace {
+JobReq heroJob(const player &hero) {
+  if (hero.getjob() == "Warrior") return WarriorOnly;
+  if (hero.getjob() == "Mage") return MageOnly;
+  return AssassinOnly;
 }
 
-// ─────────────────────────────────────────────
-//  怪物生成
-// ─────────────────────────────────────────────
-enemy generateEnemy(int floor) {
-  // ── 成长曲线（参考 Slay the Spire）──
-  // HP：前期慢，中后期加速，但不至于无解
-  int hp = 35 + floor * 8 + (floor * floor) / 8;
-  // 攻击：约等于对应职业HP的6~10%，有压力但不秒杀
-  int attack = 4 + floor * 2 + floor / 4;
-  // 经验：每层刷2~3只怪能稳定升级
-  int exp_reward = 30 + floor * 25;
-  // 金币：前期宽裕，中期可买装备，后期刷Boss发财
-  int coin_reward = 8 + floor * 12;
-  int level = floor;
-  string name = "Monster of Floor " + to_string(floor);
+Item makeItem(int floor, JobReq job, ItemType type, int tier, int maxLevel = 10000) {
+  floor = GameConfig::floor(floor);
+  if (type == Potion)
+    return Item(POTIONS[tier], 1, Potion, 30 + (tier + 1) * 15 + floor * 3,
+                0, (tier + 1) * 20 + floor * 5, 1, AnyJob, tier);
+  if ((type != Weapon && type != Armor) || job < AnyJob || job > AssassinOnly ||
+      (type == Weapon && job == AnyJob))
+    throw invalid_argument("目标装备类型或职业无效");
 
-  // ── Boss关卡（每10层）──
-  if (floor % 10 == 0) {
-    hp = hp * 3;                   // Boss 3倍血量
-    attack = attack * 2;           // Boss 2倍攻击
-    exp_reward = exp_reward * 4;   // Boss 4倍经验
-    coin_reward = coin_reward * 5; // Boss 5倍金币
-    level += 3;
-    name = "★ BOSS of Floor " + to_string(floor) + " ★";
+  const char *name;
+  if (type == Weapon) {
+    if (job == WarriorOnly) name = W_WPN[rand() % 5][tier];
+    else if (job == MageOnly) name = M_WPN[rand() % 4][tier];
+    else name = A_WPN[rand() % 4][tier];
+  } else {
+    if (job == WarriorOnly) name = W_ARM[rand() % 4][tier];
+    else if (job == MageOnly) name = M_ARM[rand() % 3][tier];
+    else if (job == AssassinOnly) name = A_ARM[rand() % 3][tier];
+    else name = C_ARM[rand() % 2][tier];
   }
+  // 15% between quality bands, at most +/-3% inside one band.
+  const int base = type == Weapon ? 8 + floor * 11 / 10 : 20 + floor * 3;
+  const int center = base * (100 + tier * 15) / 100;
+  const int variation = center * 3 / 100;
+  const int value = center + rand() % (variation * 2 + 1) - variation;
+  const int durability = 10 + floor / 2 + tier * 10 + rand() % 6;
+  const int price = (tier + 1) * 35 + floor * 10;
+  const int required = min(max(1, maxLevel), max(1, floor / 2 - 2 + tier));
+  Item item(name, required, type, value, durability, price, 1, job, tier);
+  if (tier >= 2) {
+    vector<ItemEffect> choices{ItemEffect::SkillEfficiency};
+    choices.push_back(type == Weapon ? ItemEffect::ManaOnAttack : ItemEffect::GuardRecovery);
+    if (job == WarriorOnly || job == MageOnly)
+      choices.push_back(ItemEffect::ControlFocus);
+    item.setEffect(choices[rand() % choices.size()]);
+  }
+  return item;
+}
 
-  enemy monster(name, hp, attack, 0, exp_reward, coin_reward, level);
+bool usableTarget(const Item &item, const player &hero, ItemType target) {
+  return item.getType() == target && item.getLevelRequirement() <= hero.getlevel() &&
+         (item.getJobRequirement() == AnyJob || item.getJobRequirement() == heroJob(hero));
+}
+
+} // namespace
+
+Item generateTargetedItem(int floor, JobReq job, ItemType type) {
+  floor = GameConfig::floor(floor);
+  const int tier = Progression::equipmentTier(floor, rand() % 100);
+  return makeItem(floor, job, type, tier);
+}
+
+Item generateRandomItem(int floor) {
+  floor = GameConfig::floor(floor);
+  const int tier = Progression::equipmentTier(floor, rand() % 100);
+  const int roll = rand() % 100;
+  const ItemType type = roll < 30 ? Weapon : (roll < 65 ? Armor : Potion);
+  const int jr = rand() % 100;
+  const JobReq job = type == Weapon
+      ? (jr < 35 ? WarriorOnly : (jr < 65 ? MageOnly : AssassinOnly))
+      : (jr < 35 ? WarriorOnly : (jr < 60 ? MageOnly : (jr < 85 ? AssassinOnly : AnyJob)));
+  return makeItem(floor, job, type, tier);
+}
+
+optional<Item> generateLoot(player &hero, int floor, bool firstClear) {
+  if (floor < 1 || floor > GameConfig::MaxFloor) return nullopt;
+  auto &run = hero.runState();
+  const ItemType target = run.lootTarget == Armor ? Armor : Weapon;
+  const int threshold = target == Weapon ? 6 : 8;
+  optional<Item> result;
+  if (firstClear)
+    run.pity = min(threshold, run.pity + 1);
+  if (firstClear && run.pity >= threshold) {
+    const int tier = Progression::equipmentTier(floor, rand() % 100);
+    result = makeItem(floor, heroJob(hero), target, tier, hero.getlevel());
+  } else {
+    const int chance = firstClear ? 60
+        : 60 * GameConfig::repeatRewardPercent(max(1, run.attempts[floor] - 1)) / 100;
+    if (rand() % 100 < chance) {
+      result = generateRandomItem(floor);
+      // Most equipment belongs to the current class. Potions remain common.
+      if (result->getType() != Potion && rand() % 100 < 75)
+        result = makeItem(floor, heroJob(hero), result->getType(), result->getTier(),
+                          hero.getlevel());
+    }
+  }
+  if (result && firstClear && usableTarget(*result, hero, target)) run.pity = 0;
+  return result;
+}
+
+EnemyStats enemyStatsForFloor(int value) {
+  const int floor = GameConfig::floor(value);
+  const bool boss = floor % 10 == 0;
+  EnemyStats stats{40 + floor * 8, 4 + floor * 3 / 2,
+                   30 + floor * 25, 8 + floor * 12, floor, boss};
+  if (boss) {
+    stats.hp = stats.hp * 5 / 2;
+    stats.attack *= 2;
+    stats.expReward *= 4;
+    stats.coinReward *= 5;
+    stats.level += 3;
+  }
+  return stats;
+}
+
+enemy generateEnemy(int value) {
+  const int floor = GameConfig::floor(value);
+  const auto stats = enemyStatsForFloor(floor);
+  const string name = stats.boss ? "★ BOSS of Floor " + to_string(floor) + " ★"
+                                 : "Monster of Floor " + to_string(floor);
+  enemy monster(name, stats.hp, stats.attack, 0, stats.expReward, stats.coinReward, stats.level);
   monster.setAffix(floor);
-
-  // 词缀加成更明显
-  if (monster.hasAffix(Affix::STRONG))
-    monster.resetattack(monster.getattack() * 120 / 100);
-  if (monster.hasAffix(Affix::TOUGH))
-    monster.resethp(monster.gethp() * 120 / 100);
+  if (monster.hasAffix(Affix::STRONG)) monster.resetattack(monster.getattack() * 120 / 100);
+  if (monster.hasAffix(Affix::TOUGH)) monster.resethp(monster.gethp() * 120 / 100);
   if (monster.hasAffix(Affix::QUICK))
-    monster.setdogeRate(
-        min(monster.getdogeRate() + monster.getlevel() / 2, 25));
-
-  monster.configureEncounter(floor, floor % 10 == 0);
-
+    monster.setdogeRate(min(monster.getdogeRate() + monster.getlevel() / 2, 25));
+  monster.configureEncounter(floor, stats.boss);
   return monster;
 }

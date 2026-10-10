@@ -14,6 +14,7 @@ enum class Affix {
 
 enum class EnemyIntentKind {
   Attack,
+  Charge,
   HeavyStrike,
   Wound,
   Shatter,
@@ -27,6 +28,7 @@ struct EnemyIntent {
   int healingPercent = 100;
   bool piercesGuard = false;
   int predictedAction = -99;
+  bool interruptible = false;
 };
 
 class enemy : public Character {
@@ -45,9 +47,23 @@ private:
   int baseAttack;
   int attackWeakenPercent = 0;
   int attackWeakenTurns = 0;
+  int tacticalPressure = 0;
+  int specialCooldown = 0;
+  int turnsSinceSpecial = 0;
+  int repeatedActions = 0;
+  int recoveryTurns = 0;
+  bool chargePending = false;
+  bool interruptedThisTurn = false;
+  bool lastPlayerHealed = false;
+  bool desperationUsed = false;
+  bool objectivePressure = false;
+  bool sabotaged = false;
 
   int predictAction() const;
   void updateWeakenedAttack();
+  EnemyIntentKind primaryTactic() const;
+  EnemyIntentKind secondaryTactic() const;
+  EnemyIntent makeIntent(EnemyIntentKind kind) const;
 
 public:
   enemy(std::string name, int hp, int attack, int mp, int exp_reward,
@@ -67,16 +83,25 @@ public:
   void resetall(int hp, int attack, int mp, int exp_reward, int coin_reward);
   virtual void takedamage(int damage) override;
   bool hasAffix(Affix affix) const;
+  void removeAffix(Affix affix);
   void displayAffixes() const;
   void heal(int amount);
 
   void configureEncounter(int floor, bool boss);
   bool isBoss() const;
+  std::string getEncounterTitle() const;
+  std::string getTacticalHint() const;
   EnemyIntent getIntent() const;
   void displayIntent() const;
+  bool interruptCharge();
+  void setObjectivePressure(bool enabled);
+  void setTacticalPressure(int difficulty);
+  void applySabotage();
   // Call once after resolving a successful player action and the enemy turn.
   // 0=attack, 1..5=skill slots, -1=guard, -2=potion. Invalid IDs do nothing.
-  void finishTurn(int actionId);
+  void finishTurn(int actionId, bool healed = false);
+  // Pass the intent cached before acting to avoid retroactive HP-trigger changes.
+  void finishTurn(int actionId, bool healed, EnemyIntentKind resolvedIntent);
   // Reapplications refresh duration/strength without compounding attack loss.
   void weakenAttack(int percent, int turns);
 };

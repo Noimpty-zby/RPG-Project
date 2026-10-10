@@ -16,7 +16,7 @@ public:
   virtual std::string getjob() const override;
 };
 class Assassin : public player {
-  int dodgeRate = 25;
+  int dodgeRate = 15;
 
 public:
   Assassin(std::string name);

@@ -2,6 +2,7 @@
 #include "character.h"
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 #include <ostream>
 using namespace std;
 #include <iostream>
@@ -21,8 +22,8 @@ void enemy::takedamage(int damage) {
 int enemy::getcoin_reward() const { return coin_reward; }
 int enemy::getlevel() const { return level; }
 void enemy::resethp(int amount) {
-  hp = amount;
-  max_hp = amount;
+  hp = max(0, amount);
+  max_hp = hp;
 }
 void enemy::resetexp_reward(int amount) { exp_reward = amount; }
 void enemy::resetcoin_reward(int amount) { coin_reward = amount; }
@@ -41,7 +42,7 @@ void enemy::resetall(int hp, int attack, int mp, int exp_reward,
   resetcoin_reward(coin_reward);
 }
 int enemy::getdogeRate() const { return dogeRate; }
-void enemy::setdogeRate(int rate) { dogeRate = rate; }
+void enemy::setdogeRate(int rate) { dogeRate = clamp(rate, 0, 100); }
 Affix enemy::getRandomAffix() const {
   // 重新设计概率权重：危险词缀稀有但恐怖，普通词缀常见
   int r = rand() % 100;
@@ -84,10 +85,15 @@ void enemy::setAffix(int floor) {
   for (int i = 0; i < generate_chance; i++) {
     int threshold = min(40 + floor / 5, 70); // 40%~70%，随楼层增加
     if ((rand() % 100) < threshold) {
-      affixes.push_back(getRandomAffix());
-      // 有词缀：经验和金币额外奖励
-      resetexp_reward(getexp_reward() + getlevel() * 3);
-      resetcoin_reward(getcoin_reward() + getlevel() * 2);
+      const Affix rolled = getRandomAffix();
+      if (hasAffix(rolled)) continue;
+      affixes.push_back(rolled);
+      // Only a newly added affix grants a bonus; duplicate rolls do nothing.
+      const long long bonusLevel = max(0, getlevel());
+      resetexp_reward(static_cast<int>(clamp(static_cast<long long>(getexp_reward()) + bonusLevel * 3,
+                                             0LL, static_cast<long long>(numeric_limits<int>::max()))));
+      resetcoin_reward(static_cast<int>(clamp(static_cast<long long>(getcoin_reward()) + bonusLevel * 2,
+                                              0LL, static_cast<long long>(numeric_limits<int>::max()))));
     }
   }
 }
@@ -98,6 +104,9 @@ bool enemy::hasAffix(Affix affix) const {
     }
   }
   return false;
+}
+void enemy::removeAffix(Affix affix) {
+  affixes.erase(remove(affixes.begin(), affixes.end(), affix), affixes.end());
 }
 void enemy::displayAffixes() const {
   if (affixes.empty()) {
@@ -133,9 +142,9 @@ void enemy::displayAffixes() const {
   cout << endl;
 }
 void enemy::heal(int amount) {
-  hp += amount;
-  if (hp > max_hp)
-    hp = max_hp;
+  if (amount <= 0 || !isalive()) return;
+  hp = static_cast<int>(min(static_cast<long long>(hp) + amount,
+                            static_cast<long long>(max_hp)));
 }
 
 void enemy::configureEncounter(int floor, bool boss) {
@@ -147,9 +156,81 @@ void enemy::configureEncounter(int floor, bool boss) {
   attackWeakenPercent = 0;
   attackWeakenTurns = 0;
   attack = baseAttack;
+  tacticalPressure = 0;
+  specialCooldown = 0;
+  turnsSinceSpecial = 0;
+  repeatedActions = 0;
+  recoveryTurns = 0;
+  chargePending = false;
+  interruptedThisTurn = false;
+  lastPlayerHealed = false;
+  desperationUsed = false;
+  objectivePressure = false;
+  sabotaged = false;
 }
 
 bool enemy::isBoss() const { return bossEncounter; }
+
+namespace {
+struct BossProfile {
+  const char *title;
+  EnemyIntentKind primary;
+  EnemyIntentKind secondary;
+  const char *hint;
+};
+const BossProfile bossProfiles[] = {
+    {"荒野前哨·警钟巨兵", EnemyIntentKind::Charge, EnemyIntentKind::Charge,
+     "目标：普攻打断巨兵的敲钟蓄力；错过窗口时格挡重击。"},
+    {"幽林回廊·树心祭司", EnemyIntentKind::Wound, EnemyIntentKind::Charge,
+     "目标：避开树心抑疗集中恢复，普攻打断仪式蓄力。"},
+    {"沉没书库·禁书守卫", EnemyIntentKind::Shatter, EnemyIntentKind::Charge,
+     "目标：守卫破防时主动出击，普攻打断蓄力，为学者争取时间。"},
+    {"赤砂矿井·引爆监工", EnemyIntentKind::ReadPattern, EnemyIntentKind::Charge,
+     "目标：改变监工预测的行动，用普攻打断引爆蓄力。"},
+    {"寒霜关隘·双首冰兽", EnemyIntentKind::Wound, EnemyIntentKind::Shatter,
+     "目标：避开冰霜抑疗安排恢复；连续格挡会招来破防。"},
+    {"熔炉要塞·供能核心", EnemyIntentKind::Charge, EnemyIntentKind::Shatter,
+     "目标：摧毁供能炉削弱核心，普攻打断蓄力，破防时主动出击。"},
+    {"镜影剧场·镜阵导演", EnemyIntentKind::ReadPattern, EnemyIntentKind::Wound,
+     "目标：打乱镜阵记录的连招，避免连续依赖回血。"},
+    {"星蚀观测站·蚀星观测者", EnemyIntentKind::Shatter, EnemyIntentKind::ReadPattern,
+     "目标：星蚀破防时主动出招，观测者预判时切换行动种类。"},
+    {"王庭废墟·王座祭司", EnemyIntentKind::Wound, EnemyIntentKind::ReadPattern,
+     "目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。"},
+    {"天顶之门·远征裁决者", EnemyIntentKind::ReadPattern, EnemyIntentKind::Shatter,
+     "目标：应对裁决者的读招、破防与低血蓄力，改变行动争取突围窗口。"}};
+
+int chapterIndex(int floor) { return clamp((max(1, floor) - 1) / 10, 0, 9); }
+} // namespace
+
+string enemy::getEncounterTitle() const {
+  if (bossEncounter) return bossProfiles[chapterIndex(encounterFloor)].title;
+  switch (primaryTactic()) {
+  case EnemyIntentKind::Charge: return "蓄力守卫";
+  case EnemyIntentKind::Wound: return "抑疗猎手";
+  case EnemyIntentKind::Shatter: return "破阵斥候";
+  case EnemyIntentKind::ReadPattern: return "读招追猎者";
+  default: return "普通敌人";
+  }
+}
+
+string enemy::getTacticalHint() const {
+  if (bossEncounter) return bossProfiles[chapterIndex(encounterFloor)].hint;
+  return "观察早期意图：普攻命中可打断蓄力；格挡能抗重击，换招能避开预判。";
+}
+
+EnemyIntentKind enemy::primaryTactic() const {
+  if (bossEncounter) return bossProfiles[chapterIndex(encounterFloor)].primary;
+  const EnemyIntentKind ordinary[] = {
+      EnemyIntentKind::Charge, EnemyIntentKind::Wound,
+      EnemyIntentKind::Shatter, EnemyIntentKind::ReadPattern};
+  return ordinary[max(0, encounterFloor) % 4];
+}
+
+EnemyIntentKind enemy::secondaryTactic() const {
+  return bossEncounter ? bossProfiles[chapterIndex(encounterFloor)].secondary
+                       : EnemyIntentKind::Charge;
+}
 
 int enemy::predictAction() const {
   if (lastAction < -2 || lastAction > 5)
@@ -167,44 +248,76 @@ int enemy::predictAction() const {
   return prediction;
 }
 
-EnemyIntent enemy::getIntent() const {
+EnemyIntent enemy::makeIntent(EnemyIntentKind kind) const {
   EnemyIntent intent;
-  if (encounterFloor < 40)
-    return intent;
-
-  unsigned int phase = completedTurns % 3;
-  if (phase == 0)
-    return intent;
-  if (phase == 2) {
-    intent.kind = EnemyIntentKind::Recover;
+  intent.kind = kind;
+  switch (kind) {
+  case EnemyIntentKind::Charge:
     intent.damagePercent = 0;
-    return intent;
-  }
-
-  // Ordinary encounters retain one specialty. Late bosses rotate specialties
-  // between cycles, while preserving the same visible three-turn rhythm.
-  unsigned int strategy = (encounterFloor - 40) % 3;
-  if (bossEncounter && encounterFloor >= 60)
-    strategy = (completedTurns / 3) % 3;
-
-  switch (strategy) {
-  case 0:
-    intent.kind = EnemyIntentKind::Wound;
+    intent.interruptible = true;
+    break;
+  case EnemyIntentKind::HeavyStrike:
+    intent.damagePercent = bossEncounter ? (sabotaged ? 125 : 160)
+                                         : (sabotaged ? 110 : 135);
+    break;
+  case EnemyIntentKind::Wound:
+    intent.damagePercent = 80;
     intent.healingPercent = 50;
     break;
-  case 1:
-    intent.kind = EnemyIntentKind::Shatter;
+  case EnemyIntentKind::Shatter:
     intent.damagePercent = 80;
     intent.piercesGuard = true;
     break;
-  case 2:
-    intent.kind = EnemyIntentKind::ReadPattern;
+  case EnemyIntentKind::ReadPattern:
     // The caller raises damage to 150% only if this prediction is matched.
     intent.damagePercent = 75;
     intent.predictedAction = predictAction();
     break;
+  case EnemyIntentKind::Recover:
+    intent.damagePercent = 0;
+    break;
+  case EnemyIntentKind::Attack:
+    break;
   }
   return intent;
+}
+
+EnemyIntent enemy::getIntent() const {
+  // Legacy/training enemies remain usable without configuring an encounter.
+  if (encounterFloor == 0) return makeIntent(EnemyIntentKind::Attack);
+  if (recoveryTurns > 0) return makeIntent(EnemyIntentKind::Recover);
+  if (chargePending) return makeIntent(EnemyIntentKind::HeavyStrike);
+  if (objectivePressure && specialCooldown == 0)
+    return makeIntent(EnemyIntentKind::Charge);
+
+  const auto primary = primaryTactic();
+  const auto secondary = secondaryTactic();
+  auto supports = [&](EnemyIntentKind kind) {
+    return primary == kind || secondary == kind ||
+           (bossEncounter && chapterIndex(encounterFloor) == 9);
+  };
+  if (specialCooldown == 0) {
+    if (lastPlayerHealed && supports(EnemyIntentKind::Wound))
+      return makeIntent(EnemyIntentKind::Wound);
+    if (lastAction == -1 && supports(EnemyIntentKind::Shatter))
+      return makeIntent(EnemyIntentKind::Shatter);
+    if (supports(EnemyIntentKind::ReadPattern) && predictAction() != -99 &&
+        (repeatedActions >= 2 || completedTurns >= 4))
+      return makeIntent(EnemyIntentKind::ReadPattern);
+    if (!desperationUsed && hp * 100LL <= max_hp * 35LL)
+      return makeIntent(EnemyIntentKind::Charge);
+    // One early tell introduces a small problem. Later choices depend on
+    // player habits, enemy health and time since a special, not a global cycle.
+    if ((bossEncounter && completedTurns == 0) ||
+        (!bossEncounter && completedTurns == 1) ||
+        turnsSinceSpecial >= max(2, 4 - tacticalPressure)) {
+      auto tactic = primary;
+      if (tactic == EnemyIntentKind::ReadPattern && predictAction() == -99)
+        tactic = EnemyIntentKind::Charge;
+      return makeIntent(tactic);
+    }
+  }
+  return makeIntent(EnemyIntentKind::Attack);
 }
 
 namespace {
@@ -228,16 +341,21 @@ void enemy::displayIntent() const {
   case EnemyIntentKind::Attack:
     cout << "普通攻击：造成 100% 攻击伤害，可格挡。";
     break;
+  case EnemyIntentKind::Charge:
+    cout << "蓄力：本回合不攻击；普通攻击实际命中可打断并制造休整窗口。"
+            "未打断则下回合重击，可用格挡或减攻应对。";
+    break;
   case EnemyIntentKind::HeavyStrike:
     cout << "蓄力重击：造成 " << intent.damagePercent
          << "% 攻击伤害，可格挡。";
     break;
   case EnemyIntentKind::Wound:
-    cout << "压制治疗：本次玩家行动的治疗仅生效 50%，随后普通攻击；"
-            "下回合治疗恢复正常。";
+    cout << "压制治疗：本次玩家行动治疗仅生效 50%，随后造成 80% 攻击伤害；"
+            "可先普攻或格挡，离开此意图后治疗恢复正常。";
     break;
   case EnemyIntentKind::Shatter:
-    cout << "破防攻击：造成 80% 攻击伤害，无视本回合格挡。";
+    cout << "破防攻击：造成 80% 攻击伤害，无视格挡减伤；"
+            "可主动攻击或减攻，格挡仍能恢复资源。";
     break;
   case EnemyIntentKind::ReadPattern:
     if (intent.predictedAction == -99) {
@@ -255,12 +373,60 @@ void enemy::displayIntent() const {
   cout << endl;
 }
 
-void enemy::finishTurn(int actionId) {
+bool enemy::interruptCharge() {
+  if (getIntent().kind != EnemyIntentKind::Charge) return false;
+  chargePending = false;
+  recoveryTurns = 1;
+  interruptedThisTurn = true;
+  specialCooldown = max(1, 3 - tacticalPressure) + (sabotaged ? 1 : 0);
+  return true;
+}
+
+void enemy::setObjectivePressure(bool enabled) { objectivePressure = enabled; }
+void enemy::setTacticalPressure(int difficulty) {
+  tacticalPressure = clamp(difficulty, 0, 2);
+}
+void enemy::applySabotage() {
+  removeAffix(Affix::SHIELDING);
+  sabotaged = true;
+}
+
+void enemy::finishTurn(int actionId, bool healed) {
+  finishTurn(actionId, healed, getIntent().kind);
+}
+
+void enemy::finishTurn(int actionId, bool healed, EnemyIntentKind resolved) {
   if (actionId < -2 || actionId > 5)
     return;
+  if (interruptedThisTurn) {
+    interruptedThisTurn = false;
+    turnsSinceSpecial = 0;
+  } else if (resolved == EnemyIntentKind::Charge) {
+    chargePending = true;
+    turnsSinceSpecial = 0;
+  } else if (resolved == EnemyIntentKind::HeavyStrike) {
+    chargePending = false;
+    recoveryTurns = 1;
+    specialCooldown = max(1, 3 - tacticalPressure) + (sabotaged ? 1 : 0);
+    turnsSinceSpecial = 0;
+  } else if (resolved == EnemyIntentKind::Wound ||
+             resolved == EnemyIntentKind::Shatter ||
+             resolved == EnemyIntentKind::ReadPattern) {
+    specialCooldown = max(1, 3 - tacticalPressure) + (sabotaged ? 1 : 0);
+    turnsSinceSpecial = 0;
+  } else {
+    if (resolved == EnemyIntentKind::Recover && recoveryTurns > 0)
+      --recoveryTurns;
+    if (specialCooldown > 0) --specialCooldown;
+    ++turnsSinceSpecial;
+  }
+  if (resolved != EnemyIntentKind::Attack && hp * 100LL <= max_hp * 35LL)
+    desperationUsed = true;
   if (lastAction >= -2 && lastAction <= 5)
     ++actionTransitions[lastAction + 2][actionId + 2];
+  repeatedActions = actionId == lastAction ? repeatedActions + 1 : 1;
   lastAction = actionId;
+  lastPlayerHealed = healed;
   ++completedTurns;
   if (attackWeakenTurns > 0) {
     --attackWeakenTurns;
@@ -274,7 +440,8 @@ void enemy::updateWeakenedAttack() {
   // Preserve zero-attack test/event enemies; all other attacks remain positive.
   attack = baseAttack == 0
                ? 0
-               : max(1, baseAttack * (100 - attackWeakenPercent) / 100);
+               : static_cast<int>(max(1LL, static_cast<long long>(baseAttack) *
+                                              (100 - attackWeakenPercent) / 100));
 }
 
 void enemy::weakenAttack(int percent, int turns) {

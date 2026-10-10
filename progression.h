@@ -13,7 +13,7 @@ inline int skillRankCap(int highestFloor) {
 }
 
 inline int skillUnlockFloor(int slot) {
-  constexpr int floors[] = {1, 10, 25, 45, 65};
+  constexpr int floors[] = {1, 3, 6, 10, 15};
   return floors[std::clamp(slot, 1, 5) - 1];
 }
 

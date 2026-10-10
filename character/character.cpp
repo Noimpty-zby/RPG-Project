@@ -1,4 +1,5 @@
 #include "character.h"
+#include <algorithm>
 #include <iostream>
 
 using namespace std;
@@ -15,6 +16,7 @@ int Character::gethp() const { return hp; }
 int Character::getattack() const { return attack; }
 int Character::getmp() const { return mp; }
 void Character::takedamage(int damage) {
+  damage = max(0, damage);
   hp -= damage;
   if (hp < 0)
     hp = 0;

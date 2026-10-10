@@ -1,0 +1,198 @@
+#include "jobs.h"
+#include "skills.h"
+#include "game_config.h"
+#include <climits>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+
+namespace {
+void require(bool condition, const char *message) {
+  if (!condition) throw std::runtime_error(message);
+}
+void prepare(player &hero) {
+  hero.loadStats(50, 0, 10000, 400, 1000, 100, 1000, 1000, 0, 3);
+  hero.setHighestFloor(100);
+}
+enemy target() {
+  enemy result("target", 100000, 100, 0, 0, 0, 50);
+  result.setdogeRate(0);
+  return result;
+}
+void testGrowthAndTransactions() {
+  Warrior hero("growth");
+  hero.gaincoin(100);
+  hero.gaincoin(-100);
+  hero.costcoin(-100);
+  hero.costcoin(101);
+  require(hero.getcoin() == 100, "invalid coin transactions changed balance");
+  hero.gaincoin(INT_MAX);
+  require(hero.getcoin() == 1000000000, "coin overflow not saturated at save-compatible limit");
+  hero.gainexp(-100);
+  require(hero.getexp() == 0 && hero.getlevel() == 1, "negative experience accepted");
+  hero.sethp(1); hero.setmp(0); hero.gainexp(100);
+  require(hero.getlevel() == 2 && hero.gethp() > 1 && hero.gethp() < hero.getmaxhp(), "levelup should partially recover HP");
+  require(hero.getmp() > 0 && hero.getmp() < hero.getmaxmp(), "levelup should partially recover MP");
+  hero.gainexp(INT_MAX);
+  require(hero.getlevel() == 100 && hero.getexp() <= 9999, "grinding bypassed character level cap");
+  hero.levelup(); require(hero.getlevel() == 100, "direct levelup bypassed cap");
+  auto *ability = hero.getSkill(1);
+  ability->restoreProgress(1, 0); const int first = ability->getScaledDamage(hero);
+  ability->restoreProgress(2, 0); const int second = ability->getScaledDamage(hero);
+  ability->restoreProgress(3, 0); const int third = ability->getScaledDamage(hero);
+  require(second - first == third - second && second > first, "skill ranks do not grow linearly");
+  ability->restoreProgress(5, 0); const int capped = ability->getScaledDamage(hero);
+  ability->restoreProgress(INT_MAX, INT_MAX);
+  require(ability->getskilllevel() == INT_MAX && ability->getScaledDamage(hero) == capped &&
+          ability->getcurrentcooldown() == ability->getcooldown(), "legacy rank/cooldown caused unsafe growth");
+  Warrior legacy("legacy level");
+  legacy.loadStats(10000, 0, 1000000000, 100, 1000, 100, 100, 100, 100, 1000);
+  require(legacy.getlevel() == 10000 && legacy.getcoin() == 1000000000 && legacy.getfreerevives() == 1000,
+          "supported legacy level, coins or revives were silently reduced");
+  legacy.levelup();
+  require(legacy.getlevel() == 10000, "legacy level continued growing beyond campaign cap");
+}
+void testSpecializationTransactions() {
+  Warrior hero("choices");
+  hero.loadStats(10, 0, 10000, 100, 200, 40, 100, 100, 0, 3);
+  hero.setHighestFloor(9);
+  require(!hero.chooseSpecialization(1, 1), "specialization opened before chapter gate");
+  require(hero.getcoin() == 10000, "locked specialization consumed coins");
+  hero.setHighestFloor(10);
+  require(hero.chooseSpecialization(1, 1) && hero.getcoin() == 10000, "first choice not free");
+  require(!hero.chooseSpecialization(0, 1) && !hero.chooseSpecialization(1, 3) &&
+          !hero.chooseSpecialization(3, 1) && !hero.chooseSpecialization(2, 1), "invalid specialization accepted");
+  require(!hero.chooseSpecialization(1, 1) && hero.getcoin() == 10000, "same choice charged coins");
+  require(hero.chooseSpecialization(1, 2) && hero.getcoin() == 9850, "respec fee incorrect");
+  hero.costcoin(hero.getcoin());
+  require(!hero.chooseSpecialization(1, 1) && hero.getSkill(1)->getSpecialization() == 2, "unaffordable respec mutated branch");
+  auto enemy = target(); hero.resetEncounterResources(); hero.useSkill(1, enemy);
+  hero.gaincoin(1000);
+  require(!hero.chooseSpecialization(1, 1), "respec accepted during encounter");
+  hero.finishEncounterWear();
+  const int remaining = hero.getSkill(1)->getcurrentcooldown();
+  require(hero.chooseSpecialization(1, 1) && hero.getSkill(1)->getcurrentcooldown() == remaining,
+          "camp respec was blocked or reset cooldown");
+  require(!hero.getSkill(3)->setSpecialization(1), "later slot accepted unsupported specialization");
+}
+void testSpecializationEffects() {
+  Warrior warrior("warrior"); prepare(warrior);
+  auto first = target(); auto second = target();
+  warrior.getSkill(1)->setSpecialization(1); warrior.addCombatResource(2);
+  warrior.useSkill(1, first);
+  require(warrior.getCombatResource() == 0, "counter did not consume resolve");
+  warrior.getSkill(1)->resetcurrentcooltime(); warrior.getSkill(1)->setSpecialization(2);
+  warrior.useSkill(1, second);
+  require(first.gethp() < second.gethp(), "prepared counter did not exceed heavy strike");
+  warrior.getSkill(2)->setSpecialization(1); warrior.useSkill(2, first);
+  const int healed = warrior.gethp();
+  warrior.getSkill(2)->resetcurrentcooltime(); warrior.getSkill(2)->setSpecialization(2);
+  const int manaBefore = warrior.getmp(); const int cost = warrior.getSkill(2)->getActualCost(warrior);
+  warrior.useSkill(2, second);
+  require(warrior.gethp() == healed && warrior.getmp() == manaBefore - cost + 6, "warcry damage branch healed or lost refund");
+
+  Mage mage("mage"); prepare(mage); first = target(); second = target();
+  mage.getSkill(1)->setSpecialization(1); mage.addCombatResource(2); mage.useSkill(1, first);
+  require(mage.getCombatResource() == 0, "focused fire did not consume focus");
+  mage.getSkill(1)->resetcurrentcooltime(); mage.getSkill(1)->setSpecialization(2); mage.useSkill(1, second);
+  require(mage.getCombatResource() == 1 && first.gethp() < second.gethp(), "fire branches lack resource/damage tradeoff");
+  mage.getSkill(2)->setSpecialization(1); mage.useSkill(2, first);
+  mage.getSkill(2)->resetcurrentcooltime(); mage.getSkill(2)->setSpecialization(2); mage.useSkill(2, second);
+  require(first.getattack() == 60 && second.getattack() == 100, "ice damage branch retained control");
+
+  Assassin assassin("assassin"); prepare(assassin); first = target(); second = target();
+  assassin.getSkill(1)->setSpecialization(1); assassin.useSkill(1, first);
+  require(assassin.getCombatResource() == 2, "opening specialization failed to build two openings");
+  assassin.getSkill(1)->resetcurrentcooltime(); assassin.getSkill(1)->setSpecialization(2);
+  assassin.consumeCombatResource(); assassin.useSkill(1, second);
+  require(assassin.getCombatResource() == 0 && second.gethp() < first.gethp(), "piercing branch did not trade openings for damage");
+  assassin.getSkill(2)->setSpecialization(1); assassin.addCombatResource(2); assassin.useSkill(2, first);
+  require(assassin.getCombatResource() == 0, "ambush did not consume openings");
+  assassin.getSkill(2)->resetcurrentcooltime(); assassin.getSkill(2)->setSpecialization(2); assassin.useSkill(2, second);
+  require(second.getattack() == 85 && first.getattack() == 100, "disruption branch failed to weaken target");
+}
+void testRecoveryAndResources() {
+  Warrior hero("recovery"); prepare(hero);
+  hero.equipItem_T(Item("armor", 1, Armor, 500, 20, 20, 1));
+  require(hero.getRecoveryBaseHp() == 1000, "armor inflated recovery base");
+  auto enemy = target(); hero.useSkill(2, enemy);
+  require(hero.gethp() == 550, "warcry scaled with armor HP");
+  hero.setHealingPercent(50); hero.heal(200);
+  require(hero.gethp() == 650 && hero.getSuppressedHealingTotal() == 100, "suppressed healing not recorded correctly");
+  hero.sethp(hero.getmaxhp() - 10); hero.heal(100);
+  require(hero.getSuppressedHealingTotal() == 100, "overhealing counted as suppressed healing");
+  hero.resetEncounterResources(); hero.setmp(0); hero.restoreTurnResources();
+  require(hero.getmp() == 2 && hero.getCombatResource() == 0, "warrior turn resource incorrect");
+  hero.guard(false); require(hero.getCombatResource() == 1, "warrior guard did not generate resolve");
+  Mage mage("mage"); prepare(mage); mage.setmp(0); mage.restoreTurnResources(); mage.attacktarget(enemy);
+  require(mage.getmp() == 11 && mage.getCombatResource() == 1, "mage attack mana/focus incorrect");
+  Assassin assassin("assassin"); prepare(assassin); assassin.setmp(0); assassin.restoreTurnResources(); assassin.attacktarget(enemy);
+  require(assassin.getmp() == 7 && assassin.getCombatResource() == 1, "assassin attack resource incorrect");
+}
+void testInventoryAndWear() {
+  Warrior hero("items"); prepare(hero);
+  hero.addItem(Item("blade", 1, Weapon, 20, 2, 90, 2, WarriorOnly));
+  hero.equipItem(1);
+  require(hero.getSaveBackpack()[0].getQuantity() == 1 && hero.getSaveEquipments()[0].getQuantity() == 1,
+          "stack equipment transfer lost quantities");
+  hero.equipItem(1);
+  require(hero.getSaveBackpack().size() == 1 && hero.getSaveEquipments().size() == 1,
+          "swapping from first bag slot invalidated inventory index");
+  hero.resetEncounterResources(); auto enemy = target();
+  hero.attacktarget(enemy); hero.useSkill(1, enemy); hero.takedamage(1);
+  require(hero.getSaveEquipments()[0].getDurability() == 2, "action-based durability wear remains");
+  hero.finishEncounterWear(); hero.finishEncounterWear();
+  require(hero.getSaveEquipments()[0].getDurability() == 1, "encounter wear applied zero or twice");
+  hero.resetEncounterResources(); hero.finishEncounterWear();
+  require(hero.getSaveEquipments().empty() && hero.getattack() == 100, "broken weapon left attack bonus");
+
+  hero.addItem(Item("potion", 1, Potion, 20, 0, 30, 3));
+  require(hero.toggleItemLock(1), "valid item could not be locked");
+  hero.dropItem(1); require(hero.getSaveBackpack().size() == 2, "locked gear was sold");
+  require(hero.salvageUnlocked() == 0 && hero.getSaveBackpack().size() == 2, "salvage deleted locked gear or potion");
+  hero.toggleItemLock(1); require(hero.salvageUnlocked() == 1, "unlocked gear did not salvage");
+  const int before = hero.getcoin(); hero.dropItem(1);
+  require(hero.getcoin() == before + 30, "stack sale proceeds ignored quantity");
+  hero.equipItem_T(Item("crafted", 1, Weapon, 30, 20, 100, 1, WarriorOnly));
+  hero.runState().materials = 10;
+  require(!hero.modifyEquipment(1, 2) && hero.runState().materials == 10, "unsupported effect consumed materials");
+  require(hero.modifyEquipment(1, 1) && hero.runState().materials == 7 && hero.equipmentEffect(1) == 1,
+          "valid modification failed");
+  require(!hero.modifyEquipment(1, 1) && hero.runState().materials == 7, "same effect charged materials twice");
+  require(!hero.modifyEquipment(0, 1) && !hero.modifyEquipment(1, 99), "invalid modification accepted");
+  hero.addItem(Item("overflow salvage", 1, Weapon, 10, 20, 50, 1));
+  hero.runState().materials = GameConfig::MaxMaterials;
+  require(hero.salvageUnlocked() == 0 && !hero.getSaveBackpack().empty(), "full material capacity destroyed gear");
+
+  hero.equipItem_T(Item("first armor", 1, Armor, 100, 20, 100, 1));
+  hero.sethp(1050);
+  hero.equipItem_T(Item("second armor", 1, Armor, 200, 20, 100, 1));
+  require(hero.gethp() == 1050 && hero.getmaxhp() == 1200, "armor swap truncated HP at intermediate unequip");
+  hero.equipItem_T(Item("smaller armor", 1, Armor, 20, 20, 100, 1));
+  require(hero.gethp() == 1020 && hero.getmaxhp() == 1020, "armor downsizing failed to clamp HP");
+
+  Warrior consumer("potions");
+  consumer.addItem(Item("potion", 1, Potion, 20, 0, 10, 2));
+  require(!consumer.useItem(1) && consumer.runState().potionsUsed == 0, "full HP use changed potion statistics");
+  consumer.sethp(100);
+  require(consumer.useItem(1) && consumer.runState().potionsUsed == 1, "out-of-combat potion use was not counted");
+  consumer.setHealingPercent(1);
+  require(!consumer.useItem(1) && consumer.runState().potionsUsed == 1, "zero-effective healing consumed potion");
+  consumer.addItem(Item("negative weapon", 1, Weapon, -10, 5, 10, 1));
+  consumer.equipItem_T(Item("negative armor", 1, Armor, -10, 5, 10, 1));
+  require(consumer.getSaveBackpack().size() == 1 && consumer.getSaveEquipments().empty(),
+          "invalid equipment entered inventory");
+}
+}
+int main() {
+  std::ostringstream log; auto *original = std::cout.rdbuf(log.rdbuf());
+  try {
+    testGrowthAndTransactions(); testSpecializationTransactions(); testSpecializationEffects();
+    testRecoveryAndResources(); testInventoryAndWear();
+  } catch (const std::exception &error) {
+    std::cout.rdbuf(original); std::cerr << "build tests failed: " << error.what() << '\n' << log.str(); return 1;
+  }
+  std::cout.rdbuf(original); std::cout << "build tests passed\n";
+}

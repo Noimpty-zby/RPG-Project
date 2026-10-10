@@ -2,6 +2,7 @@
 #include "character.h"
 #include "enemy.h"
 #include "item.h"
+#include "../run_state.h"
 #include <memory>
 #include <vector>
 
@@ -18,6 +19,10 @@ protected:
   int healingPercent = 100;
   bool guarding = false;
   bool guardPierced = false;
+  int combatResource = 0;
+  int suppressedHealingTotal = 0;
+  bool encounterWearPending = false;
+  RunState run;
   std::vector<Item> backpack;
   std::vector<Item> equipments;
   std::vector<std::unique_ptr<skill>> skills;
@@ -55,6 +60,17 @@ public:
   void setHealingPercent(int percent);
   void guard(bool pierced);
   void clearCombatModifiers();
+  int getRecoveryBaseHp() const;
+  int getBaseMaxHp() const { return getRecoveryBaseHp(); }
+  int getSuppressedHealingTotal() const { return suppressedHealingTotal; }
+  int getCombatResource() const { return combatResource; }
+  void addCombatResource(int amount);
+  int consumeCombatResource();
+  void resetEncounterResources();
+  void restoreTurnResources();
+  void finishEncounterWear();
+  RunState &runState() { return run; }
+  const RunState &runState() const { return run; }
 
   // ── 职业（纯虚） ──
   virtual std::string getjob() const = 0;
@@ -71,6 +87,10 @@ public:
   void showEquippedItems() const;
   void equipItem_T(const Item &item, bool restoring = false);
   void dropItem(int index);           // 丢弃背包物品
+  int equipmentEffect(int effectId) const;
+  bool toggleItemLock(int index);
+  int salvageUnlocked();
+  bool modifyEquipment(int index, int effectId);
 
   // ── 技能 ──
   void showSkills(player &hero) const;
@@ -80,6 +100,7 @@ public:
   int getSkillCount() const;
   void reduceallCooldowns();
   void levelUpSkill(int index);
+  bool chooseSpecialization(int slot, int branch);
 
   // ════════════════════════════════════════════════════
   //  存档 / 读档专用接口

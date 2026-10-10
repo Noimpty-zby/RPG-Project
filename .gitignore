@@ -2,4 +2,8 @@
 /build-local/
 /build-*/
 /save.dat
+/save.dat.*
 *.tmp
+*.tmp.*
+*.bak.*
+__pycache__/

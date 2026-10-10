@@ -177,6 +177,10 @@ struct Policy {
       return true;
     };
     if (aware) {
+      if (intent.interruptible) {
+        ++overrides;
+        return {ActionType::Attack, 0};
+      }
       if (intent.kind == EnemyIntentKind::Recover && potionIndex &&
           hero.gethp() * 100 < hero.getmaxhp() * 65)
         candidates.insert(candidates.begin(), {ActionType::Potion, potionIndex});
@@ -259,7 +263,7 @@ Result simulate(Job job, int floor, const Fixture &fixture, bool aware) {
   // Mutual death (e.g. explosive affix) is a loss. No victory rewards or
   // between-encounter healing are applied in a representative single fight.
   bool won = hero->isalive() && !monster.isalive();
-  return {won, !battle.finished(), battle.turns(), potions, guards,
+  return {won, battle.report().timeout, battle.turns(), potions, guards,
           policy.overrides, policy.recoveryPotions, policy.emergencySuppressedHeals,
           100.0 * hero->gethp() / std::max(1, hero->getmaxhp())};
 }

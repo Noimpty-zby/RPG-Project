@@ -32,7 +32,7 @@ void testProgressionBoundaries() {
   for (std::size_t i = 0; i < floors.size(); ++i)
     require(Progression::skillRankCap(floors[i]) == caps[i],
             "skill rank cap changed at wrong floor");
-  const std::array<int, 5> unlocks{1, 10, 25, 45, 65};
+  const std::array<int, 5> unlocks{1, 3, 6, 10, 15};
   for (int slot = 1; slot <= 5; ++slot)
     require(Progression::skillUnlockFloor(slot) == unlocks[slot - 1],
             "wrong skill unlock floor");
@@ -92,23 +92,23 @@ void testSkillGatesAndUpgrade() {
 
 void testSpecialMageSkills() {
   Mage hero("mage");
-  prepare(hero, 24);
+  prepare(hero, 5);
   Mageskill_3 poison;
   poison.restoreProgress(5, 0);
   hero.setmp(0);
   auto target = targetWithHp(10000);
   require(poison.getcostmp() == 0 && !poison.useSkill(hero, target),
           "poison cost or floor gate incorrect");
-  hero.setHighestFloor(25);
-  require(poison.canUse(hero) && poison.useSkill(hero, target) && hero.getmp() == 50,
+  hero.setHighestFloor(6);
+  require(poison.canUse(hero) && poison.useSkill(hero, target) && hero.getmp() == 32,
           "poison cannot replenish MP from zero after upgrading");
 
   Mageskill_4 arcane;
   arcane.restoreProgress(5, 0);
-  hero.setHighestFloor(44);
+  hero.setHighestFloor(9);
   hero.setmp(200);
   require(!arcane.canUse(hero), "arcane bypassed floor gate");
-  hero.setHighestFloor(45);
+  hero.setHighestFloor(10);
   hero.setmp(9);
   require(!arcane.canUse(hero), "arcane shown available without minimum MP");
   for (int rank : {5, 9}) {
@@ -116,7 +116,7 @@ void testSpecialMageSkills() {
     hero.setmp(200);
     auto arcaneTarget = targetWithHp(5000);
     require(arcane.useSkill(hero, arcaneTarget), "arcane cast failed");
-    require(hero.getmp() == 100 && arcaneTarget.gethp() == 4100,
+    require(hero.getmp() == 100 && arcaneTarget.gethp() == 4400,
             "arcane MP consumption or capped multiplier incorrect");
   }
 }
@@ -139,19 +139,38 @@ void testClassDamageMultipliers() {
   auto target = targetWithHp(10000);
   skill *ambush = assassin.getSkill(2);
   ambush->restoreProgress(5, 0);
-  const int expected = ambush->getScaledDamage(assassin) * 2;
+  const int expected = ambush->getScaledDamage(assassin) * 160 / 100;
   require(assassin.useSkill(2, target) && target.gethp() == 10000 - expected,
           "ambush multiplier incorrect");
   skill *combo = assassin.getSkill(3);
   combo->restoreProgress(5, 0);
-  const int singleHit = combo->getScaledDamage(assassin) * 6 / 10;
+  const int singleHit = combo->getScaledDamage(assassin) * 55 / 100;
   std::srand(17);
   const int hits = 2 + std::rand() % 3;
   std::srand(17);
   target = targetWithHp(10000);
   require(assassin.useSkill(3, target) &&
               target.gethp() == 10000 - singleHit * hits,
-          "combo did not use 60 percent damage per hit");
+          "combo did not use 55 percent damage per hit");
+
+  // Force a first-hit dodge followed by a would-be hit. A missed meteor must
+  // not independently trigger its low-health follow-up.
+  unsigned missSeed = 0;
+  for (; missSeed < 10000; ++missSeed) {
+    std::srand(missSeed);
+    const bool firstMiss = std::rand() % 100 < 50;
+    const bool nextHit = std::rand() % 100 >= 50;
+    if (firstMiss && nextHit) break;
+  }
+  require(missSeed < 10000, "could not create meteor miss fixture");
+  auto evasive = targetWithHp(10000);
+  evasive.sethp(1000);
+  evasive.setdogeRate(50);
+  mage.getSkill(5)->resetcurrentcooltime();
+  mage.setmp(mage.getmaxmp());
+  std::srand(missSeed);
+  require(mage.useSkill(5, evasive) && evasive.gethp() == 1000,
+          "missed meteor triggered an execution follow-up");
 }
 
 void testHealingAndTemporaryWeakening() {
@@ -211,12 +230,12 @@ void testDamageAndBossIdentity() {
   prepare(assassin);
   auto ordinary = targetWithHp(2000);
   ordinary.configureEncounter(100, false);
-  require(assassin.useSkill(5, ordinary) && ordinary.gethp() == 950,
+  require(assassin.useSkill(5, ordinary) && ordinary.gethp() == 1250,
           "high HP ordinary enemy incorrectly received boss resistance");
   assassin.getSkill(5)->resetcurrentcooltime();
   auto boss = targetWithHp(500);
   boss.configureEncounter(100, true);
-  require(assassin.useSkill(5, boss) && boss.gethp() == 325,
+  require(assassin.useSkill(5, boss) && boss.gethp() == 375,
           "low HP boss lost its execution resistance");
 }
 } // namespace
