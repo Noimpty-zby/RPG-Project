@@ -274,23 +274,36 @@ GitHub Actions 配置 Linux/Windows 的 CMake 回归，以及 Linux UBSan 检查
 ## 代码结构
 
 ```text
-main.cpp                  终端菜单与输入
-campaign.h/.cpp           十章路线、事件、营地、商店、统一结算
-profile.h/.cpp            跨局档案：图鉴、成就、远征记录
-help.h/.cpp               游戏内帮助主题
-run_state.h               可持久化的远征状态
-combat.h/.cpp             共享回合引擎、目标与战斗报告
-world.h/.cpp              敌人数值、装备生成、掉落保底
-progression.h             技能及品质阶段
-game_config.h             公共边界、章节成本与重复收益
-character/                基础角色
-player/                   三职业属性表、技能、专精、背包与装备
-enemy/                    敌人词缀、条件意图、Boss 配置、主题敌人与图鉴编号
-item/                     物品 ID、品质、效果与锁定
-save.h/.cpp               V1/V2 兼容与 V3 持久化
-tests/                    回归、终端冒烟与两种模拟
+src/
+├── main.cpp              终端入口：主菜单、战斗输入、营地/背包/商店界面
+├── core/                 全局配置与状态
+│   ├── game_config.h     公共边界、章节成本与重复收益
+│   ├── progression.h     技能解锁、阶数上限与装备品质阶段
+│   └── run_state.h       可持久化的远征状态
+├── character/            角色基类
+├── player/               玩家
+│   ├── player.h/.cpp     职业属性表、成长、背包与装备
+│   ├── jobs.h/.cpp       战士、法师、刺客
+│   └── skills.h/.cpp     15 个技能与专精
+├── enemy/                敌人词缀、条件意图、Boss 配置、主题敌人与图鉴编号
+├── item/                 物品 ID、品质、效果与锁定
+├── game/                 游戏规则
+│   ├── campaign.h/.cpp   十章路线、事件、营地、商店、统一结算
+│   ├── combat.h/.cpp     共享回合引擎、目标与战斗报告
+│   └── world.h/.cpp      敌人数值、装备生成、掉落保底
+├── storage/              持久化
+│   ├── save.h/.cpp       存档：V1/V2 兼容与 V3 读写
+│   └── profile.h/.cpp    跨局档案：图鉴、成就、远征记录
+└── ui/
+    └── help.h/.cpp       游戏内帮助主题
+tests/
+├── unit/                 8 组核心回归测试
+├── sim/                  balance_sim（独立遭遇）与 campaign_sim（连续远征）
+└── cli_smoke.py          真实终端冒烟测试
 tools/test.sh             独立于 CMake 的构建验证入口
 .github/workflows/        游戏构建与回归 CI
 ```
 
-调整职业属性从 `player/player.cpp` 的 `jobProfile` 表入手；调整成长从 `progression.h` 和 `player/skills.cpp` 入手；调整经济/敌人与掉落从 `game_config.h`、`world.cpp` 入手；调整章节从 `campaign.cpp` 入手。增加持久状态时，必须同步更新 `run_state.h`、`save.cpp` 和保存/读取回归。
+头文件统一以 `src/` 为根引用，例如 `#include "game/campaign.h"`。
+
+调整职业属性从 `src/player/player.cpp` 的 `jobProfile` 表入手；调整成长从 `src/core/progression.h` 和 `src/player/skills.cpp` 入手；调整经济/敌人与掉落从 `src/core/game_config.h`、`src/game/world.cpp` 入手；调整 Boss 配置从 `src/enemy/enemy.cpp` 入手；调整章节从 `src/game/campaign.cpp` 入手。增加持久状态时，必须同步更新 `src/core/run_state.h`、`src/storage/save.cpp` 和保存/读取回归。新增源文件时，同时加入 `CMakeLists.txt` 和 `tools/test.sh` 的源文件列表。
