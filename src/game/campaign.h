@@ -17,11 +17,17 @@ void seedStream(const player &hero, int floor, unsigned stream);
 bool chooseRoute(player &hero, int floor, int route);
 std::string routeDescription(int route);
 int objectivesCompleted(const player &hero, int floor);
+// One elite floor per chapter, never an objective or boss floor.
+int eliteFloor(int chapter);
+bool isEliteFloor(int floor);
 EncounterRules rulesFor(const player &hero, int floor);
 enemy makeEnemy(const player &hero, int floor);
 bool eventPending(const player &hero, int floor);
 std::string eventDescription(int floor);
 bool resolveEvent(player &hero, int floor, int choice);
+// Camp rests: up to three per chapter at 1x/2x/3x price; one in scarce supplies.
+int restsRemaining(const player &hero, int floor);
+int restPrice(const player &hero, int floor);
 bool rest(player &hero, int floor);
 bool claimOrder(player &hero, int floor);
 std::vector<Item> shopStock(const player &hero, int floor);

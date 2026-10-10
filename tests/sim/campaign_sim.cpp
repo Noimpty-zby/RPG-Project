@@ -44,7 +44,9 @@ void equipUpgrades(player &hero) {
     if (best > 0) hero.equipItem(best);
   }
 }
-void prepare(player &hero, int floor, int build) {
+// Coins a run spends on camp services, for the pacing report.
+struct Spend { long long enhance = 0, repair = 0, rest = 0; };
+void prepare(player &hero, int floor, int build, Spend &spend) {
   Campaign::claimOrder(hero, floor);
   equipUpgrades(hero);
   for (int slot = 1; slot <= hero.getSkillCount(); ++slot) {
@@ -66,7 +68,10 @@ void prepare(player &hero, int floor, int build) {
     if (!potionIndex(hero)) {
       Campaign::purchase(hero, floor, 3); Campaign::purchase(hero, floor, 4);
     }
-    if (hero.gethp() * 100 < hero.getmaxhp() * 40) Campaign::rest(hero, floor);
+    if (hero.gethp() * 100 < hero.getmaxhp() * 40) {
+      const int coins = hero.getcoin();
+      if (Campaign::rest(hero, floor)) spend.rest += coins - hero.getcoin();
+    }
     // A real player can buy another stock with earned gold. Both policies use
     // the same camp rules, including prices and the persisted refresh cap.
     if (!potionIndex(hero) && Campaign::refreshShop(hero, floor)) {
@@ -81,6 +86,21 @@ void prepare(player &hero, int floor, int build) {
     for (int refreshes = 0; potionCount(hero) < 4 && refreshes < 5; ++refreshes) {
       Campaign::purchase(hero, floor, 3); Campaign::purchase(hero, floor, 4);
       if (potionCount(hero) >= 4 || !Campaign::refreshShop(hero, floor)) break;
+    }
+  }
+  // Invest spare coins in worn gear, keeping most of the purse in reserve.
+  for (int slot = 1; slot <= static_cast<int>(hero.getSaveEquipments().size()); ++slot)
+    for (int cost = hero.enhanceCost(slot); cost > 0 && cost * 4 <= hero.getcoin(); cost = hero.enhanceCost(slot)) {
+      if (!hero.enhanceEquipment(slot)) break;
+      spend.enhance += cost;
+    }
+  // Keep worn gear alive when it is nearly broken and the repair is affordable.
+  for (int slot = 1; slot <= static_cast<int>(hero.getSaveEquipments().size()); ++slot) {
+    const Item &item = hero.getSaveEquipments()[slot - 1];
+    const int cost = hero.repairCost(slot);
+    if (item.getDurability() * 4 <= item.getMaxDurability() && cost > 0 && cost * 3 <= hero.getcoin()) {
+      hero.repairEquipment(slot);
+      spend.repair += cost;
     }
   }
   // Materials change a single effect; they never add permanent attack.
@@ -108,8 +128,14 @@ BattleAction choose(player &hero, enemy &monster, BattleSession &battle, bool aw
   return {ActionType::Attack};
 }
 struct Result { int floor, level, coins, turns, potions, deaths, upgrades, drought, timeouts, objectiveWins; };
-// First attempt at each boss, per class: [job][chapter] = {wins, attempts}.
-std::array<std::array<std::array<int, 2>, 10>, 3> bossFirstAttempts{};
+// Standard-mode pacing per class, for --report.
+struct Pacing {
+  long long ordinaryFights = 0, ordinaryTurns = 0, ordinaryDamagePercent = 0;
+  long long eliteAttempts = 0, eliteWins = 0, eliteTurns = 0;
+  long long enhanceCoins = 0, repairCoins = 0, restCoins = 0, endCoins = 0, runs = 0;
+  std::array<std::array<int, 2>, 10> bossFirstAttempts{}; // {wins, attempts} per chapter
+};
+std::array<Pacing, 3> pacing{};
 Result run(int job, unsigned seed, int route, int challenge, bool aware) {
   std::unique_ptr<player> hero;
   if (job == 0) hero = std::make_unique<Warrior>("sim");
@@ -117,6 +143,8 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
   else hero = std::make_unique<Assassin>("sim");
   Campaign::initialize(*hero, seed, challenge);
   int floor = 1, timeouts = 0, objectiveWins = 0;
+  Spend spend;
+  Pacing &stats = pacing[job];
   for (; floor <= 100; ++floor) {
     hero->setHighestFloor(floor);
     Campaign::chooseRoute(*hero, floor, route);
@@ -124,10 +152,12 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
       Campaign::resolveEvent(*hero, floor, hero->getcoin() >= GameConfig::restCost(floor) ? 1 : 2);
     bool won = false;
     for (int retry = 0; retry < 3 && !won; ++retry) {
-      prepare(*hero, floor, seed % 2 + 1);
+      prepare(*hero, floor, seed % 2 + 1, spend);
       auto monster = Campaign::makeEnemy(*hero, floor);
       Campaign::seedStream(*hero, floor, 1200 + static_cast<unsigned>(hero->runState().attempts[floor]));
-      BattleSession battle(*hero, monster, Campaign::rulesFor(*hero, floor));
+      const auto rules = Campaign::rulesFor(*hero, floor);
+      const int startMaxHp = hero->getmaxhp();
+      BattleSession battle(*hero, monster, rules);
       int cursor = 0;
       while (battle.beginTurn()) {
         const auto action = choose(*hero, monster, battle, aware, cursor);
@@ -136,10 +166,19 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
       timeouts += battle.report().timeout;
       if (battle.turns() > battle.turnLimit()) throw std::runtime_error("encounter exceeded its turn bound");
       if (battle.won() && monster.isalive()) ++objectiveWins;
-      if (challenge == 0 && retry == 0 && floor % 10 == 0) {
-        auto &tally = bossFirstAttempts[job][floor / 10 - 1];
+      if (challenge == 0 && floor % 10 == 0 && retry == 0) {
+        auto &tally = stats.bossFirstAttempts[floor / 10 - 1];
         tally[0] += battle.won();
         ++tally[1];
+      } else if (challenge == 0 && rules.elite && retry == 0) {
+        ++stats.eliteAttempts;
+        stats.eliteWins += battle.won();
+        stats.eliteTurns += battle.turns();
+      } else if (challenge == 0 && floor % 10 != 0 && !rules.elite &&
+                 rules.objective == EncounterObjective::Defeat) {
+        ++stats.ordinaryFights;
+        stats.ordinaryTurns += battle.turns();
+        stats.ordinaryDamagePercent += battle.report().damageTaken * 100LL / std::max(1, startMaxHp);
       }
       won = Campaign::settleEncounter(*hero, monster, battle, floor);
       if (!won && !hero->isalive()) {
@@ -148,23 +187,31 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
     }
     if (!won) break;
   }
+  if (challenge == 0) {
+    stats.enhanceCoins += spend.enhance;
+    stats.repairCoins += spend.repair;
+    stats.restCoins += spend.rest;
+    stats.endCoins += hero->getcoin();
+    ++stats.runs;
+  }
   const auto &r = hero->runState();
   return {floor,hero->getlevel(),hero->getcoin(),r.turns,r.potionsUsed,r.deaths,r.usefulDrops,r.longestGearDrought,timeouts,objectiveWins};
 }
 }
-// Usage: campaign_sim [--check] [--seeds N] [--bosses]
+// Usage: campaign_sim [--check] [--seeds N] [--report]
 //   --check   enforce the regression gates below (exit 1 on failure)
 //   --seeds N run seeds 1..N (default 8)
-//   --bosses  print standard-mode first-attempt boss win rates instead of CSV
+//   --report  print standard-mode pacing (ordinary/elite fights, camp spending,
+//             first-attempt boss win rates) instead of CSV
 int main(int argc, char **argv) {
-  bool check = false, bosses = false;
+  bool check = false, report = false;
   unsigned seeds = 8;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--check") check = true;
-    else if (arg == "--bosses") bosses = true;
+    else if (arg == "--report") report = true;
     else if (arg == "--seeds" && i + 1 < argc) seeds = static_cast<unsigned>(std::max(1, std::atoi(argv[++i])));
-    else { std::cerr << "usage: campaign_sim [--check] [--seeds N] [--bosses]\n"; return 2; }
+    else { std::cerr << "usage: campaign_sim [--check] [--seeds N] [--report]\n"; return 2; }
   }
   NullBuffer quiet;
   auto *output = std::cout.rdbuf(&quiet);
@@ -194,13 +241,31 @@ int main(int argc, char **argv) {
           std::to_string(r.drought) + ',' + std::to_string(r.timeouts) + ',' + std::to_string(r.objectiveWins) + '\n';
       }
   std::cout.rdbuf(output);
-  if (bosses) {
-    std::cout << "Standard mode, first attempt at each boss (both policies), win %\njob     ";
+  if (report) {
+    auto average = [](long long total, long long count, int scale = 1) {
+      return count ? static_cast<double>(total) * scale / static_cast<double>(count) : 0.0;
+    };
+    std::cout << std::fixed << std::setprecision(1)
+              << "Standard mode pacing (both policies; elite/boss = first attempts)\n"
+              << "job      ordinary-turns ordinary-dmg% elite-win% elite-turns enhance-coins repair-coins rest-coins end-coins\n";
+    for (int job = 0; job < 3; ++job) {
+      const Pacing &p = pacing[job];
+      std::cout << std::left << std::setw(8) << names[job] << std::right
+                << std::setw(15) << average(p.ordinaryTurns, p.ordinaryFights)
+                << std::setw(14) << average(p.ordinaryDamagePercent, p.ordinaryFights)
+                << std::setw(11) << average(p.eliteWins, p.eliteAttempts, 100)
+                << std::setw(12) << average(p.eliteTurns, p.eliteAttempts)
+                << std::setw(14) << std::setprecision(0) << average(p.enhanceCoins, p.runs)
+                << std::setw(13) << average(p.repairCoins, p.runs)
+                << std::setw(11) << average(p.restCoins, p.runs)
+                << std::setw(10) << average(p.endCoins, p.runs) << std::setprecision(1) << '\n';
+    }
+    std::cout << "\nFirst attempt at each boss, win %\njob     ";
     for (int chapter = 1; chapter <= 10; ++chapter) std::cout << std::setw(5) << chapter * 10;
     std::cout << '\n';
     for (int job = 0; job < 3; ++job) {
       std::cout << std::left << std::setw(8) << names[job] << std::right;
-      for (const auto &tally : bossFirstAttempts[job])
+      for (const auto &tally : pacing[job].bossFirstAttempts)
         std::cout << std::setw(5) << (tally[1] ? tally[0] * 100 / tally[1] : -1);
       std::cout << '\n';
     }

@@ -126,16 +126,59 @@ void modifyEquipment(player &hero) {
   std::cout << "选择效果：";
   if (!hero.modifyEquipment(index, readInt())) std::cout << "改造未执行：材料不足、效果相同或该部位不支持此效果。\n";
 }
+void enhanceEquipment(player &hero) {
+  for (;;) {
+    const auto &equipped = hero.getSaveEquipments();
+    if (equipped.empty()) { std::cout << "没有装备任何物品！\n"; return; }
+    std::cout << "强化已穿戴装备（金币 " << hero.getcoin() << "；每级数值 +" << GameConfig::EnhancePercent
+      << "%，最高 +" << GameConfig::MaxEnhanceLevel << "；换下后强化保留在装备上）\n";
+    for (int i = 0; i < static_cast<int>(equipped.size()); ++i) {
+      const Item &item = equipped[i];
+      std::cout << i + 1 << ". " << item.getDisplayName() << " | " << (item.getType() == Weapon ? "攻击 " : "生命 ")
+        << item.getValue();
+      if (const int cost = hero.enhanceCost(i + 1))
+        std::cout << " → " << item.getValue() + std::max(1, item.getValue() * GameConfig::EnhancePercent / 100)
+          << " | 费用 " << cost << '\n';
+      else std::cout << " | 已满级\n";
+    }
+    std::cout << "强化序号（0返回）：";
+    const int index = readInt();
+    if (index == 0) return;
+    if (!hero.enhanceEquipment(index)) std::cout << "未强化：检查序号、金币和强化上限。\n";
+  }
+}
+void repairEquipment(player &hero) {
+  for (;;) {
+    const auto &equipped = hero.getSaveEquipments();
+    if (equipped.empty()) { std::cout << "没有装备任何物品！\n"; return; }
+    std::cout << "修理已穿戴装备（金币 " << hero.getcoin() << "；修到耐久上限，品质越高越贵）\n";
+    for (int i = 0; i < static_cast<int>(equipped.size()); ++i) {
+      std::cout << i + 1 << ". " << equipped[i].getDisplayName() << " | 耐久 " << equipped[i].getDurability()
+        << "/" << equipped[i].getMaxDurability() << " | ";
+      if (const int cost = hero.repairCost(i + 1)) std::cout << "费用 " << cost << '\n';
+      else std::cout << "无需修理\n";
+    }
+    std::cout << "修理序号（0返回）：";
+    const int index = readInt();
+    if (index == 0) return;
+    if (!hero.repairEquipment(index)) std::cout << "未修理：耐久已满、序号无效或金币不足。\n";
+  }
+}
 void camp(player &hero, int floor) {
   for (;;) {
     Campaign::printJournal(hero, floor);
-    std::cout << "营地：[1] 休息（每章一次，" << GameConfig::restCost(floor)
-      << "金币，恢复基础HP的" << (hero.runState().challenge == 1 ? 25 : 40)
+    std::cout << "营地：[1] 休息（本章剩余 " << Campaign::restsRemaining(hero, floor) << " 次，本次 "
+      << Campaign::restPrice(hero, floor) << "金币，恢复基础HP的" << (hero.runState().challenge == 1 ? 25 : 40)
       << "%与最大MP的50%） [2] 领取订单 [3] 定向装备目标 [4] 装备改造\n"
-      << "[5] 商店 [6] 技能与专精 [7] 迁移传统存档 [0] 返回\n";
+      << "[5] 商店 [6] 技能与专精 [7] 迁移传统存档 [8] 强化装备 [9] 修理装备 [0] 返回\n";
     const int action = readInt();
     if (action == 0) return;
-    if (action == 1 && !Campaign::rest(hero, floor)) std::cout << "未休息：已使用、资源已满或金币不足。\n";
+    if (action == 1 && !Campaign::rest(hero, floor)) {
+      if (Campaign::restsRemaining(hero, floor) == 0) std::cout << "未休息：本章休息次数已用完。\n";
+      else if (hero.gethp() == hero.getmaxhp() && hero.getmp() == hero.getmaxmp())
+        std::cout << "未休息：生命和魔力都是满的。\n";
+      else std::cout << "未休息：金币不足（需要 " << Campaign::restPrice(hero, floor) << "）。\n";
+    }
     if (action == 2 && !Campaign::claimOrder(hero, floor)) std::cout << "订单尚未达标或已领取。\n";
     if (action == 3) {
       std::cout << "选择 [1] 武器 [2] 防具；更换目标将清空保底计数：";
@@ -147,6 +190,8 @@ void camp(player &hero, int floor) {
     if (action == 4) modifyEquipment(hero);
     if (action == 5) shop(hero, floor);
     if (action == 6) skills(hero);
+    if (action == 8) enhanceEquipment(hero);
+    if (action == 9) repairEquipment(hero);
     if (action == 7) {
       if (!hero.runState().legacyRules) { std::cout << "已经使用章节规则。\n"; continue; }
       std::cout << "迁移将把超额技能阶数转换为有限材料，并按当前进度规范角色成长。建议保留原存档备份。\n[1] 执行迁移 [0] 保留传统存档\n";
@@ -190,6 +235,8 @@ bool fight(player &hero, int floor, Profile &profile) {
   std::cout << "遭遇：" << monster.getname() << "（第" << floor << "层） HP " << monster.gethp()
     << " 攻击 " << monster.getattack() << '\n';
   profile.recordEncounter(floor, monster);
+  if (rules.elite)
+    std::cout << "【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁；首通必得本层最高品质档的目标装备。\n";
   showObjective(rules);
   Campaign::seedStream(hero, floor, 1200 + static_cast<unsigned>(hero.runState().attempts[floor]));
   BattleSession battle(hero, monster, rules);
@@ -222,6 +269,10 @@ bool fight(player &hero, int floor, Profile &profile) {
   if (won) profile.recordVictory(floor);
   checkAchievements(profile, hero, &outcome);
   profile.save();
+  for (const Item &item : hero.getSaveEquipments())
+    if (item.getDurability() <= 3)
+      std::cout << "【耐久告急】" << item.getDisplayName() << " 还能用 " << item.getDurability()
+        << " 场，可在营地修理。\n";
   std::cout << (won ? "目标完成！可前往下一层，或在营地调整。\n" : "本次挑战未完成。\n");
   return won;
 }
@@ -354,7 +405,8 @@ int main() {
     }
     std::cout << "\n楼层 " << floor << " · " << Campaign::chapter(floor).name << " | HP " << hero->gethp()
       << '/' << hero->getmaxhp() << " | 金币 " << hero->getcoin() << " | "
-      << (hero->runState().cleared[floor] ? "已首通" : "待完成") << '\n'
+      << (hero->runState().cleared[floor] ? "已首通" : "待完成")
+      << (Campaign::isEliteFloor(floor) ? " | 精英层" : "") << '\n'
       << "[1] 挑战本层 [2] 背包 [3] 装备 [4] 退出 [5] 存档 [6] 状态 [7] 技能 [8] 营地 [9] 下一层\n"
       << "[10] 前往楼层 [11] 远征档案 [12] 帮助\n";
     const int action = readInt();

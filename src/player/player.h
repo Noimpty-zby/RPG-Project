@@ -112,6 +112,12 @@ public:
   bool toggleItemLock(int index);
   int salvageUnlocked();
   bool modifyEquipment(int index, int effectId);
+  // Coins to raise an equipped item one enhancement level; 0 when maxed or invalid.
+  int enhanceCost(int index) const;
+  bool enhanceEquipment(int index);
+  // Coins to restore an equipped item to full durability; 0 when nothing to repair.
+  int repairCost(int index) const;
+  bool repairEquipment(int index);
 
   // ── 技能 ──
   void showSkills() const;

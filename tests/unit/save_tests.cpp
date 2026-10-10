@@ -79,6 +79,8 @@ void compareItem(const Item &expected, const Item &actual) {
   require(expected.getLevelRequirement() == actual.getLevelRequirement(), "item level");
   require(expected.getQuantity() == actual.getQuantity(), "item quantity");
   require(expected.getDurability() == actual.getDurability(), "item durability");
+  require(expected.getMaxDurability() == actual.getMaxDurability(), "item durability cap");
+  require(expected.getEnhanceLevel() == actual.getEnhanceLevel(), "item enhancement level");
   require(expected.getPrice() == actual.getPrice(), "item price");
   require(expected.getJobRequirement() == actual.getJobRequirement(), "item class restriction");
   require(expected.getId() == actual.getId(), "stable template ID");
@@ -114,8 +116,11 @@ void roundTrip(player &hero, Fixture &fixture) {
   run.usefulDrops = 17;
   run.gearDrought = 3;
   run.longestGearDrought = 7;
-  hero.equipItem_T(Item("Old high level armor", 80, Armor, 100, 23, 90, 1,
-                        AnyJob, 3, ItemEffect::GuardRecovery, true), true);
+  Item wornArmor("Old high level armor", 80, Armor, 100, 23, 90, 1,
+                 AnyJob, 3, ItemEffect::GuardRecovery, true);
+  wornArmor.setMaxDurability(41); // Worn down: repairs restore up to the cap.
+  wornArmor.setEnhanceLevel(3);
+  hero.equipItem_T(wornArmor, true);
   hero.equipItem_T(Item("Weapon", 40, Weapon, 30, 19, 70, 1,
                         AnyJob, 2, ItemEffect::ManaOnAttack), true);
   hero.sethp(37); // Below base HP: old loader incorrectly added armor's HP.
@@ -130,7 +135,7 @@ void roundTrip(player &hero, Fixture &fixture) {
   }
   require(SaveSystem::saveGame(hero, 40, fixture.name()), "save succeeds");
   const auto original = fixture.read();
-  require(original.find("VERSION 3\n") != std::string::npos, "save version");
+  require(original.find("VERSION 4\n") != std::string::npos, "save version");
   fixture.write(reorderSkills(original));
   int floor = -99;
   auto restored = SaveSystem::loadGame(floor, fixture.name());
@@ -261,6 +266,38 @@ void legacyRetreat(Fixture &fixture) {
           restored->runState().attempts[100] == 1, "completed v2 tower retains final clear");
 }
 
+// V3 item lines lack the durability cap; loading uses current durability as the cap.
+std::string version3(const std::string &modern) {
+  std::istringstream input(modern);
+  std::string line, output;
+  while (std::getline(input, line)) {
+    if (line == "VERSION 4") line = "VERSION 3";
+    if (line.rfind("ITEM ", 0) == 0 || line.rfind("EQUIP ", 0) == 0)
+      for (int field = 0; field < 2; ++field) line.resize(line.rfind('|'));
+    output += line + "\n";
+  }
+  return output;
+}
+
+void version3Saves(Fixture &fixture) {
+  Mage hero("V3 hero");
+  Item staff("Staff", 1, Weapon, 20, 12, 50, 1, MageOnly);
+  staff.setMaxDurability(30);
+  hero.equipItem_T(staff);
+  hero.addItem(Item("Potion", 1, Potion, 50, 0, 20, 2));
+  hero.runState().campRested[0] = 1;
+  require(SaveSystem::saveGame(hero, 1, fixture.name()), "v4 source save");
+  fixture.write(version3(fixture.read()));
+  int floor = 0;
+  auto restored = SaveSystem::loadGame(floor, fixture.name());
+  require(restored && !restored->runState().legacyRules, "v3 saves still load with chapter rules");
+  const Item &weapon = restored->getSaveEquipments().at(0);
+  require(weapon.getDurability() == 12 && weapon.getMaxDurability() == 12 && weapon.getEnhanceLevel() == 0,
+          "v3 items take their current durability as the cap and no enhancement");
+  require(SaveSystem::saveGame(*restored, floor, fixture.name()) &&
+          fixture.read().find("VERSION 4\n") != std::string::npos, "v3 saves upgrade to v4 when saved");
+}
+
 void corruptSaves(Fixture &fixture) {
   Warrior hero("Validation hero");
   hero.addItem(Item("Potion", 1, Potion, 50, 0, 20, 2));
@@ -304,7 +341,7 @@ void corruptSaves(Fixture &fixture) {
       {"MATERIALS ", "MATERIALS 10000"}, {"BATTLES ", "BATTLES -1"},
       {"GEAR_DROUGHT ", "GEAR_DROUGHT 1"}, {"ROUTES ", "ROUTES 0|0"},
       {"ROUTES ", "ROUTES 4|0|0|0|0|0|0|0|0|0"},
-      {"CAMP_RESTED ", "CAMP_RESTED 2|0|0|0|0|0|0|0|0|0"},
+      {"CAMP_RESTED ", "CAMP_RESTED 4|0|0|0|0|0|0|0|0|0"},
       {"SHOP_PURCHASED ", "SHOP_PURCHASED 32|0|0|0|0|0|0|0|0|0"},
       {"SHOP_REFRESHES ", "SHOP_REFRESHES 21|0|0|0|0|0|0|0|0|0"},
       {"ATTEMPTS ", "ATTEMPTS 0|0"}, {"CLEARED ", "CLEARED 0|1"},
@@ -317,29 +354,34 @@ void corruptSaves(Fixture &fixture) {
             "reject run/specialization inconsistency: " + replacement);
   }
   const auto id = Item::templateId("Potion", Potion, AnyJob, 0);
-  for (const auto &line : std::vector<std::string>{"ITEM Potion|1|3|50|0|20|2|0|0|1|0|" + id,
-                           "ITEM Potion|1|3|50|0|20|2|0|0|0|2|" + id,
-                           "ITEM Potion|1|3|50|0|20|2|0|0|0|0|wrong-id"}) {
+  for (const auto &line : std::vector<std::string>{"ITEM Potion|1|3|50|0|20|2|0|0|1|0|" + id + "|0|0",
+                           "ITEM Potion|1|3|50|0|20|2|0|0|0|2|" + id + "|0|0",
+                           "ITEM Potion|1|3|50|0|20|2|0|0|0|0|wrong-id|0|0",
+                           "ITEM Potion|1|3|50|0|20|2|0|0|0|0|" + id + "|0|1",
+                           "ITEM Potion|1|3|50|0|20|2|0|0|0|0|" + id + "|0",
+                           "ITEM Potion|1|3|50|0|20|2|0|0|0|0|" + id}) {
     fixture.write(replaceLine(valid, "ITEM ", line));
     int floor = 42;
     require(!SaveSystem::loadGame(floor, fixture.name()) && floor == 42,
-            "reject effect, lock or ID corruption");
+            "reject effect, lock, ID or enhancement corruption, or a v3 item line inside a v4 save");
   }
   const auto armorId = Item::templateId("Armor", Armor, AnyJob, 0);
   const auto equipped = replaceLine(valid, "EQUIP_COUNT ", "EQUIP_COUNT 1") +
-      "EQUIP Armor|1|2|50|10|20|1|0|0|0|0|" + armorId + "\n";
+      "EQUIP Armor|1|2|50|10|20|1|0|0|0|0|" + armorId + "|25|2\n";
   fixture.write(equipped);
   int floor = 42;
   require(SaveSystem::loadGame(floor, fixture.name()) != nullptr,
           "valid equipment restoration fixture");
   for (const auto &text : {
-      replaceLine(equipped, "EQUIP ", "EQUIP Armor|1|2|50|0|20|1|0|0|0|0|" + armorId),
-      replaceLine(equipped, "EQUIP ", "EQUIP Armor|1|2|50|10|20|2|0|0|0|0|" + armorId),
+      replaceLine(equipped, "EQUIP ", "EQUIP Armor|1|2|50|0|20|1|0|0|0|0|" + armorId + "|25|2"),
+      replaceLine(equipped, "EQUIP ", "EQUIP Armor|1|2|50|10|20|2|0|0|0|0|" + armorId + "|25|2"),
+      replaceLine(equipped, "EQUIP ", "EQUIP Armor|1|2|50|10|20|1|0|0|0|0|" + armorId + "|9|2"),
+      replaceLine(equipped, "EQUIP ", "EQUIP Armor|1|2|50|10|20|1|0|0|0|0|" + armorId + "|25|6"),
       replaceLine(replaceLine(equipped, "MAX_HP ", "MAX_HP 50"), "HP ", "HP 50")}) {
     fixture.write(text);
     floor = 42;
     require(!SaveSystem::loadGame(floor, fixture.name()) && floor == 42,
-            "invalid equipped durability, quantity or base stats rejected without item loss");
+            "invalid equipped durability, cap, quantity or base stats rejected without item loss");
   }
 }
 
@@ -417,6 +459,7 @@ int main() {
     roundTrip(assassin, fixture);
     legacySaves(fixture);
     legacyRetreat(fixture);
+    version3Saves(fixture);
     extremeLegacyValues(fixture);
     corruptSaves(fixture);
     atomicSave(fixture);
@@ -429,6 +472,6 @@ int main() {
     std::cerr << "Save tests FAILED: " << failure << "\n" << gameLog.str();
     return 1;
   }
-  std::cout << "Save tests passed: all classes, legacy migration, skill order, HP, malformed saves.\n";
+  std::cout << "Save tests passed: all classes, V3 upgrade, legacy migration, skill order, HP, malformed saves.\n";
   return 0;
 }

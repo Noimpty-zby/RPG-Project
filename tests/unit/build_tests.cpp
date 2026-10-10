@@ -198,11 +198,59 @@ void testInventoryAndWear() {
           "invalid equipment entered inventory");
 }
 }
+void testRepair() {
+  Warrior hero("smith"); prepare(hero);
+  Item epic("epic blade", 1, Weapon, 50, 40, 400, 1, WarriorOnly, 3);
+  epic.setDurability(10); // 30 of 40 durability missing.
+  hero.equipItem_T(epic);
+  const int perPoint = GameConfig::repairCostPerPoint(400, 3);
+  require(perPoint == 400 * 5 / 80 && hero.repairCost(1) == 30 * perPoint, "repair cost formula");
+  require(GameConfig::repairCostPerPoint(400, 0) < perPoint, "common gear must be cheaper to repair");
+  require(hero.repairCost(0) == 0 && hero.repairCost(2) == 0 && !hero.repairEquipment(2),
+          "invalid repair slot accepted");
+  const int before = hero.getcoin();
+  require(hero.repairEquipment(1) && hero.getcoin() == before - 30 * perPoint &&
+              hero.getSaveEquipments()[0].getDurability() == 40,
+          "repair must restore durability to the cap and charge once");
+  require(hero.repairCost(1) == 0 && !hero.repairEquipment(1) && hero.getcoin() == before - 30 * perPoint,
+          "repairing full durability must not charge");
+  hero.resetEncounterResources(); hero.finishEncounterWear();
+  hero.costcoin(hero.getcoin());
+  require(hero.repairCost(1) == perPoint && !hero.repairEquipment(1) &&
+              hero.getSaveEquipments()[0].getDurability() == 39,
+          "repair without enough coins must change nothing");
+}
+void testEnhancement() {
+  Warrior hero("enchanter"); prepare(hero);
+  hero.equipItem_T(Item("blade", 1, Weapon, 100, 30, 200, 1, WarriorOnly, 1));
+  hero.equipItem_T(Item("plate", 1, Armor, 200, 30, 300, 1, WarriorOnly));
+  const int attack = hero.getattack(), maxHp = hero.getmaxhp();
+  for (int level = 1; level <= GameConfig::MaxEnhanceLevel; ++level) {
+    const int value = hero.getSaveEquipments()[0].getValue();
+    const int coins = hero.getcoin();
+    require(hero.enhanceCost(1) == 200 * level, "enhancement cost must scale with the next level");
+    require(hero.enhanceEquipment(1) && hero.getcoin() == coins - 200 * level &&
+                hero.getSaveEquipments()[0].getValue() == value + value * GameConfig::EnhancePercent / 100 &&
+                hero.getSaveEquipments()[0].getEnhanceLevel() == level,
+            "enhancement must raise value by the configured percent and record the level");
+  }
+  const Item &blade = hero.getSaveEquipments()[0];
+  require(hero.getattack() == attack + blade.getValue() - 100, "enhancement gain must reach attack exactly once");
+  require(blade.getDisplayName() == "blade +5" && blade.getName() == "blade", "display name shows the level");
+  require(hero.enhanceCost(1) == 0 && !hero.enhanceEquipment(1), "enhancement must stop at the cap");
+  require(hero.enhanceEquipment(2) && hero.getmaxhp() == maxHp + 10, "armor enhancement must raise max HP");
+  hero.unequipItem(1);
+  require(hero.getattack() == attack - 100 && hero.getSaveBackpack().back().getEnhanceLevel() == 5,
+          "unequipping must remove the enhanced value and keep the level on the item");
+  hero.costcoin(hero.getcoin());
+  require(!hero.enhanceEquipment(1) && hero.getSaveEquipments()[0].getEnhanceLevel() == 1,
+          "enhancing without coins must change nothing");
+}
 int main() {
   std::ostringstream log; auto *original = std::cout.rdbuf(log.rdbuf());
   try {
     testGrowthAndTransactions(); testSpecializationTransactions(); testSpecializationEffects();
-    testRecoveryAndResources(); testInventoryAndWear();
+    testRecoveryAndResources(); testInventoryAndWear(); testRepair(); testEnhancement();
   } catch (const std::exception &error) {
     std::cout.rdbuf(original); std::cerr << "build tests failed: " << error.what() << '\n' << log.str(); return 1;
   }

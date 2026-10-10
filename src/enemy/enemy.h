@@ -98,6 +98,10 @@ public:
   void setdodgeRate(int rate);
   Affix getRandomAffix() const;
   void setAffix(int floor);
+  // Adds a distinct affix and its reward bonus; false if already present.
+  bool addAffix(Affix affix);
+  // Rolls weighted affixes until at least count distinct ones are present.
+  void ensureAffixes(int count);
   void resethp(int amount);
   void resetexp_reward(int amount);
   void resetcoin_reward(int amount);

@@ -16,6 +16,7 @@ private:
   ItemType type;
   int value;
   int durability;
+  int maxDurability; // Repairs restore up to this; starts at the generated durability.
   int price;
   int quantity;
   JobReq jobRequirement;
@@ -23,6 +24,7 @@ private:
   ItemEffect effect;
   bool locked;
   std::string id;
+  int enhanceLevel = 0;
 
 public:
   Item(std::string name, int levelRequirement, ItemType type, int value,
@@ -31,10 +33,15 @@ public:
        std::string id = "");
 
   std::string getName() const;
+  // Name with the enhancement suffix, e.g. "精钢巨剑 +2"; getName() stays the identity.
+  std::string getDisplayName() const;
+  int getEnhanceLevel() const { return enhanceLevel; }
+  void setEnhanceLevel(int level) { enhanceLevel = level; }
   int getLevelRequirement() const;
   ItemType getType() const;
   int getValue() const;
   int getDurability() const;
+  int getMaxDurability() const;
   int getPrice() const;
   int getQuantity() const;
   JobReq getJobRequirement() const;
@@ -55,7 +62,9 @@ public:
   std::string getJobRequirementName() const;
 
   void setQuantity(int quantity);
+  void setValue(int value);
   void setDurability(int durability);
+  void setMaxDurability(int maxDurability);
   bool setEffect(ItemEffect effect);
   void setLocked(bool locked);
 };

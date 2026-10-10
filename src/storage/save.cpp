@@ -84,7 +84,7 @@ void validateRun(const RunState &run, int highestFloor) {
   requireRange(run.materials, 0, GameConfig::MaxMaterials, "材料");
   validateArray(run.routes, 3, "路线");
   validateArray(run.events, 2, "事件");
-  validateArray(run.campRested, 1, "营地休息");
+  validateArray(run.campRested, GameConfig::MaxRestsPerChapter, "营地休息");
   validateArray(run.ordersClaimed, 1, "订单");
   validateArray(run.shopRefreshes, 20, "商店刷新");
   validateArray(run.shopPurchased, 31, "商店购买");
@@ -113,6 +113,9 @@ void validateItem(const Item &item) {
   requireRange(static_cast<int>(item.getType()), Weapon, Potion, "物品类型");
   requireRange(item.getValue(), 0, kMaxStat, "物品数值");
   requireRange(item.getDurability(), 0, kMaxStat, "耐久");
+  requireRange(item.getMaxDurability(), item.getDurability(), kMaxStat, "耐久上限");
+  requireRange(item.getEnhanceLevel(), 0, GameConfig::MaxEnhanceLevel, "强化等级");
+  if (item.getType() == Potion && item.getEnhanceLevel() != 0) throw runtime_error("药水不能强化");
   requireRange(item.getPrice(), 0, 1000000000, "物品价格");
   requireRange(item.getQuantity(), 1, 1000000000, "物品数量");
   requireRange(static_cast<int>(item.getJobRequirement()), AnyJob, AssassinOnly, "物品职业");
@@ -215,14 +218,16 @@ string SaveSystem::serializeItem(const Item &item) {
          << item.getDurability() << '|' << item.getPrice() << '|' << item.getQuantity()
          << '|' << static_cast<int>(item.getJobRequirement()) << '|' << item.getTier()
          << '|' << static_cast<int>(item.getEffect()) << '|' << (item.isLocked() ? 1 : 0)
-         << '|' << item.getId();
+         << '|' << item.getId() << '|' << item.getMaxDurability() << '|' << item.getEnhanceLevel();
   return output.str();
 }
 
 Item SaveSystem::deserializeItem(const string &line) {
   const auto tok = split(line, '|');
-  if (tok.size() != 7 && tok.size() != 8 && tok.size() != 12)
+  // 7/8 fields: V1/V2; 12: V3; 14: V4 adds the durability cap and enhancement level.
+  if (tok.size() != 7 && tok.size() != 8 && tok.size() != 12 && tok.size() != 14)
     throw runtime_error("存档物品格式错误");
+  const bool modern = tok.size() >= 12;
   const int level = parseNumber(tok[1], 1, 10000, "物品等级");
   const auto type = static_cast<ItemType>(parseNumber(tok[2], Weapon, Potion, "物品类型"));
   const int value = parseNumber(tok[3], 0, kMaxStat, "物品数值");
@@ -231,13 +236,18 @@ Item SaveSystem::deserializeItem(const string &line) {
   const int quantity = parseNumber(tok[6], 1, 1000000000, "数量");
   const auto job = tok.size() >= 8
       ? static_cast<JobReq>(parseNumber(tok[7], AnyJob, AssassinOnly, "职业限制")) : AnyJob;
-  const int tier = tok.size() == 12 ? parseNumber(tok[8], 0, 3, "品质") : 0;
-  const auto effect = tok.size() == 12
+  const int tier = modern ? parseNumber(tok[8], 0, 3, "品质") : 0;
+  const auto effect = modern
       ? static_cast<ItemEffect>(parseNumber(tok[9], 0, 4, "效果")) : ItemEffect::None;
-  const bool locked = tok.size() == 12 && parseNumber(tok[10], 0, 1, "锁定") != 0;
-  if (tok.size() == 12 && tok[11].empty()) throw runtime_error("缺少物品ID");
+  const bool locked = modern && parseNumber(tok[10], 0, 1, "锁定") != 0;
+  if (modern && tok[11].empty()) throw runtime_error("缺少物品ID");
   Item result(tok[0], level, type, value, durability, price, quantity, job, tier,
-               effect, locked, tok.size() == 12 ? tok[11] : "");
+               effect, locked, modern ? tok[11] : "");
+  // Older saves never recorded the cap: their current durability becomes it.
+  if (tok.size() == 14) {
+    result.setMaxDurability(parseNumber(tok[12], durability, kMaxStat, "耐久上限"));
+    result.setEnhanceLevel(parseNumber(tok[13], 0, GameConfig::MaxEnhanceLevel, "强化等级"));
+  }
   validateItem(result);
   return result;
 }
@@ -261,7 +271,7 @@ bool SaveSystem::saveGame(const player &hero, int floor, const string &filename)
     requireRange(hero.getcritRate(), 0, 100, "暴击");
     requireRange(hero.getfreerevives(), 0, 1000, "复活");
     ostringstream output;
-    output << "VERSION 3\nNAME " << hero.getname() << "\nJOB " << hero.getjob()
+    output << "VERSION 4\nNAME " << hero.getname() << "\nJOB " << hero.getjob()
            << "\nLEVEL " << hero.getlevel() << "\nEXP " << hero.getexp()
            << "\nCOIN " << hero.getcoin() << "\nHP " << hero.gethp()
            << "\nMAX_HP " << hero.getmaxhp() << "\nATTACK " << hero.getattack()
@@ -327,7 +337,8 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
     string name, job;
     int version = 0, level = 1, exp = 0, coin = 0, hp = 0, maxHp = 0, attack = 0;
     int mp = 0, maxMp = 0, crit = 0, revives = 0, savedFloor = 1, highest = 0;
-    int backpackCount = 0, equipCount = 0, skillCount = 0, modernItems = 0, modernSkills = 0;
+    int backpackCount = 0, equipCount = 0, skillCount = 0, modernSkills = 0;
+    int v3Items = 0, v4Items = 0;
     RunState run;
     vector<Item> backpack, equipped;
     vector<tuple<int, int, int, int>> skillData;
@@ -344,7 +355,7 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       getline(row >> ws, value);
       if (key != "ITEM" && key != "EQUIP" && key != "SKILL" && !seen.insert(key).second)
         throw runtime_error("重复字段: " + key);
-      if (key == "VERSION") version = parseNumber(value, 1, 3, key);
+      if (key == "VERSION") version = parseNumber(value, 1, 4, key);
       else if (key == "NAME") name = value;
       else if (key == "JOB") job = value;
       else if (key == "LEVEL") level = parseNumber(value, 1, 10000, key);
@@ -368,7 +379,7 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       else if (key == "MATERIALS") run.materials = parseNumber(value, 0, GameConfig::MaxMaterials, key);
       else if (key == "ROUTES") run.routes = parseArray<10>(value, 0, 3, key);
       else if (key == "EVENTS") run.events = parseArray<10>(value, 0, 2, key);
-      else if (key == "CAMP_RESTED") run.campRested = parseArray<10>(value, 0, 1, key);
+      else if (key == "CAMP_RESTED") run.campRested = parseArray<10>(value, 0, GameConfig::MaxRestsPerChapter, key);
       else if (key == "ORDERS_CLAIMED") run.ordersClaimed = parseArray<10>(value, 0, 1, key);
       else if (key == "SHOP_REFRESHES") run.shopRefreshes = parseArray<10>(value, 0, 20, key);
       else if (key == "SHOP_PURCHASED") run.shopPurchased = parseArray<10>(value, 0, 31, key);
@@ -389,7 +400,9 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
         auto &items = key == "ITEM" ? backpack : equipped;
         if (items.size() >= static_cast<size_t>(key == "ITEM" ? kMaxItems : 2))
           throw runtime_error("物品行数过多");
-        if (split(value, '|').size() == 12) ++modernItems;
+        const size_t fields = split(value, '|').size();
+        v3Items += fields == 12;
+        v4Items += fields == 14;
         items.push_back(deserializeItem(value));
         totalQuantity += items.back().getQuantity();
         if (totalQuantity > 1000000000) throw runtime_error("物品总数量过多");
@@ -418,15 +431,16 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
     if (highest < min(savedFloor, 100)) throw runtime_error("最高楼层小于当前楼层");
     if (backpackCount != static_cast<int>(backpack.size()) || equipCount != static_cast<int>(equipped.size()) ||
         skillCount != static_cast<int>(skillData.size())) throw runtime_error("物品或技能数量不匹配");
-    if (version == 3) {
+    if (version >= 3) {
       for (const auto &key : runKeys)
         if (!seen.count(key)) throw runtime_error("缺少章节字段: " + key);
-      if (modernItems != backpackCount + equipCount || modernSkills != skillCount)
-        throw runtime_error("V3缺少物品或专精字段");
+      const int expected = version == 4 ? v4Items : v3Items;
+      if (expected != backpackCount + equipCount || modernSkills != skillCount)
+        throw runtime_error("V" + to_string(version) + "缺少物品或专精字段");
     } else {
       for (const auto &key : runKeys)
         if (seen.count(key)) throw runtime_error("旧版本包含未知章节字段: " + key);
-      if (modernItems || modernSkills) throw runtime_error("旧版本包含V3记录");
+      if (v3Items || v4Items || modernSkills) throw runtime_error("旧版本包含V3/V4记录");
       run.legacyRules = true;
       // V2 retains the highest reached floor even after retreat. Floors below
       // it were already passed; floor 101 additionally proves floor 100 cleared.

@@ -22,6 +22,14 @@ constexpr Campaign::Chapter chapters[] = {
 bool validFloor(int floor) { return floor >= 1 && floor <= 100; }
 int localFloor(int floor) { return (floor - 1) % 10 + 1; }
 int eventType(int floor) { return GameConfig::chapter(floor) % 3; }
+// Side-goal slot (0..2) for a local floor, or -1. Chapter one keeps floors 3/6/8;
+// later chapters rotate by two. Modulo nine never puts a side goal on a boss.
+int objectiveSlot(int chapter, int local) {
+  const int positions[] = {3, 6, 8};
+  for (int slot = 0; slot < 3; ++slot)
+    if (local == (positions[slot] - 1 + chapter * 2) % 9 + 1) return slot;
+  return -1;
+}
 void loseHealthSafely(player &hero, int percent) {
   const int loss = std::max(1, static_cast<int>(static_cast<long long>(hero.gethp()) * percent / 100));
   hero.sethp(std::max(1, hero.gethp() - loss));
@@ -57,7 +65,7 @@ void giveItem(player &hero, const Item &item) {
     run.gearDrought = 0;
   }
   hero.addItem(item);
-  std::cout << "获得：" << item.getName() << "（数值 " << item.getValue() << "）\n";
+  std::cout << "获得：" << item.getDisplayName() << "（数值 " << item.getValue() << "）\n";
 }
 }
 
@@ -109,36 +117,48 @@ int objectivesCompleted(const player &hero, int floor) {
   for (int i = start; i < start + 9; ++i) count += hero.runState().cleared[i] != 0;
   return count;
 }
+int eliteFloor(int chapter) {
+  chapter = std::clamp(chapter, 0, 9);
+  // Late in the chapter for a build-up before the boss, skipping side goals.
+  for (int local : {7, 6, 8, 5, 9, 4})
+    if (objectiveSlot(chapter, local) < 0) return chapter * 10 + local;
+  return chapter * 10 + 4;
+}
+bool isEliteFloor(int floor) {
+  return validFloor(floor) && eliteFloor(GameConfig::chapter(floor)) == floor;
+}
 EncounterRules rulesFor(const player &hero, int floor) {
   EncounterRules rules;
   if (!validFloor(floor)) return rules;
   const auto &run = hero.runState();
   const int c = GameConfig::chapter(floor), local = localFloor(floor);
-  rules.difficulty = run.challenge == 0 ? 0 : 1;
+  rules.elite = isEliteFloor(floor);
+  // Challenges and elites both raise how often special intents appear.
+  rules.difficulty = (run.challenge == 0 ? 0 : 1) + (rules.elite ? 1 : 0);
   rules.bossSabotaged = local == 10 && run.routes[c] == 1 &&
                        run.cleared[c * 10 + 2] && run.cleared[c * 10 + 7];
-  // Preserve chapter one's tutorial, then rotate both locations and goal roles.
-  // Modulo nine keeps all three distinct and never assigns a side goal to a boss.
-  const int positions[] = {3, 6, 8};
   const EncounterObjective goals[] = {EncounterObjective::Survive, EncounterObjective::Disrupt,
     run.routes[c] == 1 ? EncounterObjective::Disrupt :
       (run.routes[c] == 2 ? EncounterObjective::Survive : EncounterObjective::Escape)};
-  for (int slot = 0; slot < 3; ++slot)
-    if (local == (positions[slot] - 1 + c * 2) % 9 + 1)
-      rules.objective = goals[(slot + c) % 3];
+  const int slot = objectiveSlot(c, local);
+  if (slot >= 0) rules.objective = goals[(slot + c) % 3];
   rules.targetTurns = 3 + c / 4;
   return rules;
 }
 enemy makeEnemy(const player &hero, int floor) {
   if (!validFloor(floor)) throw std::out_of_range("floor must be 1..100");
   seedStream(hero, floor, 10 + static_cast<unsigned>(hero.runState().attempts[floor]));
-  auto monster = generateEnemy(floor);
+  const auto rules = rulesFor(hero, floor);
+  auto monster = generateEnemy(floor, rules.elite);
   // These are objective encounters: a durable pursuer/ritual guardian can be
   // bypassed by the advertised goal, so damage racing is no longer automatic.
-  const auto objective = rulesFor(hero, floor).objective;
-  if (objective != EncounterObjective::Defeat) {
-    monster.resethp(monster.getmaxhp() * (objective == EncounterObjective::Disrupt ? 4 : 3));
-    monster.resetattack(std::max(1, monster.getattack() * 80 / 100));
+  // Percentages are relative to the base curve, so undo the ordinary scaling.
+  if (rules.objective != EncounterObjective::Defeat) {
+    const int hpPercent = rules.objective == EncounterObjective::Disrupt
+        ? EnemyTuning::DisruptHpPercent : EnemyTuning::SurviveHpPercent;
+    monster.resethp(monster.getmaxhp() * hpPercent / EnemyTuning::OrdinaryHpPercent);
+    monster.resetattack(std::max(1, monster.getattack() * EnemyTuning::ObjectiveAttackPercent /
+                                        EnemyTuning::OrdinaryAttackPercent));
   }
   const int event = hero.runState().events[GameConfig::chapter(floor)];
   const int type = eventType(floor);
@@ -198,16 +218,25 @@ bool resolveEvent(player &hero, int floor, int choice) {
   std::cout << eventOutcome(type, choice) << "。\n";
   return true;
 }
+int restsRemaining(const player &hero, int floor) {
+  if (!validFloor(floor)) return 0;
+  const int limit = hero.runState().challenge == 1 ? 1 : GameConfig::MaxRestsPerChapter;
+  return std::max(0, limit - hero.runState().campRested[GameConfig::chapter(floor)]);
+}
+int restPrice(const player &hero, int floor) {
+  // Each extra rest in the same chapter costs one more base price: 1x, 2x, 3x.
+  return GameConfig::restCost(floor) * (1 + hero.runState().campRested[GameConfig::chapter(floor)]);
+}
 bool rest(player &hero, int floor) {
-  if (!validFloor(floor) || !hero.isalive()) return false;
+  if (!validFloor(floor) || !hero.isalive() || restsRemaining(hero, floor) == 0) return false;
   auto &run = hero.runState();
-  const int c = GameConfig::chapter(floor), cost = GameConfig::restCost(floor);
-  if (run.campRested[c] || hero.getcoin() < cost ||
-      (hero.gethp() == hero.getmaxhp() && hero.getmp() == hero.getmaxmp())) return false;
+  const int cost = restPrice(hero, floor);
+  if (hero.getcoin() < cost || (hero.gethp() == hero.getmaxhp() && hero.getmp() == hero.getmaxmp()))
+    return false;
   hero.costcoin(cost);
   hero.heal(hero.getRecoveryBaseHp() * (run.challenge == 1 ? 25 : 40) / 100);
   hero.setmp(hero.getmp() + hero.getmaxmp() / 2);
-  run.campRested[c] = 1;
+  ++run.campRested[GameConfig::chapter(floor)];
   return true;
 }
 bool claimOrder(player &hero, int floor) {
@@ -299,6 +328,12 @@ bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int fl
     run.materials = std::min(GameConfig::MaxMaterials, run.materials + 2);
     if (run.routes[c] == 3) giveItem(hero, generateTargetedItem(floor, AnyJob, Potion));
   }
+  if (first && isEliteFloor(floor)) {
+    run.materials = std::min(GameConfig::MaxMaterials, run.materials + 2);
+    std::cout << "【精英奖励】高品质装备与 2 材料：\n";
+    giveItem(hero, generateEliteReward(hero, floor));
+    run.pity = 0; // The reward is always a wearable piece of the loot target.
+  }
   if (first && local == 10) {
     run.materials = std::min(GameConfig::MaxMaterials, run.materials + 3);
     std::cout << "章节完成：" << chapter(floor).name << "；专精与改造可在营地重新准备。\n";
@@ -350,6 +385,7 @@ void printJournal(const player &hero, int floor) {
     const auto rules = rulesFor(hero, targetFloor);
     if (rules.objective != EncounterObjective::Defeat)
       std::cout << " 第" << targetFloor << "层" << objectiveName(rules.objective);
+    if (rules.elite) std::cout << " 第" << targetFloor << "层精英";
   }
   std::cout << "；第" << (c + 1) * 10 << "层击败Boss。\n"
     << eventOutcome(eventType(floor), run.events[c]) << "。\n";

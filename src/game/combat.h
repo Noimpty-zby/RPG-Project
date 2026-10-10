@@ -14,6 +14,7 @@ struct EncounterRules {
   int targetTurns = 4;
   int difficulty = 0;
   bool bossSabotaged = false;
+  bool elite = false;
 };
 
 struct BattleReport {

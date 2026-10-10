@@ -112,6 +112,14 @@ bool usableTarget(const Item &item, const player &hero, ItemType target) {
 
 } // namespace
 
+Item generateEliteReward(const player &hero, int floor) {
+  floor = GameConfig::floor(floor);
+  const ItemType type = hero.runState().lootTarget == Armor ? Armor : Weapon;
+  // The best quality band available on this floor, wearable at the hero's level.
+  return makeItem(floor, equipmentClass(hero.job()), type, Progression::equipmentTier(floor, 99),
+                  hero.getlevel());
+}
+
 Item generateTargetedItem(int floor, JobReq job, ItemType type) {
   floor = GameConfig::floor(floor);
   const int tier = Progression::equipmentTier(floor, rand() % 100);
@@ -158,26 +166,32 @@ optional<Item> generateLoot(player &hero, int floor, bool firstClear) {
 
 EnemyStats enemyStatsForFloor(int value) {
   const int floor = GameConfig::floor(value);
-  const bool boss = floor % 10 == 0;
-  EnemyStats stats{40 + floor * 8, 4 + floor * 3 / 2,
-                   30 + floor * 25, 8 + floor * 10, floor, boss};
-  if (boss) {
-    stats.hp = stats.hp * 5 / 2;
-    stats.attack = stats.attack * 9 / 5;
-    stats.expReward *= 4;
-    stats.coinReward *= 5;
-    stats.level += 3;
-  }
-  return stats;
+  const int baseHp = 40 + floor * 8, baseAttack = 4 + floor * 3 / 2;
+  const int exp = 30 + floor * 25, coins = 8 + floor * 10;
+  // Bosses keep their own curve. Ordinary enemies are tougher but hit softer,
+  // so fights last long enough for their intents to matter.
+  if (floor % 10 == 0)
+    return {baseHp * 5 / 2, baseAttack * 9 / 5, exp * 4, coins * 5, floor + 3, true};
+  return {baseHp * EnemyTuning::OrdinaryHpPercent / 100,
+          max(1, baseAttack * EnemyTuning::OrdinaryAttackPercent / 100),
+          exp, coins, floor, false};
 }
 
-enemy generateEnemy(int value) {
+enemy generateEnemy(int value, bool elite) {
   const int floor = GameConfig::floor(value);
   const auto stats = enemyStatsForFloor(floor);
+  elite = elite && !stats.boss;
   const string name = stats.boss ? "★ " + enemyNameForFloor(floor) + " ★"
-                                 : enemyNameForFloor(floor);
+                                 : (elite ? "精英·" : "") + enemyNameForFloor(floor);
   enemy monster(name, stats.hp, stats.attack, 0, stats.expReward, stats.coinReward, stats.level);
   monster.setAffix(floor);
+  if (elite) {
+    monster.ensureAffixes(2);
+    monster.resethp(monster.gethp() * EnemyTuning::EliteHpPercent / 100);
+    monster.resetattack(monster.getattack() * EnemyTuning::EliteAttackPercent / 100);
+    monster.resetexp_reward(monster.getexp_reward() * 2);
+    monster.resetcoin_reward(monster.getcoin_reward() * 3 / 2);
+  }
   if (stats.boss) monster.resetattack(monster.getattack() * bossAttackPercent(floor) / 100);
   if (monster.hasAffix(Affix::STRONG)) monster.resetattack(monster.getattack() * 120 / 100);
   if (monster.hasAffix(Affix::TOUGH)) monster.resethp(monster.gethp() * 120 / 100);

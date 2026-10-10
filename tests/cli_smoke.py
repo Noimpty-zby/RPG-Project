@@ -18,7 +18,7 @@ for job in (1, 2, 3):
         assert "最高层 1" in first
         save = pathlib.Path(workspace, "save.dat")
         saved = save.read_text(encoding="utf-8")
-        assert "VERSION 3\n" in saved and "HIGHEST_FLOOR 1\n" in saved
+        assert "VERSION 4\n" in saved and "HIGHEST_FLOOR 1\n" in saved
         loaded = run("1\n6\n8\n0\n2\n0\n9\n4\n2\n")
         assert f"Smoke{job}" in loaded and "先完成本层目标" in loaded
         assert save.read_text(encoding="utf-8") == saved
@@ -46,8 +46,10 @@ for job in (1, 2, 3):
 
         # Help, archive, travel and partial stack sales never touch the save.
         save.write_text(saved, encoding="utf-8")
-        menus = run("1\n12\n1\n6\n0\n11\n1\n1\n0\n2\n3\n4\n0\n10\n1\n2\n3\n1\n2\n0\n4\n2\n")
+        menus = run("1\n12\n1\n6\n0\n11\n1\n1\n0\n2\n3\n4\n0\n10\n1\n2\n3\n1\n2\n0\n"
+                    "8\n8\n1\n0\n9\n0\n0\n4\n2\n")
         assert "基础流程" in menus and "[剧毒]" in menus and "敌人图鉴：已发现" in menus
+        assert "强化已穿戴装备" in menus and " +1 | " in menus and "无需修理" in menus
         assert "成就：" in menus and "还没有完成的远征" in menus
         assert "卖出数量（1-4" in menus and "×2，获得" in menus
         assert save.read_text(encoding="utf-8") == saved
@@ -69,5 +71,5 @@ for job in (1, 2, 3):
         run("1\n")
         assert profile.read_text(encoding="utf-8").count("RECORD ") == 1
 
-print("CLI smoke passed: three jobs, V3 round-trip, camp, inventory, input bounds, battle cancellation, EOF, "
-      "old save preservation, help, archive, travel, inspect, stack sales, run records.")
+print("CLI smoke passed: three jobs, V4 round-trip, camp, inventory, input bounds, battle cancellation, EOF, "
+      "old save preservation, help, archive, travel, inspect, stack sales, enhance/repair, run records.")

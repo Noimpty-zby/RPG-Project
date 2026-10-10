@@ -84,18 +84,25 @@ void enemy::setAffix(int floor) {
   // 每次有 40% 基础概率触发词缀，高楼层概率更高
   for (int i = 0; i < generate_chance; i++) {
     int threshold = min(40 + floor / 5, 70); // 40%~70%，随楼层增加
-    if ((rand() % 100) < threshold) {
-      const Affix rolled = getRandomAffix();
-      if (hasAffix(rolled)) continue;
-      affixes.push_back(rolled);
-      // Only a newly added affix grants a bonus; duplicate rolls do nothing.
-      const long long bonusLevel = max(0, getlevel());
-      resetexp_reward(static_cast<int>(clamp(static_cast<long long>(getexp_reward()) + bonusLevel * 3,
-                                             0LL, static_cast<long long>(numeric_limits<int>::max()))));
-      resetcoin_reward(static_cast<int>(clamp(static_cast<long long>(getcoin_reward()) + bonusLevel * 2,
-                                              0LL, static_cast<long long>(numeric_limits<int>::max()))));
-    }
+    if ((rand() % 100) < threshold) addAffix(getRandomAffix());
   }
+}
+bool enemy::addAffix(Affix affix) {
+  if (hasAffix(affix)) return false;
+  affixes.push_back(affix);
+  // Only a newly added affix grants a bonus; duplicate rolls do nothing.
+  const long long bonusLevel = max(0, getlevel());
+  resetexp_reward(static_cast<int>(clamp(static_cast<long long>(getexp_reward()) + bonusLevel * 3,
+                                         0LL, static_cast<long long>(numeric_limits<int>::max()))));
+  resetcoin_reward(static_cast<int>(clamp(static_cast<long long>(getcoin_reward()) + bonusLevel * 2,
+                                          0LL, static_cast<long long>(numeric_limits<int>::max()))));
+  return true;
+}
+void enemy::ensureAffixes(int count) {
+  count = clamp(count, 0, AffixCount);
+  // Weighted rolls reach every affix quickly; the bound only guards the loop.
+  for (int roll = 0; roll < 1000 && static_cast<int>(affixes.size()) < count; ++roll)
+    addAffix(getRandomAffix());
 }
 bool enemy::hasAffix(Affix affix) const {
   for (const auto &a : affixes) {

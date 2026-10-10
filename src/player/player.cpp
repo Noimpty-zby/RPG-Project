@@ -15,8 +15,10 @@ bool validItem(const Item &item) {
       item.getJobRequirement() >= AnyJob && item.getJobRequirement() <= AssassinOnly &&
       item.getLevelRequirement() >= 1 && item.getValue() >= 0 &&
       item.getValue() <= 1000000 && item.getDurability() >= 0 &&
+      item.getMaxDurability() >= item.getDurability() &&
       item.getPrice() >= 0 && item.getQuantity() > 0 &&
-      item.getTier() >= 0 && item.getTier() <= 3 && item.supportsEffect(item.getEffect());
+      item.getTier() >= 0 && item.getTier() <= 3 && item.supportsEffect(item.getEffect()) &&
+      item.getEnhanceLevel() >= 0 && item.getEnhanceLevel() <= GameConfig::MaxEnhanceLevel;
 }
 bool samePotion(const Item &a, const Item &b) {
   return a.getType() == Potion && b.getType() == Potion &&
@@ -26,7 +28,8 @@ bool samePotion(const Item &a, const Item &b) {
       a.getDurability() == b.getDurability() &&
       a.getJobRequirement() == b.getJobRequirement() &&
       a.getTier() == b.getTier() && a.getEffect() == b.getEffect() &&
-      a.isLocked() == b.isLocked();
+      a.isLocked() == b.isLocked() && a.getEnhanceLevel() == b.getEnhanceLevel() &&
+      a.getMaxDurability() == b.getMaxDurability();
 }
 constexpr JobProfile profiles[] = {
   {"Warrior", "战士", "战意", 200, 18, 24, 8, 20, 3, 3},
@@ -177,7 +180,7 @@ void player::finishEncounterWear() {
     Item &item = equipments[i];
     item.setDurability(max(0, item.getDurability() - 1));
     if (item.getDurability() > 0) continue;
-    cout << "【装备破损】" << item.getName() << endl;
+    cout << "【装备破损】" << item.getDisplayName() << endl;
     if (item.getType() == Weapon) attack = max(0, attack - item.getValue());
     if (item.getType() == Armor) {
       max_hp = max(1, max_hp - item.getValue());
@@ -224,7 +227,7 @@ void player::printBackpack() const {
   if (backpack.empty()) { cout << "背包空空如也！" << endl; return; }
   for (int i = 0; i < static_cast<int>(backpack.size()); ++i) {
     const Item &item = backpack[i];
-    cout << i + 1 << ". " << (item.isLocked() ? "[锁定] " : "") << item.getName()
+    cout << i + 1 << ". " << (item.isLocked() ? "[锁定] " : "") << item.getDisplayName()
          << " ×" << item.getQuantity() << " | 数值 " << item.getValue()
          << " | 单价 " << item.getPrice() << " | 等级 " << item.getLevelRequirement()
          << " | " << item.getJobRequirementName();
@@ -235,7 +238,8 @@ void player::printBackpack() const {
       const int difference = item.getValue() - equipped;
       cout << " | " << item.getTierName() << " | " << (item.getType() == Weapon ? "攻击" : "生命") << "变化 "
            << (difference >= 0 ? "+" : "") << difference
-           << " | 耐久 " << item.getDurability() << " | 效果 " << item.getEffectDescription();
+           << " | 耐久 " << item.getDurability() << "/" << item.getMaxDurability()
+           << " | 效果 " << item.getEffectDescription();
       if (!canWear(item) || item.getLevelRequirement() > level || item.getDurability() <= 0)
         cout << " [当前不可装备]";
     }
@@ -304,9 +308,10 @@ void player::showEquippedItems() const {
   if (equipments.empty()) { cout << "没有装备任何物品！" << endl; return; }
   for (int i = 0; i < static_cast<int>(equipments.size()); ++i) {
     const auto &item = equipments[i];
-    cout << i + 1 << ". " << item.getName() << " | " << item.getTierName() << " | "
+    cout << i + 1 << ". " << item.getDisplayName() << " | " << item.getTierName() << " | "
          << (item.getType() == Weapon ? "攻击+" : "生命+") << item.getValue()
-         << " | 耐久 " << item.getDurability() << " | " << item.getEffectDescription() << endl;
+         << " | 耐久 " << item.getDurability() << "/" << item.getMaxDurability()
+         << " | " << item.getEffectDescription() << endl;
   }
 }
 int player::sellItem(int index, int quantity) {
@@ -350,6 +355,42 @@ bool player::modifyEquipment(int index, int effectId) {
   const int cost = 3 + item.getTier() * 2;
   if (run.materials < cost || !item.setEffect(static_cast<ItemEffect>(effectId))) return false;
   run.materials -= cost;
+  return true;
+}
+
+int player::enhanceCost(int index) const {
+  if (index < 1 || index > static_cast<int>(equipments.size())) return 0;
+  const Item &item = equipments[index - 1];
+  if (item.getEnhanceLevel() >= GameConfig::MaxEnhanceLevel) return 0;
+  return GameConfig::enhanceCost(item.getPrice(), item.getEnhanceLevel() + 1);
+}
+bool player::enhanceEquipment(int index) {
+  const int cost = enhanceCost(index);
+  if (cost <= 0 || coin < cost) return false;
+  Item &item = equipments[index - 1];
+  const int gain = max(1, item.getValue() * GameConfig::EnhancePercent / 100);
+  if (item.getValue() + gain > 1000000) return false;
+  costcoin(cost);
+  item.setValue(item.getValue() + gain);
+  item.setEnhanceLevel(item.getEnhanceLevel() + 1);
+  // The worn item already counts toward stats, so only the gain is added.
+  if (item.getType() == Weapon) attack = GameConfig::addCounter(attack, gain);
+  else max_hp = GameConfig::addCounter(max_hp, gain);
+  return true;
+}
+int player::repairCost(int index) const {
+  if (index < 1 || index > static_cast<int>(equipments.size())) return 0;
+  const Item &item = equipments[index - 1];
+  const long long missing = max(0, item.getMaxDurability() - item.getDurability());
+  const long long cost = missing * GameConfig::repairCostPerPoint(item.getPrice(), item.getTier());
+  return static_cast<int>(min(cost, static_cast<long long>(GameConfig::MaxCoins)));
+}
+bool player::repairEquipment(int index) {
+  const int cost = repairCost(index);
+  if (cost <= 0 || coin < cost) return false;
+  costcoin(cost);
+  Item &item = equipments[index - 1];
+  item.setDurability(item.getMaxDurability());
   return true;
 }
 

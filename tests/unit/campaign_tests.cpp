@@ -1,4 +1,5 @@
 #include "core/game_config.h"
+#include "core/progression.h"
 #include "game/campaign.h"
 #include "player/jobs.h"
 #include "storage/save.h"
@@ -212,6 +213,81 @@ void testLivingTimeoutIsNotADeath() {
 }
 } // namespace
 
+void testEliteEncounters() {
+  Warrior hero("elite");
+  prepareEventHero(hero);
+  int elites = 0;
+  for (int floor = 1; floor <= GameConfig::MaxFloor; ++floor) {
+    const auto rules = Campaign::rulesFor(hero, floor);
+    if (!rules.elite) continue;
+    ++elites;
+    require(Campaign::isEliteFloor(floor) && Campaign::eliteFloor(GameConfig::chapter(floor)) == floor,
+            "elite helpers must agree");
+    require(floor % 10 != 0 && rules.objective == EncounterObjective::Defeat,
+            "elites must never replace a boss or a side goal");
+    require(rules.difficulty == 1, "elites must raise intent pressure by one step");
+  }
+  require(elites == 10, "every chapter needs exactly one elite floor");
+  for (int c = 0; c < 10; ++c) {
+    const int floor = Campaign::eliteFloor(c);
+    hero.runState().attempts[floor] = 0;
+    const enemy elite = Campaign::makeEnemy(hero, floor);
+    require(elite.getAffixes().size() >= 2 && elite.getname().rfind("精英·", 0) == 0,
+            "elites carry at least two affixes and a visible title");
+    std::srand(static_cast<unsigned>(floor));
+    const enemy plain = generateEnemy(floor);
+    std::srand(static_cast<unsigned>(floor));
+    const enemy strong = generateEnemy(floor, true);
+    require(strong.getmaxhp() > plain.getmaxhp() && strong.getattack() >= plain.getattack() &&
+                strong.getexp_reward() > plain.getexp_reward(),
+            "elites must be tougher and more rewarding than the same floor's enemy");
+  }
+  require(generateEnemy(10, true).getname().find("精英") == std::string::npos,
+          "boss floors never generate elites");
+
+  // Objective guardians are scaled from the base curve, undoing the ordinary tuning.
+  hero.runState().routes[0] = 3;
+  require(Campaign::rulesFor(hero, 6).objective == EncounterObjective::Disrupt, "fixture floor is a disrupt goal");
+  Campaign::seedStream(hero, 6, 10 + static_cast<unsigned>(hero.runState().attempts[6]));
+  const enemy base = generateEnemy(6);
+  const enemy guardian = Campaign::makeEnemy(hero, 6);
+  require(guardian.getmaxhp() == base.getmaxhp() * EnemyTuning::DisruptHpPercent / EnemyTuning::OrdinaryHpPercent &&
+              guardian.getattack() == std::max(1, base.getattack() * EnemyTuning::ObjectiveAttackPercent /
+                                                       EnemyTuning::OrdinaryAttackPercent),
+          "guardian stats must be relative to the base curve");
+
+  // First clear of an elite pays a best-band piece of the loot target once.
+  Warrior rewarded("reward");
+  Campaign::initialize(rewarded, 9, 0);
+  rewarded.runState().lootTarget = Armor;
+  rewarded.runState().pity = 4;
+  const int floor = Campaign::eliteFloor(0);
+  for (int f = 1; f < floor; ++f) { rewarded.runState().cleared[f] = 1; rewarded.runState().attempts[f] = 1; }
+  rewarded.setHighestFloor(floor);
+  auto settle = [&](int &materials, std::size_t &items) {
+    enemy target("elite fixture", 1, 0, 0, 10, 10, floor);
+    target.configureEncounter(floor, false);
+    target.setdodgeRate(0);
+    BattleSession battle(rewarded, target, Campaign::rulesFor(rewarded, floor));
+    require(battle.beginTurn() && battle.act({ActionType::Attack}), "fixture fight");
+    materials = rewarded.runState().materials;
+    items = rewarded.getSaveBackpack().size();
+    require(Campaign::settleEncounter(rewarded, target, battle, floor), "fixture victory");
+  };
+  int materials = 0;
+  std::size_t items = 0;
+  settle(materials, items);
+  require(rewarded.runState().materials >= materials + 2 && rewarded.runState().pity == 0,
+          "first elite clear grants materials and resets pity");
+  bool rewardFound = false;
+  for (const Item &item : rewarded.getSaveBackpack())
+    rewardFound |= item.getType() == Armor && item.getJobRequirement() == WarriorOnly &&
+                   item.getTier() == Progression::equipmentTier(floor, 99) &&
+                   item.getLevelRequirement() <= rewarded.getlevel();
+  require(rewardFound, "elite reward must be wearable class armor in the best quality band");
+  settle(materials, items);
+  require(rewarded.runState().materials == materials, "repeat elite clears pay no elite reward");
+}
 int main() {
   std::ostringstream quiet;
   auto *original = std::cout.rdbuf(quiet.rdbuf());
@@ -220,6 +296,7 @@ int main() {
   testEventEnemyEffectsAndPrices();
   testEventsPersistWithoutNewFields();
   testLivingTimeoutIsNotADeath();
+  testEliteEncounters();
   Warrior hero("campaign");
   Campaign::initialize(hero, 777, 0);
   bool rejected = false;
@@ -265,10 +342,21 @@ int main() {
   assert(!Campaign::resolveEvent(hero, 5, 2) && hero.getcoin() == coins);
   assert(Campaign::makeEnemy(hero, 10).getattack() <= first.getattack());
   assert(!Campaign::rest(hero, 1)); // Full resources must not charge.
+  for (int rest = 1; rest <= GameConfig::MaxRestsPerChapter; ++rest) {
+    hero.sethp(1);
+    coins = hero.getcoin();
+    assert(Campaign::restPrice(hero, 1) == GameConfig::restCost(1) * rest);
+    assert(Campaign::rest(hero, 1) && hero.getcoin() == coins - GameConfig::restCost(1) * rest);
+  }
   hero.sethp(1);
-  assert(Campaign::rest(hero, 1));
   coins = hero.getcoin();
+  assert(Campaign::restsRemaining(hero, 1) == 0);
   assert(!Campaign::rest(hero, 1) && hero.getcoin() == coins);
+  assert(Campaign::restsRemaining(hero, 11) == GameConfig::MaxRestsPerChapter);
+  hero.runState().challenge = 1; // Scarce supplies: one rest per chapter.
+  assert(Campaign::restsRemaining(hero, 11) == 1 && Campaign::rest(hero, 11) &&
+         Campaign::restsRemaining(hero, 11) == 0 && !Campaign::rest(hero, 11));
+  hero.runState().challenge = 0;
   assert(!Campaign::claimOrder(hero, 1));
   for (int f = 1; f <= 5; ++f) { hero.runState().cleared[f] = 1; hero.runState().attempts[f] = 1; }
   assert(Campaign::claimOrder(hero, 5));

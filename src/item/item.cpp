@@ -8,15 +8,19 @@ Item::Item(string name, int levelRequirement, ItemType type, int value,
            int durability, int price, int quantity, JobReq jobRequirement,
            int tier, ItemEffect effect, bool locked, string id)
     : name(name), levelRequirement(levelRequirement), type(type), value(value),
-      durability(durability), price(price), quantity(quantity),
+      durability(durability), maxDurability(durability), price(price), quantity(quantity),
       jobRequirement(jobRequirement), tier(tier), effect(effect), locked(locked),
       id(id.empty() ? templateId(name, type, jobRequirement, tier) : id) {}
 
 string Item::getName() const { return name; }
+string Item::getDisplayName() const {
+  return enhanceLevel > 0 ? name + " +" + to_string(enhanceLevel) : name;
+}
 int Item::getLevelRequirement() const { return levelRequirement; }
 ItemType Item::getType() const { return type; }
 int Item::getValue() const { return value; }
 int Item::getDurability() const { return durability; }
+int Item::getMaxDurability() const { return maxDurability; }
 int Item::getPrice() const { return price; }
 int Item::getQuantity() const { return quantity; }
 JobReq Item::getJobRequirement() const { return jobRequirement; }
@@ -102,4 +106,6 @@ string Item::getJobRequirementName() const {
 }
 
 void Item::setQuantity(int q) { quantity = q; }
+void Item::setValue(int v) { value = v; }
 void Item::setDurability(int d) { durability = d; }
+void Item::setMaxDurability(int value) { maxDurability = value; }
