@@ -134,7 +134,7 @@ const char *affixDescription(Affix affix) {
   case Affix::QUICK: return "闪避率提高（最高25%），攻击可能落空。";
   case Affix::EXPLOSIVE: return "被击败时爆炸：造成其攻击一半的伤害（最多基础生命10%），无法格挡或闪避。";
   case Affix::POISONOUS: return "每回合开始造成其攻击1/5的伤害（最多基础生命5%），无法格挡或闪避。";
-  case Affix::HEALING: return "在“攻势恢复”回合回复3%最大生命；用爆发打断这个窗口。";
+  case Affix::HEALING: return "蓄力完成时回复4%最大生命；普攻打断蓄力即可阻止。";
   case Affix::SHIELDING: return "吸收普攻和多数技能的部分伤害（最多一半）；穿盾技能不受影响。";
   }
   return "";
@@ -314,20 +314,21 @@ EnemyIntent enemy::makeIntent(EnemyIntentKind kind) const {
     intent.interruptible = true;
     break;
   case EnemyIntentKind::HeavyStrike:
-    intent.damagePercent = bossEncounter ? (sabotaged ? 125 : 160)
-                                         : (sabotaged ? 110 : 135);
+    intent.damagePercent = bossEncounter
+        ? (sabotaged ? IntentTuning::SabotagedBossHeavyStrikePercent : IntentTuning::BossHeavyStrikePercent)
+        : (sabotaged ? IntentTuning::SabotagedHeavyStrikePercent : IntentTuning::HeavyStrikePercent);
     break;
   case EnemyIntentKind::Wound:
-    intent.damagePercent = 80;
-    intent.healingPercent = 50;
+    intent.damagePercent = IntentTuning::WoundPercent;
+    intent.healingPercent = IntentTuning::WoundHealingPercent;
     break;
   case EnemyIntentKind::Shatter:
-    intent.damagePercent = 80;
+    intent.damagePercent = IntentTuning::ShatterPercent;
     intent.piercesGuard = true;
     break;
   case EnemyIntentKind::ReadPattern:
-    // The caller raises damage to 150% only if this prediction is matched.
-    intent.damagePercent = 75;
+    // The caller uses ReadHitPercent instead if this prediction is matched.
+    intent.damagePercent = IntentTuning::ReadMissPercent;
     intent.predictedAction = predictAction();
     break;
   case EnemyIntentKind::Recover:
@@ -392,39 +393,42 @@ string actionDescription(int actionId) {
 } // namespace
 
 void enemy::displayIntent() const {
-  EnemyIntent intent = getIntent();
+  const EnemyIntent intent = getIntent();
   cout << "【敌人意图】";
   switch (intent.kind) {
   case EnemyIntentKind::Attack:
-    cout << "普通攻击：造成 100% 攻击伤害，可格挡。";
+    cout << "普通攻击：造成 100% 攻击伤害，可格挡减半。";
     break;
   case EnemyIntentKind::Charge:
-    cout << "蓄力：本回合不攻击；普通攻击实际命中可打断并制造休整窗口。"
-            "未打断则下回合重击，可用格挡或减攻应对。";
+    cout << "蓄力：本回合不攻击；普通攻击实际命中即可打断，敌人随后休整一回合。"
+            "未打断则下回合重击（"
+         << makeIntent(EnemyIntentKind::HeavyStrike).damagePercent << "%），可格挡减半。";
+    if (hasAffix(Affix::HEALING))
+      cout << "【治疗】蓄力完成会回复 " << IntentTuning::HealingAffixPercent << "% 最大生命。";
     break;
   case EnemyIntentKind::HeavyStrike:
-    cout << "蓄力重击：造成 " << intent.damagePercent
-         << "% 攻击伤害，可格挡。";
+    cout << "蓄力重击：造成 " << intent.damagePercent << "% 攻击伤害，可格挡减半。";
     break;
   case EnemyIntentKind::Wound:
-    cout << "压制治疗：本次玩家行动治疗仅生效 50%，随后造成 80% 攻击伤害；"
-            "可先普攻或格挡，离开此意图后治疗恢复正常。";
+    cout << "压制治疗：本次行动的治疗只生效 " << intent.healingPercent << "%，随后造成 "
+         << intent.damagePercent << "% 攻击伤害；这回合先别回血。";
     break;
   case EnemyIntentKind::Shatter:
-    cout << "破防攻击：造成 80% 攻击伤害，无视格挡减伤；"
-            "可主动攻击或减攻，格挡仍能恢复资源。";
+    cout << "破防攻击：造成 " << intent.damagePercent << "% 攻击伤害，无视格挡减伤；"
+            "减攻技能仍然有效，主动进攻比格挡划算。";
     break;
   case EnemyIntentKind::ReadPattern:
     if (intent.predictedAction == -99) {
-      cout << "观察连招：经验不足，尚无法预测；本回合仅造成 75% 攻击伤害。";
+      cout << "观察连招：经验不足，尚无法预测；本回合仅造成 " << intent.damagePercent
+           << "% 攻击伤害。";
     } else {
-      cout << "预判连招：预计你使用【"
-           << actionDescription(intent.predictedAction)
-           << "】；命中预判造成 150% 攻击伤害，改变行动则仅造成 75%。";
+      cout << "预判连招：预计你使用【" << actionDescription(intent.predictedAction)
+           << "】；命中预判造成 " << IntentTuning::ReadHitPercent << "% 攻击伤害，换一种行动只受 "
+           << intent.damagePercent << "%。";
     }
     break;
   case EnemyIntentKind::Recover:
-    cout << "攻势恢复：本回合不发动攻击，治疗正常，可安排回血或准备爆发。";
+    cout << "休整：蓄力被打断，本回合不攻击，适合回血或爆发。";
     break;
   }
   cout << endl;
@@ -433,7 +437,8 @@ void enemy::displayIntent() const {
 bool enemy::interruptCharge() {
   if (getIntent().kind != EnemyIntentKind::Charge) return false;
   chargePending = false;
-  recoveryTurns = 1;
+  // Pressured enemies (challenges, elites) shake off an interrupt at once.
+  recoveryTurns = tacticalPressure == 0 ? 1 : 0;
   interruptedThisTurn = true;
   specialCooldown = max(1, 3 - tacticalPressure) + (sabotaged ? 1 : 0);
   return true;
@@ -462,8 +467,8 @@ void enemy::finishTurn(int actionId, bool healed, EnemyIntentKind resolved) {
     chargePending = true;
     turnsSinceSpecial = 0;
   } else if (resolved == EnemyIntentKind::HeavyStrike) {
+    // A landed heavy strike earns the player nothing: only interrupts open a rest.
     chargePending = false;
-    recoveryTurns = 1;
     specialCooldown = max(1, 3 - tacticalPressure) + (sabotaged ? 1 : 0);
     turnsSinceSpecial = 0;
   } else if (resolved == EnemyIntentKind::Wound ||

@@ -33,6 +33,21 @@ struct EnemyIntent {
   bool interruptible = false;
 };
 
+// How hard each telegraphed intent hits, in percent of attack. An unanswered
+// special must hurt more than plain attacks; answering it opens a window.
+namespace IntentTuning {
+constexpr int HeavyStrikePercent = 220;
+constexpr int BossHeavyStrikePercent = 250;
+constexpr int SabotagedHeavyStrikePercent = 170;
+constexpr int SabotagedBossHeavyStrikePercent = 190;
+constexpr int WoundPercent = 100;
+constexpr int WoundHealingPercent = 50; // Player healing that still lands.
+constexpr int ShatterPercent = 120;
+constexpr int ReadMissPercent = 75;  // The player changed the predicted action.
+constexpr int ReadHitPercent = 175;  // The player repeated it.
+constexpr int HealingAffixPercent = 4; // Max HP restored per uninterrupted charge.
+} // namespace IntentTuning
+
 constexpr int AffixCount = 7;
 const char *affixName(Affix affix);
 const char *affixDescription(Affix affix);

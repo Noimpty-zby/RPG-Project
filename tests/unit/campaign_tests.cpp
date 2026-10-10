@@ -229,6 +229,13 @@ void testEliteEncounters() {
     require(rules.difficulty == 1, "elites must raise intent pressure by one step");
   }
   require(elites == 10, "every chapter needs exactly one elite floor");
+  // Only scarce supplies pressures enemies; no-revive keeps standard enemies.
+  for (int challenge : {0, 1, 2}) {
+    hero.runState().challenge = challenge;
+    require(Campaign::rulesFor(hero, 1).difficulty == (challenge == 1 ? 1 : 0),
+            "intent pressure belongs to scarce supplies only");
+  }
+  hero.runState().challenge = 0;
   for (int c = 0; c < 10; ++c) {
     const int floor = Campaign::eliteFloor(c);
     hero.runState().attempts[floor] = 0;

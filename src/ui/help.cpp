@@ -6,7 +6,39 @@ namespace {
 struct Topic {
   const char *title;
   const char *text;
+  std::string (*build)() = nullptr; // Pages built from live tuning values.
 };
+
+std::string intentPage() {
+  using namespace IntentTuning;
+  const auto pct = [](int value) { return std::to_string(value) + "%"; };
+  return "· 行动：普攻（命中回复 MP、积累职业资源，并能打断蓄力）、技能、格挡（本回合伤害减半并回复 MP）、药水。\n"
+         "· 无效输入、取消选择或使用失败都不会推进回合，也不会回蓝或减少冷却。\n"
+         "· 敌人每回合会公开意图。特殊意图不应对会比普通攻击更痛，应对了则有好处：\n"
+         "  普通攻击：造成 100% 攻击伤害，可格挡减半。\n"
+         "  蓄力：本回合不攻击；普攻实际命中即可打断，敌人随后休整一回合。\n"
+         "        未打断则下回合重击：" + pct(HeavyStrikePercent) + "（Boss " + pct(BossHeavyStrikePercent) +
+         "），格挡可减半；重击之后不会休整。\n"
+         "  压制治疗：本回合你的治疗只生效 " + pct(WoundHealingPercent) + "，随后造成 " + pct(WoundPercent) +
+         " 伤害；这回合先别回血。\n"
+         "  破防：造成 " + pct(ShatterPercent) + " 伤害并无视格挡减伤；减攻技能仍然有效，主动进攻比格挡划算。\n"
+         "  预判连招：重复被预判的行动会受到 " + pct(ReadHitPercent) + " 伤害，换一种行动只受 " +
+         pct(ReadMissPercent) + "。\n"
+         "  休整：只在蓄力被打断后出现，本回合不攻击，适合回血或爆发。\n"
+         "· 精英和补给匮乏模式的敌人更难缠：特殊意图更频繁，被打断后不休整。\n"
+         "· 敌人会参考你最近的治疗、格挡、出招习惯和自身血量；生命低于 35% 时会尝试一次绝境蓄力。\n"
+         "· 战斗中选 [5] 可以随时查看敌我详情、词缀说明和技能状态，不消耗回合。";
+}
+
+std::string affixPage() {
+  std::string text;
+  for (int id = 0; id < AffixCount; ++id) {
+    const Affix affix = static_cast<Affix>(id);
+    text += std::string("· [") + affixName(affix) + "] " + affixDescription(affix) + "\n";
+  }
+  text += "· 敌人可能同时带有多个词缀，楼层越高越常见；击败带词缀的敌人奖励更多。";
+  return text;
+}
 
 const Topic topics[] = {
     {"基础流程",
@@ -21,26 +53,14 @@ const Topic topics[] = {
      "· 每章有一个精英楼层（第 6 或 7 层），章节日志和楼层标题会提前标出。\n"
      "· 营地：休息（每章最多 3 次，价格逐次翻倍）、领取订单、选择保底目标、装备改造、\n"
      "  强化、修理、商店、技能与专精。"},
-    {"战斗与敌人意图",
-     "· 行动：普攻（命中回复 MP、积累职业资源，并能打断蓄力）、技能、格挡（本回合伤害减半并回复 MP）、药水。\n"
-     "· 无效输入、取消选择或使用失败都不会推进回合，也不会回蓝或减少冷却。\n"
-     "· 敌人每回合会公开意图：\n"
-     "  普通攻击：造成 100% 攻击伤害，可格挡。\n"
-     "  蓄力：本回合不攻击；普攻实际命中即可打断，敌人随后休整一回合。未打断则下回合重击。\n"
-     "  重击：高倍率伤害，可以格挡或提前减攻。\n"
-     "  压制治疗：本回合你的治疗只生效 50%，随后造成 80% 伤害。\n"
-     "  破防：造成 80% 伤害并无视格挡减伤（格挡仍会回复 MP）。\n"
-     "  预判连招：命中预判的行动会受到 150% 伤害，换一种行动只受 75%。\n"
-     "  攻势恢复：本回合不攻击，适合回血或爆发。\n"
-     "· 敌人会参考你最近的治疗、格挡、出招习惯和自身血量；生命低于 35% 时会尝试一次绝境蓄力。\n"
-     "· 战斗中选 [5] 可以随时查看敌我详情、词缀说明和技能状态，不消耗回合。"},
+    {"战斗与敌人意图", nullptr, intentPage},
     {"遭遇目标",
      "· 击败：击败敌人，限 80 回合。\n"
      "· 生存：撑过指定回合数，或击败敌人。\n"
      "· 打断：用普攻命中蓄力中的敌人，累计打断 2 次，或击败敌人；限 20 回合。\n"
      "· 撤离：撑过至少 3 回合后用格挡撤离，或击败敌人；限 15 回合。\n"
      "· 目标遭遇中的敌人生命更高、攻击稍低，按目标完成通常比硬拼更划算。\n"
-     "· 精英：每章一场，至少两个词缀，生命和攻击更高，特殊意图更频繁。\n"
+     "· 精英：每章一场，至少两个词缀，生命和攻击更高，敌人更难缠（特殊意图更频繁，被打断后不休整）。\n"
      "  首通必得一件本职业、本层最高品质档的装备（部位按营地的保底目标）和 2 材料。\n"
      "· 超过回合上限视为失败并回到营地；死亡优先于同回合的胜利。\n"
      "· 第 1 章的特殊目标在第 3、6、8 层，之后每章轮换位置；每章第 10 层总是 Boss 战。"},
@@ -66,11 +86,12 @@ const Topic topics[] = {
      "  和批量拆解未锁定装备换取材料。\n"
      "· 章节商店的库存跨楼层、跨读档保留；刷新费用随章节和次数增加，每章最多 20 次。\n"
      "  Boss 战前用多余金币补充药水通常很值得。"},
-    {"敌人词缀", nullptr},
+    {"敌人词缀", nullptr, affixPage},
     {"挑战模式、存档与档案",
      "· 标准：每局 3 次免费复苏，之后花费当前三分之一金币复苏。\n"
-     "· 补给匮乏：每章只能休息一次，休息和首通恢复减少，商店价格 +25%，开局药水更少。\n"
-     "· 无复苏：阵亡即结束远征。两种挑战中敌人的特殊意图都更频繁。\n"
+     "· 补给匮乏：每章只能休息一次，休息和首通恢复减少，商店价格 +25%，开局药水更少；\n"
+     "  敌人更难缠：特殊意图更频繁，被打断后不休整。\n"
+     "· 无复苏：敌人强度与标准模式相同，但阵亡即结束远征。\n"
      "· 复苏后回到当前楼层营地，首通记录、路线和一次性奖励保留，可以调整专精与装备后重试。\n"
      "· 种子保存在存档中；同种子和同样的选择在任何系统上都会得到相同的远征，可以分享种子。\n"
      "· 存档 save.dat 只在战斗外手动保存，退出时可选择是否保存；新游戏在保存前不会覆盖旧档。\n"
@@ -78,15 +99,6 @@ const Topic topics[] = {
 };
 constexpr int count = static_cast<int>(sizeof topics / sizeof topics[0]);
 
-std::string affixPage() {
-  std::string text;
-  for (int id = 0; id < AffixCount; ++id) {
-    const Affix affix = static_cast<Affix>(id);
-    text += std::string("· [") + affixName(affix) + "] " + affixDescription(affix) + "\n";
-  }
-  text += "· 敌人可能同时带有多个词缀，楼层越高越常见；击败带词缀的敌人奖励更多。";
-  return text;
-}
 } // namespace
 
 namespace Help {
@@ -97,6 +109,6 @@ const char *topicTitle(int topic) {
 std::string topicText(int topic) {
   if (topic < 1 || topic > count) return "";
   const Topic &page = topics[topic - 1];
-  return page.text ? page.text : affixPage();
+  return page.build ? page.build() : page.text;
 }
 } // namespace Help

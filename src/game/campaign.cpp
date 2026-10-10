@@ -133,8 +133,10 @@ EncounterRules rulesFor(const player &hero, int floor) {
   const auto &run = hero.runState();
   const int c = GameConfig::chapter(floor), local = localFloor(floor);
   rules.elite = isEliteFloor(floor);
-  // Challenges and elites both raise how often special intents appear.
-  rules.difficulty = (run.challenge == 0 ? 0 : 1) + (rules.elite ? 1 : 0);
+  // Scarce supplies and elites face pressured enemies: more frequent specials
+  // and no rest after an interrupt. No-revive keeps standard enemies; its
+  // challenge is the single life.
+  rules.difficulty = (run.challenge == 1 ? 1 : 0) + (rules.elite ? 1 : 0);
   rules.bossSabotaged = local == 10 && run.routes[c] == 1 &&
                        run.cleared[c * 10 + 2] && run.cleared[c * 10 + 7];
   const EncounterObjective goals[] = {EncounterObjective::Survive, EncounterObjective::Disrupt,

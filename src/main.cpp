@@ -236,7 +236,7 @@ bool fight(player &hero, int floor, Profile &profile) {
     << " 攻击 " << monster.getattack() << '\n';
   profile.recordEncounter(floor, monster);
   if (rules.elite)
-    std::cout << "【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁；首通必得本层最高品质档的目标装备。\n";
+    std::cout << "【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁且被打断后不休整；首通必得本层最高品质档的目标装备。\n";
   showObjective(rules);
   Campaign::seedStream(hero, floor, 1200 + static_cast<unsigned>(hero.runState().attempts[floor]));
   BattleSession battle(hero, monster, rules);
@@ -382,7 +382,7 @@ int main() {
     else hero = std::make_unique<Assassin>(name);
     std::cout << "远征种子（1..2147483647，0随机；同种子同选择可复现）：";
     int seed; do { seed = readInt(); } while (seed < 0);
-    std::cout << "挑战 [0] 标准 [1] 补给匮乏（恢复减少，物价提高） [2] 无复苏；两种挑战的敌人特殊意图更频繁：";
+    std::cout << "挑战 [0] 标准 [1] 补给匮乏（资源紧张，敌人更难缠） [2] 无复苏（敌人同标准，只有一条命）：";
     int challenge; do { challenge = readInt(); } while (challenge < 0 || challenge > 2);
     Campaign::initialize(*hero, seed == 0 ? static_cast<unsigned>(std::time(nullptr)) : static_cast<unsigned>(seed), challenge);
     std::cout << "提示：主菜单 [12] 帮助 介绍意图、目标、路线与装备。\n";

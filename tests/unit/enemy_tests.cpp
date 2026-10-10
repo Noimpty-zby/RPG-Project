@@ -60,15 +60,14 @@ void testChargeAndEarnedRecovery() {
           "Charge must be visible and interruptible before the heavy strike");
   e.finishTurn(-1);
   require(e.getIntent().kind == EnemyIntentKind::HeavyStrike &&
-              e.getIntent().damagePercent == 160 && !e.getIntent().piercesGuard,
+              e.getIntent().damagePercent == IntentTuning::BossHeavyStrikePercent &&
+              !e.getIntent().piercesGuard,
           "Ignoring charge must lead to a blockable heavy strike");
+  require(IntentTuning::HeavyStrikePercent > 200 && IntentTuning::BossHeavyStrikePercent > 200,
+          "An unanswered charge must out-damage two plain attacks");
   e.finishTurn(-1);
-  require(e.getIntent().kind == EnemyIntentKind::Recover &&
-              e.getIntent().damagePercent == 0,
-          "Heavy strike must create a recovery window");
-  e.finishTurn(1);
   require(e.getIntent().kind != EnemyIntentKind::Recover,
-          "Recovery must not repeat indefinitely");
+          "A landed heavy strike must not hand the player a free recovery turn");
 
   e.configureEncounter(10, true);
   require(e.interruptCharge(), "Charge should accept an interruption");
@@ -79,6 +78,15 @@ void testChargeAndEarnedRecovery() {
   require(!e.interruptCharge(), "Ordinary attacks are not interruptible");
   require(e.getIntent().kind == EnemyIntentKind::Attack,
           "Interrupted enemy must not jump back into heavy strike");
+
+  // Pressured enemies (scarce supplies, elites) shake off an interrupt at once.
+  auto pressured = foe(10, true);
+  pressured.setTacticalPressure(1);
+  require(pressured.interruptCharge(), "Pressured charge should still be interruptible");
+  pressured.finishTurn(0, false, EnemyIntentKind::Charge);
+  require(pressured.getIntent().kind != EnemyIntentKind::Recover &&
+              pressured.getIntent().kind != EnemyIntentKind::HeavyStrike,
+          "A pressured interrupt cancels the strike but grants no recovery turn");
 
   // Crossing a health threshold during an ordinary hit cannot retroactively
   // turn that already-telegraphed attack into a charge.
@@ -111,8 +119,9 @@ void testConditionalReactions() {
   breaker.finishTurn(-1);
   require(breaker.getIntent().kind == EnemyIntentKind::Shatter &&
               breaker.getIntent().piercesGuard &&
-              breaker.getIntent().damagePercent == 80,
-          "Shield breaker must respond to defensive habits");
+              breaker.getIntent().damagePercent == IntentTuning::ShatterPercent &&
+              IntentTuning::ShatterPercent > 100,
+          "Shield breaker must respond to defensive habits and out-hit a plain attack");
 
   auto reader = foe(40, true);
   bool sawRead = false;
@@ -165,7 +174,8 @@ void testPressureAndSabotage() {
   require(!boss.hasAffix(Affix::SHIELDING), "Sabotage must remove the shield source");
   boss.finishTurn(1);
   require(boss.getIntent().kind == EnemyIntentKind::HeavyStrike &&
-              boss.getIntent().damagePercent == 125,
+              boss.getIntent().damagePercent == IntentTuning::SabotagedBossHeavyStrikePercent &&
+              IntentTuning::SabotagedBossHeavyStrikePercent < IntentTuning::BossHeavyStrikePercent,
           "Sabotage must also weaken the boss core, even beyond removing a shield");
 }
 

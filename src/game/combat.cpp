@@ -146,8 +146,10 @@ bool BattleSession::act(BattleAction action) {
   const bool healed = hero.gethp() > hpBeforeAction;
   battleReport.suppressedHealing +=
       std::max(0, hero.getSuppressedHealingTotal() - suppressedBefore);
+  bool interrupted = false;
   if (action.type == ActionType::Attack && intent.interruptible &&
       monster.gethp() < enemyHpBefore && monster.interruptCharge()) {
+    interrupted = true;
     ++battleReport.interrupts;
     std::cout << "【打断成功】普通攻击打断蓄力，下回合敌人休整。" << std::endl;
   }
@@ -162,17 +164,18 @@ bool BattleSession::act(BattleAction action) {
     int damagePercent = intent.damagePercent;
     if (intent.kind == EnemyIntentKind::ReadPattern && intent.predictedAction != -99) {
       bool predicted = actionId == intent.predictedAction;
-      damagePercent = predicted ? 150 : 75;
+      damagePercent = predicted ? IntentTuning::ReadHitPercent : IntentTuning::ReadMissPercent;
       if (predicted) ++battleReport.readPunishments;
       std::cout << (predicted ? "连招被识破，敌人追击！" : "你改变了行动，敌人判断落空！")
                 << std::endl;
     }
     if (damagePercent > 0 && monster.getattack() > 0)
       dealEnemyDamage(std::max(1, monster.getattack() * damagePercent / 100));
-    // Regeneration has a window to interrupt with burst damage, not an endless race.
+    // Healers mend while charging; landing a basic attack interrupts it.
     if (hero.isalive() && monster.hasAffix(Affix::HEALING) &&
-        intent.kind == EnemyIntentKind::Recover) {
-      monster.heal(std::max(1, monster.getmaxhp() * 3 / 100));
+        intent.kind == EnemyIntentKind::Charge && !interrupted) {
+      monster.heal(std::max(1, monster.getmaxhp() * IntentTuning::HealingAffixPercent / 100));
+      std::cout << "【治疗】蓄力中的敌人回复了生命。" << std::endl;
     }
   }
   monster.finishTurn(actionId, healed, intent.kind);

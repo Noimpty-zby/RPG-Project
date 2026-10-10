@@ -33,7 +33,7 @@ bool samePotion(const Item &a, const Item &b) {
 }
 constexpr JobProfile profiles[] = {
   {"Warrior", "战士", "战意", 200, 18, 24, 8, 20, 3, 3},
-  {"Mage", "法师", "专注", 140, 12, 40, 12, 15, 2, 8},
+  {"Mage", "法师", "专注", 150, 12, 40, 12, 17, 2, 8},
   {"Assassin", "刺客", "破绽", 150, 15, 25, 20, 15, 3, 4},
 };
 }

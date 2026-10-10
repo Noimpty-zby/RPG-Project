@@ -2,6 +2,7 @@
 #include "game/combat.h"
 #include "player/jobs.h"
 #include "player/skills.h"
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -9,6 +10,9 @@
 #include <string>
 
 namespace {
+// Damage of an intent against the fixtures' 100-attack enemy, plain or guarded.
+int hit(int percent) { return std::max(1, 100 * percent / 100); }
+int guarded(int damage) { return damage / 2 + damage % 2; }
 void require(bool condition, const char *message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -92,7 +96,8 @@ void testChargeCounterAndRecovery() {
   require(charging.getIntent().kind == EnemyIntentKind::HeavyStrike,
           "An unbroken charge must become the advertised heavy strike");
   turn(guardBattle, {ActionType::Guard});
-  require(guardHero->gethp() == 720 && guardBattle.report().damageTaken == 80,
+  const int heavy = guarded(hit(IntentTuning::BossHeavyStrikePercent));
+  require(guardHero->gethp() == 800 - heavy && guardBattle.report().damageTaken == heavy,
           "Basic guard must halve the heavy strike");
 
   auto missHero = hero(); auto dodging = foe(10, true); dodging.setdodgeRate(100);
@@ -107,22 +112,25 @@ void testSuppressionAndShatterCounters() {
   auto h = hero(500); auto priest = foe(20, true); givePotion(*h);
   BattleSession b(*h, priest);
   turn(b, {ActionType::Potion, 1});
-  require(h->gethp() == 520 && b.report().suppressedHealing == 100 &&
+  require(h->gethp() == 500 + 100 - hit(IntentTuning::WoundPercent) &&
+              b.report().suppressedHealing == 100 &&
               b.report().potionsUsed == 1 && b.turns() == 1,
           "Suppression must halve actual healing and potion use must cost a turn");
+  const int afterPotion = h->gethp();
   h->heal(100);
-  require(h->gethp() == 620, "Suppression must not leak outside its action");
+  require(h->gethp() == afterPotion + 100, "Suppression must not leak outside its action");
 
   auto basic = hero(); auto secondPriest = foe(20, true);
   BattleSession basicBattle(*basic, secondPriest);
   turn(basicBattle, {ActionType::Guard});
-  require(basic->gethp() == 760 && basicBattle.report().suppressedHealing == 0,
+  require(basic->gethp() == 800 - guarded(hit(IntentTuning::WoundPercent)) &&
+              basicBattle.report().suppressedHealing == 0,
           "Ordinary guard must offer a basic response to suppression");
 
   auto guardHero = hero(); auto breaker = foe(30, true); guardHero->setmp(0);
   BattleSession guardBattle(*guardHero, breaker);
   turn(guardBattle, {ActionType::Guard});
-  require(guardHero->gethp() == 720 && guardHero->getmp() == 8 &&
+  require(guardHero->gethp() == 800 - hit(IntentTuning::ShatterPercent) && guardHero->getmp() == 8 &&
               guardBattle.report().guards == 1,
           "Shatter bypasses guard reduction but must retain guard resource gains");
 
@@ -130,7 +138,7 @@ void testSuppressionAndShatterCounters() {
   controlled.weakenAttack(50, 2);
   BattleSession controlBattle(*controlHero, controlled);
   turn(controlBattle, {ActionType::Attack});
-  require(controlHero->gethp() == 760,
+  require(controlHero->gethp() == 800 - std::max(1, 50 * IntentTuning::ShatterPercent / 100),
           "Temporary weakening must still mitigate shatter damage");
 }
 
@@ -148,13 +156,15 @@ void testReadCounterAndReport() {
   auto h = hero(); auto reader = predictableEnemy();
   BattleSession b(*h, reader);
   turn(b, {ActionType::Guard});
-  require(h->gethp() == 762 && b.report().readPunishments == 0,
+  require(h->gethp() == 800 - guarded(hit(IntentTuning::ReadMissPercent)) &&
+              b.report().readPunishments == 0,
           "Changing a predicted attack to basic guard must avoid the punishment");
   auto repeated = hero(); auto readerAgain = predictableEnemy();
   BattleSession punished(*repeated, readerAgain);
   turn(punished, {ActionType::Attack});
-  require(repeated->gethp() == 650 && punished.report().readPunishments == 1 &&
-              punished.report().damageTaken == 150,
+  require(repeated->gethp() == 800 - hit(IntentTuning::ReadHitPercent) &&
+              punished.report().readPunishments == 1 &&
+              punished.report().damageTaken == hit(IntentTuning::ReadHitPercent),
           "Matching a displayed prediction must be counted and resolved");
 }
 
@@ -275,8 +285,28 @@ void testCleanupAndSabotage() {
   require(!core.hasAffix(Affix::SHIELDING),
           "Encounter rules must apply campaign sabotage to the shield source");
   turn(sabotage, {ActionType::Guard});
-  require(core.getIntent().damagePercent == 125,
+  require(core.getIntent().damagePercent == IntentTuning::SabotagedBossHeavyStrikePercent,
           "Campaign sabotage must weaken the core heavy strike");
+}
+
+void testHealingAffixAndInterrupts() {
+  // Healers mend while charging; landing a basic attack interrupts it.
+  auto ignoring = hero(); auto healer = foe(10, true, 0);
+  giveAffix(healer, Affix::HEALING);
+  healer.removeAffix(Affix::POISONOUS);
+  healer.resethp(1000); healer.sethp(500);
+  BattleSession ignored(*ignoring, healer);
+  turn(ignored, {ActionType::Guard});
+  require(healer.gethp() == 500 + 1000 * IntentTuning::HealingAffixPercent / 100,
+          "An uninterrupted charge must heal a healing enemy");
+  auto breaker = hero(); auto interrupted = foe(10, true, 0);
+  giveAffix(interrupted, Affix::HEALING);
+  interrupted.removeAffix(Affix::POISONOUS);
+  interrupted.resethp(1000); interrupted.sethp(500);
+  BattleSession broken(*breaker, interrupted);
+  turn(broken, {ActionType::Attack});
+  require(broken.report().interrupts == 1 && interrupted.gethp() < 500,
+          "Interrupting the charge must deny the heal");
 }
 
 void testAssassinCannotDodgeUnavoidableDamage() {
@@ -321,6 +351,7 @@ int main() {
     testInitiallyDeadEncounterCannotSettle();
     testCleanupAndSabotage();
     testAssassinCannotDodgeUnavoidableDamage();
+    testHealingAffixAndInterrupts();
     std::cout.rdbuf(previous);
     std::cout << "combat objective tests passed\n";
   } catch (const std::exception &error) {

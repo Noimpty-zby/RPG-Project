@@ -171,7 +171,7 @@ EnemyStats enemyStatsForFloor(int value) {
   // Bosses keep their own curve. Ordinary enemies are tougher but hit softer,
   // so fights last long enough for their intents to matter.
   if (floor % 10 == 0)
-    return {baseHp * 5 / 2, baseAttack * 9 / 5, exp * 4, coins * 5, floor + 3, true};
+    return {baseHp * 5 / 2, baseAttack * 17 / 10, exp * 4, coins * 5, floor + 3, true};
   return {baseHp * EnemyTuning::OrdinaryHpPercent / 100,
           max(1, baseAttack * EnemyTuning::OrdinaryAttackPercent / 100),
           exp, coins, floor, false};

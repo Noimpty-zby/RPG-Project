@@ -21,7 +21,7 @@ constexpr int OrdinaryHpPercent = 160;
 constexpr int OrdinaryAttackPercent = 85;
 // Elites relative to ordinary enemies of the same floor.
 constexpr int EliteHpPercent = 170;
-constexpr int EliteAttackPercent = 125;
+constexpr int EliteAttackPercent = 115;
 // Objective guardians relative to the base curve: durable, slightly weaker hits.
 constexpr int SurviveHpPercent = 300;
 constexpr int DisruptHpPercent = 400;

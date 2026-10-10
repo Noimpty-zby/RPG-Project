@@ -116,7 +116,11 @@ BattleAction choose(player &hero, enemy &monster, BattleSession &battle, bool aw
   if (aware && intent.interruptible) return {ActionType::Attack};
   if (aware && battle.objective() == EncounterObjective::Escape && battle.turns() >= 2)
     return {ActionType::Guard};
-  if (aware && intent.kind == EnemyIntentKind::HeavyStrike && hero.gethp() < monster.getattack() * 2)
+  // Guard a telegraphed heavy strike that would take 30% or more of current HP,
+  // unless a plain attack could finish the enemy first.
+  if (aware && intent.kind == EnemyIntentKind::HeavyStrike &&
+      monster.getattack() * intent.damagePercent / 100 * 10 >= hero.gethp() * 3 &&
+      monster.gethp() > hero.getattack())
     return {ActionType::Guard};
   const std::array<int, 5> sequence = hero.job() == Job::Warrior ? std::array<int,5>{3,2,4,5,1} :
     hero.job() == Job::Mage ? std::array<int,5>{2,4,5,1,3} : std::array<int,5>{5,2,3,4,1};
