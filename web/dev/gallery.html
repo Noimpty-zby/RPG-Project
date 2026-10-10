@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Sprite gallery</title>
+<style>
+  body { background: #262b44; color: #ead4aa; font: 12px sans-serif; margin: 12px; }
+  canvas { image-rendering: pixelated; background: #3a4466; margin: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; margin-bottom: 10px; }
+  .cell { display: flex; flex-direction: column; align-items: center; }
+</style>
+</head>
+<body>
+<div id="out"></div>
+<script type="module">
+import { humanoidFrames, walker, HeroLooks, NpcLooks } from '../js/engine/humanoid.js';
+import { monsterGrid } from '../js/engine/monsters.js';
+import { Bestiary } from '../js/rules/enemy.js';
+const out = document.getElementById('out');
+function show(row, grid, label, scale = 4) {
+  const c = grid.toCanvas();
+  c.style.width = c.width * scale + 'px';
+  c.style.height = c.height * scale + 'px';
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.append(c, Object.assign(document.createElement('span'), { textContent: label }));
+  row.append(cell);
+}
+const section = (title) => {
+  out.append(Object.assign(document.createElement('h3'), { textContent: title }));
+  const row = document.createElement('div');
+  row.className = 'row';
+  out.append(row);
+  return row;
+};
+const params = new URLSearchParams(location.search);
+const what = params.get('show') || 'all';
+if (what === 'all' || what === 'heroes') {
+  const row = section('Heroes');
+  HeroLooks.forEach((look, i) => {
+    const f = humanoidFrames(look);
+    show(row, f.idle, `hero${i} idle`); show(row, f.attack, 'attack'); show(row, f.cast, 'cast');
+    for (const dir of ['down', 'up', 'side']) for (const step of [0, 1, 2]) show(row, walker(look, dir, step), `${dir}${step}`, 4);
+  });
+}
+if (what === 'all' || what === 'npcs') {
+  const row = section('NPCs');
+  show(row, walker(NpcLooks.merchant, 'down', 0), 'merchant', 4);
+  NpcLooks.allies.forEach((look, i) => show(row, walker(look, 'down', 0), `ally${i}`, 4));
+}
+if (what === 'all' || what === 'monsters') {
+  for (let c = 0; c < 10; c++) {
+    const row = section(`Chapter ${c + 1}`);
+    for (let s = 0; s < 5; s++) {
+      const id = c * 5 + s;
+      show(row, monsterGrid(id), Bestiary.entryName(id), 3);
+    }
+  }
+}
+document.body.dataset.ready = '1';
+</script>
+</body>
+</html>
