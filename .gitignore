@@ -1,0 +1,5 @@
+/build/
+/build-local/
+/build-*/
+/save.dat
+*.tmp

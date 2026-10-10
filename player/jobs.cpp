@@ -7,11 +7,11 @@
 
 using namespace std;
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  Õ½Ê¿ ¡ª¡ª ¼á¼×ÖØ¶Ü£¬¸ßÑªÁ¿£¬ÎÈ¶¨Êä³ö
-//  ³õÊ¼£ºHP 200 / ATK 18 / MP 15 / ±©»÷ 8%
-//  Ã¿¼¶£ºHP+20  ATK+4  MP+3
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  æˆ˜å£« â€”â€” åšç”²é‡ç›¾ï¼Œé«˜è¡€é‡ï¼Œç¨³å®šè¾“å‡º
+//  åˆå§‹ï¼šHP 200 / ATK 18 / MP 15 / æš´å‡» 8%
+//  æ¯çº§ï¼šHP+20  ATK+4  MP+3
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Warrior::Warrior(string name) : player(name, 200, 18, 15, 1, 0, 0, 8) {
   learnSkill(std::make_unique<Warriorskill_1>());
   learnSkill(std::make_unique<Warriorskill_2>());
@@ -23,18 +23,18 @@ void Warrior::levelup() {
   level++;
   attack += 4;
   max_hp += 20;
-  hp = max_hp; // Éı¼¶»ØÂúÑª£¨ÀàËÆ´ó¶àÊıRPG£©
+  hp = max_hp; // å‡çº§å›æ»¡è¡€ï¼ˆç±»ä¼¼å¤§å¤šæ•°RPGï¼‰
   max_mp += 3;
   mp = max_mp;
-  cout << getname() << " Éıµ½ÁË " << level << " ¼¶£¡HP/MPÒÑ»ØÂú£¡" << endl;
+  cout << getname() << " å‡åˆ°äº† " << level << " çº§ï¼HP/MPå·²å›æ»¡ï¼" << endl;
 }
 string Warrior::getjob() const { return "Warrior"; }
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  ·¨Ê¦ ¡ª¡ª ·¨Á¦³äÅæ£¬¼¼ÄÜ±¬·¢Ç¿£¬ÈâÉí´àÈõ
-//  ³õÊ¼£ºHP 120 / ATK 12 / MP 40 / ±©»÷ 12%
-//  Ã¿¼¶£ºHP+12  ATK+3  MP+8
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  æ³•å¸ˆ â€”â€” æ³•åŠ›å……æ²›ï¼ŒæŠ€èƒ½çˆ†å‘å¼ºï¼Œè‚‰èº«è„†å¼±
+//  åˆå§‹ï¼šHP 120 / ATK 12 / MP 40 / æš´å‡» 12%
+//  æ¯çº§ï¼šHP+12  ATK+3  MP+8
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Mage::Mage(string name) : player(name, 120, 12, 40, 1, 0, 0, 12) {
   learnSkill(std::make_unique<Mageskill_1>());
   learnSkill(std::make_unique<Mageskill_2>());
@@ -49,16 +49,16 @@ void Mage::levelup() {
   hp = max_hp;
   max_mp += 8;
   mp = max_mp;
-  cout << getname() << " Éıµ½ÁË " << level << " ¼¶£¡HP/MPÒÑ»ØÂú£¡" << endl;
+  cout << getname() << " å‡åˆ°äº† " << level << " çº§ï¼HP/MPå·²å›æ»¡ï¼" << endl;
 }
 string Mage::getjob() const { return "Mage"; }
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  ´Ì¿Í ¡ª¡ª ¸ß±¬·¢£¬¸ß±©»÷£¬ÓĞÉÁ±Ü£¬´à
-//  ³õÊ¼£ºHP 150 / ATK 15 / MP 25 / ±©»÷ 25%
-//  Ã¿¼¶£ºHP+15  ATK+5  MP+4
-//  ±»¶¯£º25% ÉÁ±Ü£¨Ô­20%£¬ÂÔÎ¢ÏÂµ÷Æ½ºâ£©
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  åˆºå®¢ â€”â€” é«˜çˆ†å‘ï¼Œé«˜æš´å‡»ï¼Œæœ‰é—ªé¿ï¼Œè„†
+//  åˆå§‹ï¼šHP 150 / ATK 15 / MP 25 / æš´å‡» 25%
+//  æ¯çº§ï¼šHP+15  ATK+5  MP+4
+//  è¢«åŠ¨ï¼š25% é—ªé¿ï¼ˆåŸ20%ï¼Œç•¥å¾®ä¸‹è°ƒå¹³è¡¡ï¼‰
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Assassin::Assassin(string name) : player(name, 150, 15, 25, 1, 0, 0, 25) {
   learnSkill(std::make_unique<Assassinskill_1>());
   learnSkill(std::make_unique<Assassinskill_2>());
@@ -73,13 +73,13 @@ void Assassin::levelup() {
   hp = max_hp;
   max_mp += 4;
   mp = max_mp;
-  cout << getname() << " Éıµ½ÁË " << level << " ¼¶£¡HP/MPÒÑ»ØÂú£¡" << endl;
+  cout << getname() << " å‡åˆ°äº† " << level << " çº§ï¼HP/MPå·²å›æ»¡ï¼" << endl;
 }
 string Assassin::getjob() const { return "Assassin"; }
 void Assassin::takedamage(int damage) {
   int dodgeChance = rand() % 100;
-  if (dodgeChance < dodgeRate) { // dodgeRate = 25£¨¶¨ÒåÔÚ jobs.h£©
-    cout << "¡¾±»¶¯¡¤¹í²½¡¿ÍêÃÀÉÁ±Ü£¡" << endl;
+  if (dodgeChance < dodgeRate) { // dodgeRate = 25ï¼ˆå®šä¹‰åœ¨ jobs.hï¼‰
+    cout << "ã€è¢«åŠ¨Â·é¬¼æ­¥ã€‘å®Œç¾é—ªé¿ï¼" << endl;
     return;
   }
   player::takedamage(damage);

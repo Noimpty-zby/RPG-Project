@@ -2,6 +2,8 @@
 #include "character.h"
 #include "item.h"
 #include "skills.h"
+#include "progression.h"
+#include <algorithm>
 #include <ctime>
 #include <iostream>
 
@@ -17,6 +19,10 @@ int player::getexp() const { return exp; }
 int player::getcoin() const { return coin; }
 int player::getfreerevives() const { return free_revives; }
 int player::getcritRate() const { return critRate; }
+int player::getHighestFloor() const { return highestFloor; }
+void player::setHighestFloor(int floor) {
+  highestFloor = max(highestFloor, clamp(floor, 1, 100));
+}
 
 void player::decreaserevives() {
   if (free_revives > 0)
@@ -28,8 +34,8 @@ void player::gainexp(int amount) {
   this->exp += amount;
   cout << getname() << " gain " << amount << " points of exp!" << endl;
   while (this->exp >= level * 100) {
-    int threshold = level * 100; // ÏÈÓÃµ±Ç° level ¼ÆËããĞÖµ
-    exp -= threshold;            // ÔÙ¿Û³ı£¬±ÜÃâ levelup() ¸Ä±ä level ºó´íÎó¿Û¼õ
+    int threshold = level * 100; // å…ˆç”¨å½“å‰ level è®¡ç®—é˜ˆå€¼
+    exp -= threshold;            // å†æ‰£é™¤ï¼Œé¿å… levelup() æ”¹å˜ level åé”™è¯¯æ‰£å‡
     levelup();
   }
 }
@@ -57,6 +63,7 @@ void player::costcoin(int amount) {
 }
 
 void player::revive() {
+  clearCombatModifiers();
   hp = max_hp;
   cout << getname() << "revived with " << hp << " HP!" << endl;
 }
@@ -71,13 +78,34 @@ void player::printstats() const {
   cout << "Coins: " << coin << endl;
   cout << "Free Revives Left: " << getfreerevives() << endl;
   cout << "Crit Rate: " << critRate << "%" << endl;
+  cout << "æœ€é«˜åˆ°è¾¾æ¥¼å±‚: " << highestFloor << " | æŠ€èƒ½ç­‰çº§ä¸Šé™: "
+       << Progression::skillRankCap(highestFloor) << endl;
 }
 
 void player::heal(int amount) {
-  hp += amount;
-  if (hp > max_hp)
-    hp = max_hp;
-  cout << "¡¾±»¶¯¡¿»÷É±»Ø¸´£¡HP »Ö¸´ÁË " << amount << " µã¡£" << endl;
+  int restored = min(max_hp - hp, max(0, amount) * healingPercent / 100);
+  hp += restored;
+  cout << "HP æ¢å¤äº† " << restored << " ç‚¹";
+  if (healingPercent < 100)
+    cout << "ï¼ˆæœ¬å›åˆæŠ‘ç–—ï¼šæ¢å¤æ•ˆæœ " << healingPercent << "%ï¼‰";
+  cout << "ã€‚" << endl;
+}
+
+void player::setHealingPercent(int percent) {
+  healingPercent = clamp(percent, 0, 100);
+}
+
+void player::guard(bool pierced) {
+  guarding = true;
+  guardPierced = pierced;
+  setmp(getmp() + 6);
+  cout << "ä½ æ”¾å¼ƒæ”»å‡»ï¼Œæ ¼æŒ¡æœ¬å›åˆä¼¤å®³å¹¶æ¢å¤ 6 MPã€‚" << endl;
+}
+
+void player::clearCombatModifiers() {
+  healingPercent = 100;
+  guarding = false;
+  guardPierced = false;
 }
 
 void player::attacktarget(Character &target) {
@@ -85,21 +113,21 @@ void player::attacktarget(Character &target) {
   bool isCrit = (rand() % 100 < critRate);
   if (isCrit) {
     damage *= 2;
-    cout << "¡¾±©»÷¡¿" << endl;
+    cout << "ã€æš´å‡»ã€‘" << endl;
   }
 
   cout << getname() << " attacks " << target.getname() << " for " << damage
        << " damage!" << endl;
   target.takedamage(damage);
 
-  // ÎäÆ÷ÄÍ¾Ã£¨´ÓºóÏòÇ°£©
+  // æ­¦å™¨è€ä¹…ï¼ˆä»åå‘å‰ï¼‰
   for (int i = (int)equipments.size() - 1; i >= 0; --i) {
     auto &item = equipments[i];
     if (item.getType() == Weapon) {
       item.setDurability(item.getDurability() - 1);
       if (item.getDurability() <= 0) {
-        cout << "¡¾×°±¸ÆÆËğ¡¿" << item.getName() << "ÒÑÆÆËğ£¬¹¥»÷Á¦¼õÉÙ"
-             << item.getValue() << "µã£¡" << endl;
+        cout << "ã€è£…å¤‡ç ´æŸã€‘" << item.getName() << "å·²ç ´æŸï¼Œæ”»å‡»åŠ›å‡å°‘"
+             << item.getValue() << "ç‚¹ï¼" << endl;
         attack -= item.getValue();
         equipments.erase(equipments.begin() + i);
       }
@@ -111,7 +139,7 @@ void player::attacktargetDealt(Character &target, int damage) {
   bool isCrit = (rand() % 100 < critRate);
   if (isCrit) {
     damage *= 2;
-    cout << "¡¾±©»÷¡¿" << endl;
+    cout << "ã€æš´å‡»ã€‘" << endl;
   }
 
   cout << getname() << " attacks " << target.getname() << " for " << damage
@@ -123,8 +151,8 @@ void player::attacktargetDealt(Character &target, int damage) {
     if (item.getType() == Weapon) {
       item.setDurability(item.getDurability() - 1);
       if (item.getDurability() <= 0) {
-        cout << "¡¾×°±¸ÆÆËğ¡¿" << item.getName() << "ÒÑÆÆËğ£¬¹¥»÷Á¦¼õÉÙ"
-             << item.getValue() << "µã£¡" << endl;
+        cout << "ã€è£…å¤‡ç ´æŸã€‘" << item.getName() << "å·²ç ´æŸï¼Œæ”»å‡»åŠ›å‡å°‘"
+             << item.getValue() << "ç‚¹ï¼" << endl;
         attack -= item.getValue();
         equipments.erase(equipments.begin() + i);
       }
@@ -139,7 +167,8 @@ void player::addItem(const Item &item) {
         existing.getType() == item.getType() &&
         existing.getValue() == item.getValue() &&
         existing.getDurability() == item.getDurability() &&
-        existing.getPrice() == item.getPrice()) {
+        existing.getPrice() == item.getPrice() &&
+        existing.getJobRequirement() == item.getJobRequirement()) {
       existing.setQuantity(existing.getQuantity() + item.getQuantity());
       return;
     }
@@ -149,59 +178,62 @@ void player::addItem(const Item &item) {
 
 void player::printBackpack() const {
   if (backpack.empty()) {
-    cout << "±³°ü¿Õ¿ÕÈçÒ²£¡" << endl;
+    cout << "èƒŒåŒ…ç©ºç©ºå¦‚ä¹Ÿï¼" << endl;
     return;
   }
 
-  cout << "=== " << getname() << "µÄ±³°ü ===" << endl;
+  cout << "=== " << getname() << "çš„èƒŒåŒ… ===" << endl;
   for (int i = 0; i < (int)backpack.size(); i++) {
     const Item &item = backpack[i];
     cout << i + 1 << ". " << item.getName();
     cout << " x" << item.getQuantity();
     if (item.getType() == Weapon || item.getType() == Armor)
-      cout << " ÄÍ¾Ã¶È: " << item.getDurability();
-    cout << "\n   ÀàĞÍ: "
-         << (item.getType() == Weapon  ? "ÎäÆ÷"
-             : item.getType() == Armor ? "·À¾ß"
-                                       : "Ò©Ë®")
-         << "\n   ¼ÛÖµ: " << item.getValue() << "\n   ¼Û¸ñ: " << item.getPrice()
-         << "\n   µÈ¼¶ĞèÇó: " << item.getLevelRequirement()
-         << "\n   Ö°ÒµÏŞÖÆ: " << item.getJobRequirementName() << endl;
+      cout << " è€ä¹…åº¦: " << item.getDurability();
+    cout << "\n   ç±»å‹: "
+         << (item.getType() == Weapon  ? "æ­¦å™¨"
+             : item.getType() == Armor ? "é˜²å…·"
+                                       : "è¯æ°´")
+         << "\n   ä»·å€¼: " << item.getValue() << "\n   ä»·æ ¼: " << item.getPrice()
+         << "\n   ç­‰çº§éœ€æ±‚: " << item.getLevelRequirement()
+         << "\n   èŒä¸šé™åˆ¶: " << item.getJobRequirementName() << endl;
     cout << "-----------------------------\n";
   }
 }
 
-void player::useItem(int index) {
+bool player::useItem(int index) {
   if (index < 1 || index > (int)backpack.size()) {
-    cout << "ÎŞĞ§µÄÎïÆ·Ë÷Òı£¡" << endl;
-    return;
+    cout << "æ— æ•ˆçš„ç‰©å“ç´¢å¼•ï¼" << endl;
+    return false;
   }
   Item &item = backpack[index - 1];
   if (item.getType() == Potion) {
-    hp += item.getValue();
-    if (hp > max_hp)
-      hp = max_hp;
-    cout << getname() << "Ê¹ÓÃÁË" << item.getName() << "£¬»Ö¸´ÁË"
-         << item.getValue() << " HP!" << endl;
+    if (hp >= max_hp) {
+      cout << "ç”Ÿå‘½å·²æ»¡ï¼Œæœªæ¶ˆè€—è¯æ°´ã€‚" << endl;
+      return false;
+    }
+    cout << getname() << "ä½¿ç”¨äº†" << item.getName() << "ã€‚" << endl;
+    heal(item.getValue());
     item.setQuantity(item.getQuantity() - 1);
     if (item.getQuantity() <= 0)
       backpack.erase(backpack.begin() + index - 1);
+    return true;
   } else {
-    cout << "Ö»ÄÜÊ¹ÓÃÒ©Ë®ÀàÎïÆ·£¡" << endl;
+    cout << "åªèƒ½ä½¿ç”¨è¯æ°´ç±»ç‰©å“ï¼" << endl;
+    return false;
   }
 }
 
 void player::equipItem(int index) {
   if (index < 1 || index > (int)backpack.size()) {
-    cout << "ÎŞĞ§µÄÎïÆ·Ë÷Òı£¡" << endl;
+    cout << "æ— æ•ˆçš„ç‰©å“ç´¢å¼•ï¼" << endl;
     return;
   }
   Item itemToEquip = backpack[index - 1];
   if (itemToEquip.getLevelRequirement() > level) {
-    cout << "µÈ¼¶²»×ã£¬ÎŞ·¨×°±¸¡¾" << itemToEquip.getName() << "¡¿£¡" << endl;
+    cout << "ç­‰çº§ä¸è¶³ï¼Œæ— æ³•è£…å¤‡ã€" << itemToEquip.getName() << "ã€‘ï¼" << endl;
     return;
   }
-  // ©¤©¤ Ö°ÒµÏŞÖÆ¼ì²é ©¤©¤
+  // â”€â”€ èŒä¸šé™åˆ¶æ£€æŸ¥ â”€â”€
   JobReq jr = itemToEquip.getJobRequirement();
   if (jr != AnyJob) {
     string job = getjob();
@@ -209,15 +241,15 @@ void player::equipItem(int index) {
               (jr == MageOnly && job == "Mage") ||
               (jr == AssassinOnly && job == "Assassin");
     if (!ok) {
-      cout << "¡¾" << itemToEquip.getName() << "¡¿ÊÇ"
-           << itemToEquip.getJobRequirementName() << "£¬ÄãÎŞ·¨×°±¸£¡" << endl;
+      cout << "ã€" << itemToEquip.getName() << "ã€‘æ˜¯"
+           << itemToEquip.getJobRequirementName() << "ï¼Œä½ æ— æ³•è£…å¤‡ï¼" << endl;
       return;
     }
   }
   if (itemToEquip.getType() == Weapon || itemToEquip.getType() == Armor) {
     for (int i = (int)equipments.size() - 1; i >= 0; --i) {
       if (equipments[i].getType() == itemToEquip.getType()) {
-        cout << "×Ô¶¯Ğ¶ÏÂ " << equipments[i].getName() << endl;
+        cout << "è‡ªåŠ¨å¸ä¸‹ " << equipments[i].getName() << endl;
         if (equipments[i].getType() == Weapon)
           attack -= equipments[i].getValue();
         else {
@@ -233,7 +265,8 @@ void player::equipItem(int index) {
               existing.getType() == equipments[i].getType() &&
               existing.getValue() == equipments[i].getValue() &&
               existing.getDurability() == equipments[i].getDurability() &&
-              existing.getPrice() == equipments[i].getPrice()) {
+              existing.getPrice() == equipments[i].getPrice() &&
+              existing.getJobRequirement() == equipments[i].getJobRequirement()) {
             existing.setQuantity(existing.getQuantity() + 1);
             merged = true;
             break;
@@ -245,12 +278,11 @@ void player::equipItem(int index) {
         break;
       }
     }
-    cout << getname() << "×°±¸ÁË" << itemToEquip.getName() << "£¡" << endl;
+    cout << getname() << "è£…å¤‡äº†" << itemToEquip.getName() << "ï¼" << endl;
     if (itemToEquip.getType() == Weapon)
       attack += itemToEquip.getValue();
     else {
       max_hp += itemToEquip.getValue();
-      hp += itemToEquip.getValue();
     }
     itemToEquip.setQuantity(1);
     equipments.push_back(itemToEquip);
@@ -260,17 +292,17 @@ void player::equipItem(int index) {
     if (bp.getQuantity() <= 0)
       backpack.erase(backpack.begin() + index - 1);
   } else {
-    cout << "Ö»ÄÜ×°±¸ÎäÆ÷»ò·À¾ß£¡" << endl;
+    cout << "åªèƒ½è£…å¤‡æ­¦å™¨æˆ–é˜²å…·ï¼" << endl;
   }
 }
 
 void player::unequipItem(int index) {
   if (index < 1 || index > (int)equipments.size()) {
-    cout << "ÎŞĞ§µÄ×°±¸Ë÷Òı£¡" << endl;
+    cout << "æ— æ•ˆçš„è£…å¤‡ç´¢å¼•ï¼" << endl;
     return;
   }
   Item &item = equipments[index - 1];
-  cout << getname() << "Ğ¶ÏÂÁË" << item.getName() << "£¡" << endl;
+  cout << getname() << "å¸ä¸‹äº†" << item.getName() << "ï¼" << endl;
   if (item.getType() == Weapon)
     attack -= item.getValue();
   else if (item.getType() == Armor) {
@@ -285,7 +317,8 @@ void player::unequipItem(int index) {
         existing.getType() == item.getType() &&
         existing.getValue() == item.getValue() &&
         existing.getDurability() == item.getDurability() &&
-        existing.getPrice() == item.getPrice()) {
+        existing.getPrice() == item.getPrice() &&
+        existing.getJobRequirement() == item.getJobRequirement()) {
       existing.setQuantity(existing.getQuantity() + 1);
       equipments.erase(equipments.begin() + index - 1);
       return;
@@ -297,21 +330,24 @@ void player::unequipItem(int index) {
 
 void player::showEquippedItems() const {
   if (equipments.empty()) {
-    cout << "Ã»ÓĞ×°±¸ÈÎºÎÎïÆ·£¡" << endl;
+    cout << "æ²¡æœ‰è£…å¤‡ä»»ä½•ç‰©å“ï¼" << endl;
     return;
   }
-  cout << "=== " << getname() << "µÄ×°±¸ ===" << endl;
+  cout << "=== " << getname() << "çš„è£…å¤‡ ===" << endl;
   for (const auto &item : equipments) {
     cout << "- " << item.getName() << " (";
     if (item.getType() == Weapon)
-      cout << "ÎäÆ÷, ¹¥»÷+" << item.getValue();
+      cout << "æ­¦å™¨, æ”»å‡»+" << item.getValue();
     else if (item.getType() == Armor)
-      cout << "·À¾ß, HP+" << item.getValue();
+      cout << "é˜²å…·, HP+" << item.getValue();
     cout << ")" << endl;
   }
 }
 
 void player::takedamage(int damage) {
+  damage = max(0, damage);
+  if (guarding && !guardPierced)
+    damage = (damage + 1) / 2;
   hp -= damage;
   if (hp < 0)
     hp = 0;
@@ -321,8 +357,8 @@ void player::takedamage(int damage) {
     if (item.getType() == Armor) {
       item.setDurability(item.getDurability() - 1);
       if (item.getDurability() <= 0) {
-        cout << "¡¾×°±¸ÆÆËğ¡¿" << item.getName() << "ÒÑÆÆËğ£¬HP¼õÉÙ"
-             << item.getValue() << "µã£¡" << endl;
+        cout << "ã€è£…å¤‡ç ´æŸã€‘" << item.getName() << "å·²ç ´æŸï¼ŒHPå‡å°‘"
+             << item.getValue() << "ç‚¹ï¼" << endl;
         max_hp -= item.getValue();
         if (hp > max_hp)
           hp = max_hp;
@@ -336,26 +372,29 @@ void player::takedamage(int damage) {
 
 void player::showSkills(player &hero) const {
   if (skills.empty()) {
-    cout << "Ã»ÓĞÈÎºÎ¼¼ÄÜ£¡" << endl;
+    cout << "æ²¡æœ‰ä»»ä½•æŠ€èƒ½ï¼" << endl;
     return;
   }
-  cout << "=== " << getname() << "µÄ¼¼ÄÜ ===" << endl;
+  cout << "=== " << getname() << "çš„æŠ€èƒ½ ===" << endl;
   for (int i = 0; i < (int)skills.size(); i++) {
     const skill *s = skills[i].get();
     cout << i + 1 << ". " << s->getskillname()
-         << " (µÈ¼¶: " << s->getskilllevel() << ", MPÏûºÄ: " << s->getcostmp()
-         << ", ÀäÈ´: " << s->getcooldown()
-         << "s, µ±Ç°ÀäÈ´: " << s->getcurrentcooldown()
-         << "s, ÉËº¦: " << s->getdamage() << ")" << endl
-         << "µÈ¼¶ĞèÇó: " << s->getlevelrequired() << endl
-         << "µ±Ç°¼¼ÄÜ×´Ì¬: " << (s->canUse(hero) ? "¿ÉÓÃ" : "²»¿ÉÓÃ") << endl
+         << " (ç­‰çº§: " << s->getskilllevel() << ", MPæ¶ˆè€—: " << s->getcostmp()
+         << ", å†·å´: " << s->getcooldown()
+         << "å›åˆ, å½“å‰å†·å´: " << s->getcurrentcooldown()
+         << "å›åˆ, åŸºç¡€ä¼¤å®³: " << s->getdamage() << ")" << endl
+         << "ç­‰çº§éœ€æ±‚: " << s->getlevelrequired() << endl
+         << "æ¥¼å±‚éœ€æ±‚: " << s->getunlockfloor()
+         << " | å½“å‰æŠ€èƒ½ç­‰çº§ä¸Šé™: " << Progression::skillRankCap(highestFloor)
+         << " | å‡çº§è´¹ç”¨: " << s->getlevelUpCost() << endl
+         << "å½“å‰æŠ€èƒ½çŠ¶æ€: " << (s->canUse(hero) ? "å¯ç”¨" : "ä¸å¯ç”¨") << endl
          << "===============================" << endl;
   }
 }
 
 bool player::useSkill(int index, enemy &target) {
   if (index < 1 || index > (int)skills.size()) {
-    cout << "ÎŞĞ§µÄ¼¼ÄÜË÷Òı£¡" << endl;
+    cout << "æ— æ•ˆçš„æŠ€èƒ½ç´¢å¼•ï¼" << endl;
     return false;
   }
   return skills[index - 1]->useSkill(*this, target);
@@ -382,21 +421,22 @@ player::~player() = default;
 
 void player::levelUpSkill(int index) {
   if (index < 1 || index > (int)skills.size()) {
-    cout << "ÎŞĞ§µÄ¼¼ÄÜË÷Òı£¡" << endl;
+    cout << "æ— æ•ˆçš„æŠ€èƒ½ç´¢å¼•ï¼" << endl;
     return;
   }
   skill *s = skills[index - 1].get();
   int costcoins = s->getlevelUpCost();
-  if (coin >= costcoins) {
+  if (s->levelUpSkill(level, coin, highestFloor))
     costcoin(costcoins);
-    s->levelUpSkill(level, costcoins);
-  } else {
-    cout << "½ğ±Ò²»×ã£¬ÎŞ·¨Éı¼¶¼¼ÄÜ£¡" << endl;
-  }
 }
 
-void player::equipItem_T(const Item &item) {
-  // Ö°ÒµÏŞÖÆ£¨±¦Ïä/ÊÂ¼şÖ±½Ó×°±¸Ò²Òª¼ì²é£©
+void player::equipItem_T(const Item &item, bool restoring) {
+  if (!restoring && (item.getLevelRequirement() > level || item.getType() == Potion)) {
+    addItem(item);
+    cout << "å½“å‰ä¸èƒ½ç›´æ¥è£…å¤‡ï¼Œç‰©å“å·²æ”¾å…¥èƒŒåŒ…ã€‚" << endl;
+    return;
+  }
+  // èŒä¸šé™åˆ¶ï¼ˆå®ç®±/äº‹ä»¶ç›´æ¥è£…å¤‡ä¹Ÿè¦æ£€æŸ¥ï¼‰
   JobReq jr = item.getJobRequirement();
   if (jr != AnyJob) {
     string job = getjob();
@@ -404,15 +444,19 @@ void player::equipItem_T(const Item &item) {
               (jr == MageOnly && job == "Mage") ||
               (jr == AssassinOnly && job == "Assassin");
     if (!ok) {
-      cout << "¡¾" << item.getName() << "¡¿ÊÇ" << item.getJobRequirementName()
-           << "£¬ÄãÎŞ·¨×°±¸£¡" << endl;
+      cout << "ã€" << item.getName() << "ã€‘æ˜¯" << item.getJobRequirementName()
+           << "ï¼Œä½ æ— æ³•è£…å¤‡ï¼" << endl;
+      if (!restoring) {
+        addItem(item);
+        cout << "ç‰©å“å·²æ”¾å…¥èƒŒåŒ…ã€‚" << endl;
+      }
       return;
     }
   }
   if (item.getType() == Weapon || item.getType() == Armor) {
     for (int i = (int)equipments.size() - 1; i >= 0; --i) {
       if (equipments[i].getType() == item.getType()) {
-        cout << "×Ô¶¯Ğ¶ÏÂ " << equipments[i].getName() << endl;
+        cout << "è‡ªåŠ¨å¸ä¸‹ " << equipments[i].getName() << endl;
         if (equipments[i].getType() == Weapon)
           attack -= equipments[i].getValue();
         else {
@@ -428,7 +472,8 @@ void player::equipItem_T(const Item &item) {
               existing.getType() == equipments[i].getType() &&
               existing.getValue() == equipments[i].getValue() &&
               existing.getDurability() == equipments[i].getDurability() &&
-              existing.getPrice() == equipments[i].getPrice()) {
+              existing.getPrice() == equipments[i].getPrice() &&
+              existing.getJobRequirement() == equipments[i].getJobRequirement()) {
             existing.setQuantity(existing.getQuantity() + 1);
             merged = true;
             break;
@@ -440,38 +485,37 @@ void player::equipItem_T(const Item &item) {
         break;
       }
     }
-    cout << getname() << "×°±¸ÁË" << item.getName() << "£¡" << endl;
+    cout << getname() << "è£…å¤‡äº†" << item.getName() << "ï¼" << endl;
     if (item.getType() == Weapon)
       attack += item.getValue();
     else {
       max_hp += item.getValue();
-      hp += item.getValue();
     }
     Item newItem = item;
     newItem.setQuantity(1);
     equipments.push_back(newItem);
   } else {
-    cout << "Ö»ÄÜ×°±¸ÎäÆ÷»ò·À¾ß£¡" << endl;
+    cout << "åªèƒ½è£…å¤‡æ­¦å™¨æˆ–é˜²å…·ï¼" << endl;
   }
 }
 
-// ©¤©¤ ¶ªÆú±³°üÎïÆ· ©¤©¤
+// â”€â”€ ä¸¢å¼ƒèƒŒåŒ…ç‰©å“ â”€â”€
 void player::dropItem(int index) {
   if (index < 1 || index > (int)backpack.size()) {
-    cout << "ÎŞĞ§µÄÎïÆ·Ë÷Òı£¡" << endl;
+    cout << "æ— æ•ˆçš„ç‰©å“ç´¢å¼•ï¼" << endl;
     return;
   }
   const Item &item = backpack[index - 1];
-  cout << "¶ªÆúÁË¡¾" << item.getName() << "¡¿¡Á" << item.getQuantity()
-       << "¡££¨Âô³ö¼ÛÔ¼ " << item.getPrice() / 3 << " ½ğ±Ò£©" << endl;
-  // ¶ªÆúÊ±¸øÓèÈı·ÖÖ®Ò»ÊÛ¼Û×÷Îª²¹³¥
+  cout << "ä¸¢å¼ƒäº†ã€" << item.getName() << "ã€‘Ã—" << item.getQuantity()
+       << "ã€‚ï¼ˆå–å‡ºä»·çº¦ " << item.getPrice() / 3 << " é‡‘å¸ï¼‰" << endl;
+  // ä¸¢å¼ƒæ—¶ç»™äºˆä¸‰åˆ†ä¹‹ä¸€å”®ä»·ä½œä¸ºè¡¥å¿
   coin += item.getPrice() / 3;
   backpack.erase(backpack.begin() + index - 1);
 }
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  ´æµµ / ¶Áµµ×¨ÓÃ
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  å­˜æ¡£ / è¯»æ¡£ä¸“ç”¨
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 void player::loadStats(int _level, int _exp, int _coin, int _hp, int _max_hp,
                        int _attack, int _mp, int _max_mp, int _critRate,
                        int _free_revives) {

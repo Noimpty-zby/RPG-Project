@@ -1,5 +1,6 @@
 #include "enemy.h"
 #include "character.h"
+#include <algorithm>
 #include <cstdlib>
 #include <ostream>
 using namespace std;
@@ -7,13 +8,13 @@ using namespace std;
 enemy::enemy(string name, int hp, int attack, int mp, int exp_reward,
              int coin_reward, int level)
     : Character(name, hp, attack, mp), exp_reward(exp_reward),
-      coin_reward(coin_reward), level(level) {}
+      coin_reward(coin_reward), level(level), baseAttack(attack) {}
 int enemy::getexp_reward() const { return exp_reward; }
 void enemy::takedamage(int damage) {
   int dodgeChance = rand() % 100;
   if (dodgeChance < dogeRate) {
-    cout << getname() << "ÉÁ±ÜÁË¹¥»÷£¡" << endl;
-    return; // ÉÁ±Ü³É¹¦£¬²»ÊÜÉËº¦
+    cout << getname() << "é—ªé¿äº†æ”»å‡»ï¼" << endl;
+    return; // é—ªé¿æˆåŠŸï¼Œä¸å—ä¼¤å®³
   }
   Character::takedamage(damage);
 }
@@ -25,7 +26,12 @@ void enemy::resethp(int amount) {
 }
 void enemy::resetexp_reward(int amount) { exp_reward = amount; }
 void enemy::resetcoin_reward(int amount) { coin_reward = amount; }
-void enemy::resetattack(int amount) { attack = amount; }
+void enemy::resetattack(int amount) {
+  baseAttack = max(0, amount);
+  attackWeakenPercent = 0;
+  attackWeakenTurns = 0;
+  attack = baseAttack;
+}
 void enemy::resetall(int hp, int attack, int mp, int exp_reward,
                      int coin_reward) {
   resethp(hp);
@@ -37,22 +43,22 @@ void enemy::resetall(int hp, int attack, int mp, int exp_reward,
 int enemy::getdogeRate() const { return dogeRate; }
 void enemy::setdogeRate(int rate) { dogeRate = rate; }
 Affix enemy::getRandomAffix() const {
-  // ÖØÐÂÉè¼Æ¸ÅÂÊÈ¨ÖØ£ºÎ£ÏÕ´Ê×ºÏ¡ÓÐµ«¿Ö²À£¬ÆÕÍ¨´Ê×º³£¼û
+  // é‡æ–°è®¾è®¡æ¦‚çŽ‡æƒé‡ï¼šå±é™©è¯ç¼€ç¨€æœ‰ä½†ææ€–ï¼Œæ™®é€šè¯ç¼€å¸¸è§
   int r = rand() % 100;
   if (r < 25)
-    return Affix::STRONG; // 25% Á¦Á¿£º¹¥»÷ÌáÉý
+    return Affix::STRONG; // 25% åŠ›é‡ï¼šæ”»å‡»æå‡
   else if (r < 45)
-    return Affix::TOUGH; // 20% ¼áÈÍ£ºHPÌáÉý
+    return Affix::TOUGH; // 20% åšéŸ§ï¼šHPæå‡
   else if (r < 60)
-    return Affix::QUICK; // 15% Ñ¸½Ý£ºÉÁ±ÜÌáÉý
+    return Affix::QUICK; // 15% è¿…æ·ï¼šé—ªé¿æå‡
   else if (r < 73)
-    return Affix::POSIONOUS; // 13% ¾ç¶¾£º³ÖÐøÉËº¦£¨Î£ÏÕ£©
+    return Affix::POSIONOUS; // 13% å‰§æ¯’ï¼šæŒç»­ä¼¤å®³ï¼ˆå±é™©ï¼‰
   else if (r < 85)
-    return Affix::HEALING; // 12% ÖÎÁÆ£ºÕ½¶·ÖÐ»ØÑª£¨·³ÈË£©
+    return Affix::HEALING; // 12% æ²»ç–—ï¼šæˆ˜æ–—ä¸­å›žè¡€ï¼ˆçƒ¦äººï¼‰
   else if (r < 93)
-    return Affix::EXPLOSIVE; //  8% ±¬Õ¨£ºËÀÍöÊ±·´ÉË£¨¾ªÏ²£©
+    return Affix::EXPLOSIVE; //  8% çˆ†ç‚¸ï¼šæ­»äº¡æ—¶åä¼¤ï¼ˆæƒŠå–œï¼‰
   else
-    return Affix::SHIELDING; //  7% »¤¶Ü£ºÎüÊÕÉËº¦£¨×îÄÑ²ø£©
+    return Affix::SHIELDING; //  7% æŠ¤ç›¾ï¼šå¸æ”¶ä¼¤å®³ï¼ˆæœ€éš¾ç¼ ï¼‰
 }
 void enemy::setAffix(int floor) {
   int generate_chance = 0;
@@ -74,12 +80,12 @@ void enemy::setAffix(int floor) {
   if (floor >= 80 && floor <= 100) {
     generate_chance = 6;
   }
-  // Ã¿´ÎÓÐ 40% »ù´¡¸ÅÂÊ´¥·¢´Ê×º£¬¸ßÂ¥²ã¸ÅÂÊ¸ü¸ß
+  // æ¯æ¬¡æœ‰ 40% åŸºç¡€æ¦‚çŽ‡è§¦å‘è¯ç¼€ï¼Œé«˜æ¥¼å±‚æ¦‚çŽ‡æ›´é«˜
   for (int i = 0; i < generate_chance; i++) {
-    int threshold = min(40 + floor / 5, 70); // 40%~70%£¬ËæÂ¥²ãÔö¼Ó
+    int threshold = min(40 + floor / 5, 70); // 40%~70%ï¼Œéšæ¥¼å±‚å¢žåŠ 
     if ((rand() % 100) < threshold) {
       affixes.push_back(getRandomAffix());
-      // ÓÐ´Ê×º£º¾­ÑéºÍ½ð±Ò¶îÍâ½±Àø
+      // æœ‰è¯ç¼€ï¼šç»éªŒå’Œé‡‘å¸é¢å¤–å¥–åŠ±
       resetexp_reward(getexp_reward() + getlevel() * 3);
       resetcoin_reward(getcoin_reward() + getlevel() * 2);
     }
@@ -95,32 +101,32 @@ bool enemy::hasAffix(Affix affix) const {
 }
 void enemy::displayAffixes() const {
   if (affixes.empty()) {
-    cout << "[ÆÕÍ¨]";
+    cout << "[æ™®é€š]";
     return;
   }
-  cout << "µÐÈË±»¼Ó³ÖÁË£¡£¡£¡¡¾´Ê×º¡¿" << endl;
+  cout << "æ•Œäººè¢«åŠ æŒäº†ï¼ï¼ï¼ã€è¯ç¼€ã€‘" << endl;
   for (auto aff : affixes) {
     switch (aff) {
     case Affix::STRONG:
-      cout << "[Ç¿Á¦] ";
+      cout << "[å¼ºåŠ›] ";
       break;
     case Affix::TOUGH:
-      cout << "[¼áÈÍ] ";
+      cout << "[åšéŸ§] ";
       break;
     case Affix::QUICK:
-      cout << "[Ñ¸½Ý] ";
+      cout << "[è¿…æ·] ";
       break;
     case Affix::EXPLOSIVE:
-      cout << "[±¬Õ¨] ";
+      cout << "[çˆ†ç‚¸] ";
       break;
     case Affix::POSIONOUS:
-      cout << "[¾ç¶¾] ";
+      cout << "[å‰§æ¯’] ";
       break;
     case Affix::HEALING:
-      cout << "[ÖÎÁÆ] ";
+      cout << "[æ²»ç–—] ";
       break;
     case Affix::SHIELDING:
-      cout << "[»¤¶Ü] ";
+      cout << "[æŠ¤ç›¾] ";
       break;
     }
   }
@@ -130,4 +136,151 @@ void enemy::heal(int amount) {
   hp += amount;
   if (hp > max_hp)
     hp = max_hp;
+}
+
+void enemy::configureEncounter(int floor, bool boss) {
+  encounterFloor = max(0, floor);
+  bossEncounter = boss;
+  completedTurns = 0;
+  lastAction = -99;
+  actionTransitions = {};
+  attackWeakenPercent = 0;
+  attackWeakenTurns = 0;
+  attack = baseAttack;
+}
+
+bool enemy::isBoss() const { return bossEncounter; }
+
+int enemy::predictAction() const {
+  if (lastAction < -2 || lastAction > 5)
+    return -99;
+  const auto &transitions = actionTransitions[lastAction + 2];
+  unsigned int bestCount = 0;
+  int prediction = -99;
+  // Ties use the lower action ID, so the same history always gives the same tell.
+  for (int i = 0; i < (int)transitions.size(); ++i) {
+    if (transitions[i] > bestCount) {
+      bestCount = transitions[i];
+      prediction = i - 2;
+    }
+  }
+  return prediction;
+}
+
+EnemyIntent enemy::getIntent() const {
+  EnemyIntent intent;
+  if (encounterFloor < 40)
+    return intent;
+
+  unsigned int phase = completedTurns % 3;
+  if (phase == 0)
+    return intent;
+  if (phase == 2) {
+    intent.kind = EnemyIntentKind::Recover;
+    intent.damagePercent = 0;
+    return intent;
+  }
+
+  // Ordinary encounters retain one specialty. Late bosses rotate specialties
+  // between cycles, while preserving the same visible three-turn rhythm.
+  unsigned int strategy = (encounterFloor - 40) % 3;
+  if (bossEncounter && encounterFloor >= 60)
+    strategy = (completedTurns / 3) % 3;
+
+  switch (strategy) {
+  case 0:
+    intent.kind = EnemyIntentKind::Wound;
+    intent.healingPercent = 50;
+    break;
+  case 1:
+    intent.kind = EnemyIntentKind::Shatter;
+    intent.damagePercent = 80;
+    intent.piercesGuard = true;
+    break;
+  case 2:
+    intent.kind = EnemyIntentKind::ReadPattern;
+    // The caller raises damage to 150% only if this prediction is matched.
+    intent.damagePercent = 75;
+    intent.predictedAction = predictAction();
+    break;
+  }
+  return intent;
+}
+
+namespace {
+string actionDescription(int actionId) {
+  if (actionId == 0)
+    return "æ™®é€šæ”»å‡»";
+  if (actionId == -1)
+    return "æ ¼æŒ¡";
+  if (actionId == -2)
+    return "ä½¿ç”¨è¯æ°´";
+  if (actionId >= 1 && actionId <= 5)
+    return "æŠ€èƒ½æ§½ " + to_string(actionId);
+  return "å°šæœªè¯†åˆ«çš„è¡ŒåŠ¨";
+}
+} // namespace
+
+void enemy::displayIntent() const {
+  EnemyIntent intent = getIntent();
+  cout << "ã€æ•Œäººæ„å›¾ã€‘";
+  switch (intent.kind) {
+  case EnemyIntentKind::Attack:
+    cout << "æ™®é€šæ”»å‡»ï¼šé€ æˆ 100% æ”»å‡»ä¼¤å®³ï¼Œå¯æ ¼æŒ¡ã€‚";
+    break;
+  case EnemyIntentKind::HeavyStrike:
+    cout << "è“„åŠ›é‡å‡»ï¼šé€ æˆ " << intent.damagePercent
+         << "% æ”»å‡»ä¼¤å®³ï¼Œå¯æ ¼æŒ¡ã€‚";
+    break;
+  case EnemyIntentKind::Wound:
+    cout << "åŽ‹åˆ¶æ²»ç–—ï¼šæœ¬æ¬¡çŽ©å®¶è¡ŒåŠ¨çš„æ²»ç–—ä»…ç”Ÿæ•ˆ 50%ï¼ŒéšåŽæ™®é€šæ”»å‡»ï¼›"
+            "ä¸‹å›žåˆæ²»ç–—æ¢å¤æ­£å¸¸ã€‚";
+    break;
+  case EnemyIntentKind::Shatter:
+    cout << "ç ´é˜²æ”»å‡»ï¼šé€ æˆ 80% æ”»å‡»ä¼¤å®³ï¼Œæ— è§†æœ¬å›žåˆæ ¼æŒ¡ã€‚";
+    break;
+  case EnemyIntentKind::ReadPattern:
+    if (intent.predictedAction == -99) {
+      cout << "è§‚å¯Ÿè¿žæ‹›ï¼šç»éªŒä¸è¶³ï¼Œå°šæ— æ³•é¢„æµ‹ï¼›æœ¬å›žåˆä»…é€ æˆ 75% æ”»å‡»ä¼¤å®³ã€‚";
+    } else {
+      cout << "é¢„åˆ¤è¿žæ‹›ï¼šé¢„è®¡ä½ ä½¿ç”¨ã€"
+           << actionDescription(intent.predictedAction)
+           << "ã€‘ï¼›å‘½ä¸­é¢„åˆ¤é€ æˆ 150% æ”»å‡»ä¼¤å®³ï¼Œæ”¹å˜è¡ŒåŠ¨åˆ™ä»…é€ æˆ 75%ã€‚";
+    }
+    break;
+  case EnemyIntentKind::Recover:
+    cout << "æ”»åŠ¿æ¢å¤ï¼šæœ¬å›žåˆä¸å‘åŠ¨æ”»å‡»ï¼Œæ²»ç–—æ­£å¸¸ï¼Œå¯å®‰æŽ’å›žè¡€æˆ–å‡†å¤‡çˆ†å‘ã€‚";
+    break;
+  }
+  cout << endl;
+}
+
+void enemy::finishTurn(int actionId) {
+  if (actionId < -2 || actionId > 5)
+    return;
+  if (lastAction >= -2 && lastAction <= 5)
+    ++actionTransitions[lastAction + 2][actionId + 2];
+  lastAction = actionId;
+  ++completedTurns;
+  if (attackWeakenTurns > 0) {
+    --attackWeakenTurns;
+    if (attackWeakenTurns == 0)
+      attackWeakenPercent = 0;
+    updateWeakenedAttack();
+  }
+}
+
+void enemy::updateWeakenedAttack() {
+  // Preserve zero-attack test/event enemies; all other attacks remain positive.
+  attack = baseAttack == 0
+               ? 0
+               : max(1, baseAttack * (100 - attackWeakenPercent) / 100);
+}
+
+void enemy::weakenAttack(int percent, int turns) {
+  if (percent <= 0 || turns <= 0)
+    return;
+  attackWeakenPercent = max(attackWeakenPercent, min(percent, 60));
+  attackWeakenTurns = max(attackWeakenTurns, turns);
+  updateWeakenedAttack();
 }

@@ -1,17 +1,30 @@
 cmake_minimum_required(VERSION 3.10)
-project(RPG_Project)
+project(RPG_Project LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+add_library(rpg_core
+    character/character.cpp player/player.cpp player/jobs.cpp player/skills.cpp
+    enemy/enemy.cpp item/item.cpp save.cpp combat.cpp world.cpp)
+target_include_directories(rpg_core PUBLIC . character player enemy item)
+if(MSVC)
+    target_compile_options(rpg_core PUBLIC /utf-8)
+endif()
+add_executable(RPG_Game main.cpp)
+target_link_libraries(RPG_Game PRIVATE rpg_core)
 
-file(GLOB_RECURSE SOURCES 
-    "main.cpp"
-    "character/*.cpp"
-    "player/*.cpp"
-    "enemy/*.cpp"
-    "item/*.cpp"
-    "skills/*.cpp"
-    "save.cpp"
-)
-
-include_directories(character player enemy item skills save)
-
-add_executable(RPG_Game ${SOURCES})
+include(CTest)
+if(BUILD_TESTING)
+    foreach(test_name enemy_tests skill_progression_tests save_tests combat_tests)
+        add_executable(${test_name} tests/${test_name}.cpp)
+        target_link_libraries(${test_name} PRIVATE rpg_core)
+        if(MSVC)
+            target_compile_options(${test_name} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${test_name} PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endforeach()
+    add_executable(balance_sim tests/balance_sim.cpp)
+    target_link_libraries(balance_sim PRIVATE rpg_core)
+endif()

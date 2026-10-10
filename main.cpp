@@ -2,7 +2,10 @@
 #include "item.h"
 #include "jobs.h"
 #include "player.h"
-#include "save.h" // ¡ï ´æµµÏµÍ³
+#include "save.h" // â˜… å­˜æ¡£ç³»ç»Ÿ
+#include "combat.h"
+#include "world.h"
+#include "progression.h"
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
@@ -13,31 +16,48 @@
 
 using namespace std;
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  Ç°ÖÃÉùÃ÷
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  å‰ç½®å£°æ˜
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 void showshop(player &hero, int floor, vector<Item> &shopItems);
-Item generateRandomItem(int floor);
-enemy generateEnemy(int floor);
 bool battle(player &hero, enemy &monster);
 bool hadEvent(player &hero, int floor);
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  ÊäÈë¸¨Öú£ºÇå³ı cin ´íÎó×´Ì¬
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  è¾“å…¥è¾…åŠ©ï¼šæ¸…é™¤ cin é”™è¯¯çŠ¶æ€
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 static int safeReadInt() {
   int v;
   while (!(cin >> v)) {
+    if (cin.eof()) {
+      cout << "\nè¾“å…¥ç»“æŸï¼Œé€€å‡ºæ¸¸æˆã€‚" << endl;
+      exit(0);
+    }
     cin.clear();
     cin.ignore(10000, '\n');
-    cout << "ÇëÊäÈëÒ»¸öÊı×Ö£º";
+    cout << "è¯·è¾“å…¥ä¸€ä¸ªæ•°å­—ï¼š";
   }
   return v;
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  Ëæ»úÊÂ¼şÃ¶¾Ù
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+void manageSkills(player &hero) {
+  while (true) {
+    hero.showSkills(hero);
+    cout << "[1] å‡çº§æŠ€èƒ½  [2] è¿”å›" << endl;
+    int choice = safeReadInt();
+    if (choice == 2) return;
+    if (choice != 1) {
+      cout << "æ— æ•ˆé€‰æ‹©ã€‚" << endl;
+      continue;
+    }
+    cout << "è¾“å…¥æŠ€èƒ½åºå·ï¼š";
+    hero.levelUpSkill(safeReadInt());
+  }
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  éšæœºäº‹ä»¶æšä¸¾
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 enum class eventType { NONE, TREASURE, TRAP, MERCHANT, HOT_SPRING, SHRINE };
 
 eventType generateRandomEvent() {
@@ -54,198 +74,31 @@ eventType generateRandomEvent() {
     return eventType::SHRINE;
 }
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  ×°±¸Ãû³Æ³Ø£¨°´Ö°Òµ + Æ·ÖÊ·Ö¼¶£©
-//  tier: 0=ÆÕÍ¨  1=¾«Á¼  2=Ï¡ÓĞ  3=Ê·Ê«
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-
-// ©¤©¤ Õ½Ê¿×¨ÓÃÎäÆ÷£¨ÖØĞÍ½üÕ½£º½£/´¸/¸«/Ç¹/Íäµ¶£©©¤©¤
-static const char *W_WPN[5][4] = {
-    {"ÆÆ¾ÉÌú½£", "¾«¶ÍÌú½£", "¾«¸Ö¾Ş½£", "ÉñÊ¥Ê¥½£"},
-    {"ÌúÖÆÕ½´¸", "¾«¸ÖÕ½´¸", "·ûÎÄÕ½´¸", "°µ½ğÕ½´¸"},
-    {"È±¿ÚÕ½¸«", "¾«¶ÍÕ½¸«", "°µÌúÕ½¸«", "·ûÎÄ¾Ş¸«"},
-    {"ĞàÄ¾³¤Ç¹", "¾«¸ÖÕ½Ç¹", "Áú»ê³¤Ç¹", "ÉñÊ¥Õ½Ç¹"},
-    {"ÉúĞâÍäµ¶", "¾«¸ÖÍäµ¶", "ÑªÔÂÍäµ¶", "ÉñÆ÷Íäµ¶"},
-};
-// ©¤©¤ Õ½Ê¿×¨ÓÃ·À¾ß£¨ÖØ¼×/¶Ü/»¤ÍÈ/Í·¿ø£©©¤©¤
-static const char *W_ARM[4][4] = {
-    {"ÆÆ¾ÉÁ´¼×", "ÌúÁ´¼×", "¾«¸Ö°å¼×", "ÃØÒøÖØ¼×"},
-    {"Ä¾ÖÆÔ²¶Ü", "ÌúÆ¤¶ÜÅÆ", "¾«¸ÖËş¶Ü", "Éñ¶Ü"},
-    {"Æ¤¸ï»¤ÍÈ", "ÌúÖÆ»¤ÍÈ", "¾«¸Ö»¤ÍÈ", "ÁúÁÛ»¤ÍÈ"},
-    {"¾ÉÌúÍ·¿ø", "ÌúÖÆÍ·¿ø", "¾«¸ÖÕ½¿ø", "Áú¹ÇÕ½¿ø"},
-};
-// ©¤©¤ ·¨Ê¦×¨ÓÃÎäÆ÷£¨·¨ÕÈ/Ä§ÕÈ/·¨µä/ÄîÖé£©©¤©¤
-static const char *M_WPN[4][4] = {
-    {"ĞàÄ¾·¨ÕÈ", "Ë®¾§·¨ÕÈ", "ÁúÎÆ·¨ÕÈ", "»ìãçÄ§ÕÈ"},
-    {"Ñ§Í½Ä§ÕÈ", "ÔªËØÄ§ÕÈ", "°ÂÊõÄ§ÕÈ", "Ğé¿ÕÄ§ÕÈ"},
-    {"ÆÆ¾É·¨µä", "ÔªËØ·¨µä", "¹Å´ú·¨µä", "½û¼É·¨µä"},
-    {"²£Á§ÄîÖé", "Ë®¾§ÄîÖé", "·ûÎÄÄîÖé", "ĞÇ³½ÄîÖé"},
-};
-// ©¤©¤ ·¨Ê¦×¨ÓÃ·À¾ß£¨·¨ÅÛ/·¨Ã±/Ñü´ø£©©¤©¤
-static const char *M_ARM[3][4] = {
-    {"´Ö²¼·¨ÅÛ", "Ñ§Õß³¤ÅÛ", "Ä§ÎÆ·¨ÒÂ", "ĞÇ³½·¨ÒÂ"},
-    {"²¼ÖÆÃ±×Ó", "Ñ§ÕßÃ±", "Ä§·¨¸ßÃ±", "ĞÇ³½·¨¹Ú"},
-    {"Æ¤ÖÊÑü´ø", "Ä§Á¦Ñü´ø", "°ÂÊõÑü´ø", "Ğé¿ÕÑü´ø"},
-};
-// ©¤©¤ ´Ì¿Í×¨ÓÃÎäÆ÷£¨¶Ìµ¶/¹­/¶¾ÈĞ/·ÉïÚ£©©¤©¤
-static const char *A_WPN[4][4] = {
-    {"ĞâÌú¶Ìµ¶", "º®ÌúØ°Ê×", "ÓÄÓ°´Ìµ¶", "Ó°ÈĞ"},
-    {"Ä¾¹­", "½Ç¹­", "¾«Áé³¤¹­", "Áú¹Ç¹­"},
-    {"¶¾Í¿Ø°Ê×", "Éß¶¾¶ÌÈĞ", "ÓÄ¶¾ÀûÈĞ", "ËÀÍöÖ®ÈĞ"},
-    {"ÌúÖÆ·ÉïÚ", "¶¾Õë·ÉïÚ", "»ÃÓ°·ÉïÚ", "ÉñÆ÷·ÉïÚ"},
-};
-// ©¤©¤ ´Ì¿Í×¨ÓÃ·À¾ß£¨Æ¤¼×/Åû·ç/ÊÖÌ×£©©¤©¤
-static const char *A_ARM[3][4] = {
-    {"ÆÆ¾ÉÆ¤¼×", "¾«Æ¤¼×", "Ó°Ï®Æ¤¼×", "°µÓ°Õ½¼×"},
-    {"²¼ÖÆÅû·ç", "Æ¤ÖÊÅû·ç", "°µÓ°Åû·ç", "Ğé¿ÕÅû·ç"},
-    {"Æ¤ÊÖÌ×", "Àû×¦ÊÖÌ×", "°µÓ°ÊÖÌ×", "ËÀÉñÊÖÌ×"},
-};
-// ©¤©¤ Í¨ÓÃ·À¾ß£¨»¤·û/Ñü´ø£©©¤©¤
-static const char *C_ARM[2][4] = {
-    {"ÆÆ¾É»¤·û", "¾«ÖÆ»¤·û", "Ê¥¹â»¤·û", "ÉñÆ÷»¤·û"},
-    {"ÊŞÆ¤Ñü´ø", "Æ¤Ñü´ø", "ÊØ»¤Ñü´ø", "Ê¥Õ½Ñü´ø"},
-};
-// ©¤©¤ Ò©Ë®£¨Í¨ÓÃ£©©¤©¤
-static const char *POTIONS[4] = {"Ğ¡ĞÍÖÎÁÆÒ©Ë®", "ÖÎÁÆÒ©Ë®", "ÓÅÖÊÖÎÁÆÒ©Ë®",
-                                 "ÉñÊ¥Ê¥Ë®"};
-
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  generateRandomItem£º´øÖ°ÒµÏŞÖÆ + Æ·ÖÊ·Ö¼¶
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-Item generateRandomItem(int floor) {
-  // ©¤©¤ Æ·ÖÊÅĞ¶¨£¨¸ß²ãÆ·ÖÊÏÂÏŞÌáÉı£©©¤©¤
-  int r = rand() % 100;
-  int tier = (r < 50) ? 0 : (r < 80) ? 1 : (r < 95) ? 2 : 3;
-  tier = min(3, tier + floor / 20);
-  int t = tier;
-
-  // ©¤©¤ ÀàĞÍ£º30%ÎäÆ÷ / 35%·À¾ß / 35%Ò©Ë® ©¤©¤
-  int roll = rand() % 100;
-  bool isWeapon = (roll < 30);
-  bool isArmor = (roll < 65 && !isWeapon);
-  // else: Ò©Ë®
-
-  if (!isWeapon && !isArmor) {
-    int potVal = 30 + (t + 1) * 15 + floor * 3;
-    int price = (t + 1) * 20 + floor * 5;
-    return Item(POTIONS[t], 1, Potion, potVal, 0, price, 1, AnyJob);
-  }
-
-  // ©¤©¤ ÊıÖµ ©¤©¤
-  // ÎäÆ÷¹¥»÷¼Ó³É£º²Î¿¼Í¬²ã¹ÖÎï¹¥»÷µÄ30~50%£¬ÈÃ×°±¸ÓĞÃ÷ÏÔÌáÉı
-  int baseAtk = (t + 1) * 5 + floor * 2;
-  int atkVal = baseAtk + rand() % max(1, baseAtk / 3);
-  // ·À¾ßHP¼Ó³É£º±ÈÎäÆ÷¸ß£¬ÄÜ¿¸1~2µ¶
-  int baseHp = (t + 1) * 10 + floor * 4;
-  int hpVal = baseHp + rand() % max(1, baseHp / 3);
-  // ÄÍ¾Ã/¼Û¸ñ/µÈ¼¶ĞèÇó
-  int dur = (t + 1) * 10 + floor / 2 + rand() % 6;
-  int price = (t + 1) * 35 + floor * 10;
-  int levelReq = max(1, floor - 3 + t);
-
-  // ©¤©¤ Ö°Òµ¹éÊô ©¤©¤
-  // ÎäÆ÷£ºÕ½Ê¿35% / ·¨Ê¦30% / ´Ì¿Í35%
-  // ·À¾ß£ºÕ½Ê¿35% / ·¨Ê¦25% / ´Ì¿Í25% / Í¨ÓÃ15%
-  int jr = rand() % 100;
-  JobReq job;
-  if (isWeapon) {
-    job = (jr < 35) ? WarriorOnly : (jr < 65) ? MageOnly : AssassinOnly;
-  } else {
-    job = (jr < 35)   ? WarriorOnly
-          : (jr < 60) ? MageOnly
-          : (jr < 85) ? AssassinOnly
-                      : AnyJob;
-  }
-
-  if (isWeapon) {
-    const char *name;
-    if (job == WarriorOnly)
-      name = W_WPN[rand() % 5][t];
-    else if (job == MageOnly)
-      name = M_WPN[rand() % 4][t];
-    else
-      name = A_WPN[rand() % 4][t];
-    return Item(name, levelReq, Weapon, atkVal, dur, price, 1, job);
-  } else {
-    const char *name;
-    if (job == WarriorOnly)
-      name = W_ARM[rand() % 4][t];
-    else if (job == MageOnly)
-      name = M_ARM[rand() % 3][t];
-    else if (job == AssassinOnly)
-      name = A_ARM[rand() % 3][t];
-    else
-      name = C_ARM[rand() % 2][t];
-    return Item(name, levelReq, Armor, hpVal, dur, price, 1, job);
-  }
-}
-
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  ¹ÖÎïÉú³É
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-enemy generateEnemy(int floor) {
-  // ©¤©¤ ³É³¤ÇúÏß£¨²Î¿¼ Slay the Spire£©©¤©¤
-  // HP£ºÇ°ÆÚÂı£¬ÖĞºóÆÚ¼ÓËÙ£¬µ«²»ÖÁÓÚÎŞ½â
-  int hp = 35 + floor * 8 + (floor * floor) / 8;
-  // ¹¥»÷£ºÔ¼µÈÓÚ¶ÔÓ¦Ö°ÒµHPµÄ6~10%£¬ÓĞÑ¹Á¦µ«²»ÃëÉ±
-  int attack = 4 + floor * 2 + floor / 4;
-  // ¾­Ñé£ºÃ¿²ãË¢2~3Ö»¹ÖÄÜÎÈ¶¨Éı¼¶
-  int exp_reward = 30 + floor * 25;
-  // ½ğ±Ò£ºÇ°ÆÚ¿íÔ££¬ÖĞÆÚ¿ÉÂò×°±¸£¬ºóÆÚË¢Boss·¢²Æ
-  int coin_reward = 8 + floor * 12;
-  int level = floor;
-  string name = "Monster of Floor " + to_string(floor);
-
-  // ©¤©¤ Boss¹Ø¿¨£¨Ã¿10²ã£©©¤©¤
-  if (floor % 10 == 0) {
-    hp = hp * 3;                   // Boss 3±¶ÑªÁ¿
-    attack = attack * 2;           // Boss 2±¶¹¥»÷
-    exp_reward = exp_reward * 4;   // Boss 4±¶¾­Ñé
-    coin_reward = coin_reward * 5; // Boss 5±¶½ğ±Ò
-    level += 3;
-    name = "¡ï BOSS of Floor " + to_string(floor) + " ¡ï";
-  }
-
-  enemy monster(name, hp, attack, 0, exp_reward, coin_reward, level);
-  monster.setAffix(floor);
-
-  // ´Ê×º¼Ó³É¸üÃ÷ÏÔ
-  if (monster.hasAffix(Affix::STRONG))
-    monster.resetattack(monster.getattack() + monster.getlevel() * 3);
-  if (monster.hasAffix(Affix::TOUGH))
-    monster.resethp(monster.gethp() + monster.getlevel() * 25);
-  if (monster.hasAffix(Affix::QUICK))
-    monster.setdogeRate(
-        min(monster.getdogeRate() + monster.getlevel() * 2, 45));
-
-  return monster;
-}
-
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  ÉÌµê
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  å•†åº—
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 void showshop(player &hero, int floor, vector<Item> &shopItems) {
   cout << "\n========================================" << endl;
-  cout << "»¶Ó­À´µ½ÉÌµê£¡µ±Ç°Â¥²ã£º" << floor << endl;
+  cout << "æ¬¢è¿æ¥åˆ°å•†åº—ï¼å½“å‰æ¥¼å±‚ï¼š" << floor << endl;
   for (int i = 0; i < (int)shopItems.size(); i++) {
-    cout << i + 1 << ". " << shopItems[i].getName() << " - ÀàĞÍ: "
-         << (shopItems[i].getType() == Weapon  ? "ÎäÆ÷"
-             : shopItems[i].getType() == Armor ? "·À¾ß"
-                                               : "Ò©Ë®")
-         << "\n   ¼ÛÖµ: " << shopItems[i].getValue()
-         << " ÄÍ¾Ã: " << shopItems[i].getDurability()
-         << "\n   ¼Û¸ñ: " << shopItems[i].getPrice()
-         << " ÊıÁ¿: " << shopItems[i].getQuantity()
-         << "\n   µÈ¼¶ĞèÇó: " << shopItems[i].getLevelRequirement()
-         << "\n   Ö°ÒµÏŞÖÆ: " << shopItems[i].getJobRequirementName()
-         << "\n   ÄãµÄ½ğ±Ò£º" << hero.getcoin()
+    cout << i + 1 << ". " << shopItems[i].getName() << " - ç±»å‹: "
+         << (shopItems[i].getType() == Weapon  ? "æ­¦å™¨"
+             : shopItems[i].getType() == Armor ? "é˜²å…·"
+                                               : "è¯æ°´")
+         << "\n   ä»·å€¼: " << shopItems[i].getValue()
+         << " è€ä¹…: " << shopItems[i].getDurability()
+         << "\n   ä»·æ ¼: " << shopItems[i].getPrice()
+         << " æ•°é‡: " << shopItems[i].getQuantity()
+         << "\n   ç­‰çº§éœ€æ±‚: " << shopItems[i].getLevelRequirement()
+         << "\n   èŒä¸šé™åˆ¶: " << shopItems[i].getJobRequirementName()
+         << "\n   ä½ çš„é‡‘å¸ï¼š" << hero.getcoin()
          << "\n=========================================" << endl;
   }
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  Ëæ»úÊÂ¼ş´¥·¢
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  éšæœºäº‹ä»¶è§¦å‘
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool hadEvent(player &hero, int floor) {
   int eventChance = min(30 + floor, 80);
   if ((rand() % 100) >= eventChance)
@@ -255,70 +108,70 @@ bool hadEvent(player &hero, int floor) {
   switch (event) {
 
   case eventType::TREASURE: {
-    cout << "Äã·¢ÏÖÁËÒ»¸ö±¦Ïä£¡ÀïÃæÓĞÒ»Ğ©½ğ±ÒºÍÒ»¸öËæ»úÎïÆ·£¡" << endl;
-    int coins = 40 + floor * 15 + rand() % (floor * 5 + 20); // ±¦Ïä½ğ±ÒÓĞËæ»úĞÔ
+    cout << "ä½ å‘ç°äº†ä¸€ä¸ªå®ç®±ï¼é‡Œé¢æœ‰ä¸€äº›é‡‘å¸å’Œä¸€ä¸ªéšæœºç‰©å“ï¼" << endl;
+    int coins = 40 + floor * 15 + rand() % (floor * 5 + 20); // å®ç®±é‡‘å¸æœ‰éšæœºæ€§
     hero.gaincoin(coins);
-    cout << "Äã»ñµÃÁË " << coins << " ½ğ±Ò£¡" << endl;
+    cout << "ä½ è·å¾—äº† " << coins << " é‡‘å¸ï¼" << endl;
     Item randomItem = generateRandomItem(floor);
-    cout << "Äã»ñµÃÁËÒ»¸ö"
-         << (randomItem.getType() == Potion   ? "Ò©Ë®"
-             : randomItem.getType() == Weapon ? "ÎäÆ÷"
-                                              : "·À¾ß")
-         << "£º" << randomItem.getName() << "£¡" << endl;
-    cout << "¼ÛÖµ " << randomItem.getValue() << "£¬ÄÍ¾Ã "
-         << randomItem.getDurability() << "£¬µÈ¼¶ĞèÇó "
-         << randomItem.getLevelRequirement() << "£¡" << endl;
-    // ÏÔÊ¾Ö°ÒµÏŞÖÆÌáÊ¾
+    cout << "ä½ è·å¾—äº†ä¸€ä¸ª"
+         << (randomItem.getType() == Potion   ? "è¯æ°´"
+             : randomItem.getType() == Weapon ? "æ­¦å™¨"
+                                              : "é˜²å…·")
+         << "ï¼š" << randomItem.getName() << "ï¼" << endl;
+    cout << "ä»·å€¼ " << randomItem.getValue() << "ï¼Œè€ä¹… "
+         << randomItem.getDurability() << "ï¼Œç­‰çº§éœ€æ±‚ "
+         << randomItem.getLevelRequirement() << "ï¼" << endl;
+    // æ˜¾ç¤ºèŒä¸šé™åˆ¶æç¤º
     if (randomItem.getJobRequirement() != AnyJob)
-      cout << "  ? ´ËÎïÆ·Îª¡¾" << randomItem.getJobRequirementName() << "¡¿"
+      cout << "  ? æ­¤ç‰©å“ä¸ºã€" << randomItem.getJobRequirementName() << "ã€‘"
            << endl;
-    cout << "[1] ¼ÓÈë±³°ü  [2] Ö±½Ó×°±¸  [3] ¶ªÆú£¨»ñÉÙÁ¿½ğ±Ò£©" << endl;
+    cout << "[1] åŠ å…¥èƒŒåŒ…  [2] ç›´æ¥è£…å¤‡  [3] ä¸¢å¼ƒï¼ˆè·å°‘é‡é‡‘å¸ï¼‰" << endl;
     int c;
     c = safeReadInt();
     if (c == 1) {
       hero.addItem(randomItem);
-      cout << "ÎïÆ·ÒÑ¼ÓÈë±³°ü£¡" << endl;
+      cout << "ç‰©å“å·²åŠ å…¥èƒŒåŒ…ï¼" << endl;
     } else if (c == 2) {
-      hero.equipItem_T(randomItem); // Ö°Òµ¼ì²éÔÚÄÚ²¿´¦Àí
+      hero.equipItem_T(randomItem); // èŒä¸šæ£€æŸ¥åœ¨å†…éƒ¨å¤„ç†
     } else {
       int junkGold = randomItem.getPrice() / 3;
       hero.gaincoin(junkGold);
-      cout << "ÎïÆ·±»¶ªÆú£¬»ñµÃ " << junkGold << " ½ğ±Ò¡£" << endl;
+      cout << "ç‰©å“è¢«ä¸¢å¼ƒï¼Œè·å¾— " << junkGold << " é‡‘å¸ã€‚" << endl;
     }
   } break;
 
   case eventType::TRAP: {
-    cout << "Äã´¥·¢ÁËÒ»¸öÏİÚå£¡ÊÜµ½ÁËÒ»Ğ©ÉËº¦£¡" << endl;
-    // ÏİÚåÉËº¦£ºÔ¼µÈÓÚÍæ¼Òµ±Ç°×î´óHPµÄ8%~15%£¬ÓĞÍ´¸Ğµ«²»ÖÂÃü
+    cout << "ä½ è§¦å‘äº†ä¸€ä¸ªé™·é˜±ï¼å—åˆ°äº†ä¸€äº›ä¼¤å®³ï¼" << endl;
+    // é™·é˜±ä¼¤å®³ï¼šçº¦ç­‰äºç©å®¶å½“å‰æœ€å¤§HPçš„8%~15%ï¼Œæœ‰ç—›æ„Ÿä½†ä¸è‡´å‘½
     int trapDamage = 8 + floor * 2 + rand() % (floor + 5);
     hero.takedamage(trapDamage);
   } break;
 
   case eventType::MERCHANT: {
-    cout << "ÄãÓöµ½ÁËÒ»¸öÉÌÈË£¡ËûÓĞÒ»Ğ©ÎïÆ·³öÊÛ£¡" << endl;
+    cout << "ä½ é‡åˆ°äº†ä¸€ä¸ªå•†äººï¼ä»–æœ‰ä¸€äº›ç‰©å“å‡ºå”®ï¼" << endl;
     vector<Item> shopItems;
     for (int i = 0; i < 5; i++)
       shopItems.push_back(generateRandomItem(floor));
     showshop(hero, floor, shopItems);
-    cout << "[1] ¹ºÂòÎïÆ·  [2] Àë¿ª" << endl;
+    cout << "[1] è´­ä¹°ç‰©å“  [2] ç¦»å¼€" << endl;
     int sc;
     sc = safeReadInt();
     if (sc == 1) {
       bool buying = true;
       while (buying) {
         if (shopItems.empty()) {
-          cout << "ÉÌµêÒÑÊÛóÀ£¡" << endl;
+          cout << "å•†åº—å·²å”®ç½„ï¼" << endl;
           break;
         }
-        cout << "ÊäÈëÎïÆ·ĞòºÅ¹ºÂò£º";
+        cout << "è¾“å…¥ç‰©å“åºå·è´­ä¹°ï¼š";
         int bi;
         bi = safeReadInt();
         if (bi >= 1 && bi <= (int)shopItems.size()) {
           Item &item = shopItems[bi - 1];
           if (hero.getcoin() >= item.getPrice()) {
             hero.costcoin(item.getPrice());
-            cout << "¹ºÂòÁË " << item.getName() << "£¡" << endl;
-            cout << "[1] ±³°ü  [2] ×°±¸  [3] ¶ªÆú" << endl;
+            cout << "è´­ä¹°äº† " << item.getName() << "ï¼" << endl;
+            cout << "[1] èƒŒåŒ…  [2] è£…å¤‡  [3] ä¸¢å¼ƒ" << endl;
             int cc;
             cc = safeReadInt();
             if (cc == 1)
@@ -327,11 +180,11 @@ bool hadEvent(player &hero, int floor) {
               hero.equipItem_T(item);
             shopItems.erase(shopItems.begin() + bi - 1);
           } else
-            cout << "½ğ±Ò²»×ã£¡" << endl;
+            cout << "é‡‘å¸ä¸è¶³ï¼" << endl;
         } else
-          cout << "ÎŞĞ§ĞòºÅ£¡" << endl;
+          cout << "æ— æ•ˆåºå·ï¼" << endl;
         showshop(hero, floor, shopItems);
-        cout << "¼ÌĞø¹ºÂò£¿[1] ÊÇ  [2] ·ñ" << endl;
+        cout << "ç»§ç»­è´­ä¹°ï¼Ÿ[1] æ˜¯  [2] å¦" << endl;
         int again;
         again = safeReadInt();
         if (again != 1)
@@ -341,30 +194,30 @@ bool hadEvent(player &hero, int floor) {
   } break;
 
   case eventType::HOT_SPRING: {
-    cout << "Äã·¢ÏÖÁËÒ»¸öÎÂÈª£¡ĞİÏ¢Ò»ÏÂ£¬»Ö¸´Ò»Ğ© HP ºÍ MP£¡" << endl;
-    int hpR = 40 + floor * 8, mpR = 20 + floor * 4; // ÎÂÈª£º´ó»Ø¸´£¬¹ÄÀøÃ°ÏÕ
+    cout << "ä½ å‘ç°äº†ä¸€ä¸ªæ¸©æ³‰ï¼ä¼‘æ¯ä¸€ä¸‹ï¼Œæ¢å¤ä¸€äº› HP å’Œ MPï¼" << endl;
+    int hpR = 40 + floor * 8, mpR = 20 + floor * 4; // æ¸©æ³‰ï¼šå¤§å›å¤ï¼Œé¼“åŠ±å†’é™©
     hero.sethp(hero.gethp() + hpR);
     hero.setmp(hero.getmp() + mpR);
-    cout << "Äã»Ö¸´ÁË " << hpR << " µã HP ºÍ " << mpR << " µã MP£¡" << endl;
+    cout << "ä½ æ¢å¤äº† " << hpR << " ç‚¹ HP å’Œ " << mpR << " ç‚¹ MPï¼" << endl;
   } break;
 
   case eventType::SHRINE: {
-    cout << "Äã·¢ÏÖÁËÒ»¸öÉñÉç£¡Ğí¸öÔ¸°É£¡" << endl;
+    cout << "ä½ å‘ç°äº†ä¸€ä¸ªç¥ç¤¾ï¼è®¸ä¸ªæ„¿å§ï¼" << endl;
     int outcome = rand() % 3;
     if (outcome == 0) {
-      cout << "ÉñÃ÷´ÍÓèÁËÄã½ğ±ÒºÍ¾­Ñé£¡" << endl;
-      int gc = 80 + floor * 30, ec = 40 + floor * 20; // Éñ´Í£º´óÁ¿¾­ÑéºÍ½ğ±Ò
+      cout << "ç¥æ˜èµäºˆäº†ä½ é‡‘å¸å’Œç»éªŒï¼" << endl;
+      int gc = 80 + floor * 30, ec = 40 + floor * 20; // ç¥èµï¼šå¤§é‡ç»éªŒå’Œé‡‘å¸
       hero.gaincoin(gc);
       hero.gainexp(ec);
-      cout << "»ñµÃ " << gc << " ½ğ±Ò£¬" << ec << " ¾­Ñé£¡" << endl;
+      cout << "è·å¾— " << gc << " é‡‘å¸ï¼Œ" << ec << " ç»éªŒï¼" << endl;
     } else if (outcome == 1) {
-      cout << "ÉñÃ÷¾Ü¾øÁËÄã£¡Ê§È¥ÁËÒ»Ğ© HP ºÍ MP£¡" << endl;
-      int hl = 10 + floor * 3, ml = 8 + floor * 3; // Éñ·££º½ÏÇá£¬±ÜÃâÎŞÁÄËÀÍö
+      cout << "ç¥æ˜æ‹’ç»äº†ä½ ï¼å¤±å»äº†ä¸€äº› HP å’Œ MPï¼" << endl;
+      int hl = 10 + floor * 3, ml = 8 + floor * 3; // ç¥ç½šï¼šè¾ƒè½»ï¼Œé¿å…æ— èŠæ­»äº¡
       hero.takedamage(hl);
       hero.setmp(max(0, hero.getmp() - ml));
-      cout << "Ê§È¥ÁË " << hl << " µã HP ºÍ " << ml << " µã MP£¡" << endl;
+      cout << "å¤±å»äº† " << hl << " ç‚¹ HP å’Œ " << ml << " ç‚¹ MPï¼" << endl;
     } else {
-      cout << "ÉñÃ÷³ÁÄ¬²»Óï..." << endl;
+      cout << "ç¥æ˜æ²‰é»˜ä¸è¯­..." << endl;
     }
   } break;
 
@@ -373,171 +226,108 @@ bool hadEvent(player &hero, int floor) {
   }
 
   if (hero.gethp() <= 0) {
-    cout << "ÄãÔÚÊÂ¼şÖĞ²»ĞÒËÀÍöÁË..." << endl;
+    cout << "ä½ åœ¨äº‹ä»¶ä¸­ä¸å¹¸æ­»äº¡äº†..." << endl;
     return true;
   }
   return false;
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  Õ½¶·Âß¼­
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//  æˆ˜æ–—é€»è¾‘
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool battle(player &hero, enemy &monster) {
-  cout << "\n>>> " << monster.getname() << " ³öÏÖÁË£¡<<<" << endl;
-
-  while (hero.gethp() > 0 && monster.gethp() > 0) {
-    hero.setmp(hero.getmp() + 8); // Ã¿»ØºÏ»Ø¸´8MP£¬¹ÄÀøÊ¹ÓÃ¼¼ÄÜ
-    hero.reduceallCooldowns();
-
-    cout << ">>> ÄãµÄ»ØºÏ£¡What do you want to do!" << endl;
-
-    // ¾ç¶¾ÉËº¦
-    if (monster.hasAffix(Affix::POSIONOUS)) {
-      cout << ">>> " << monster.getname() << "¡¾¾ç¶¾¡¿<<<" << endl;
-      int pDmg = 8 + monster.getlevel() * 3; // ¾ç¶¾ÉËº¦ÉÔÇ¿£¬Ôö¼ÓÍşĞ²¸Ğ
-      hero.takedamage(pDmg);
-      cout << "ÄãÊÜµ½ÁË " << pDmg << " µã¶¾ÉË£¡(HP: " << hero.gethp() << "/"
-           << hero.getmaxhp() << ")" << endl;
-      if (hero.gethp() <= 0) {
-        cout << ">>> " << hero.getname() << " ±»¶¾ËÀÁË£¡" << endl;
-        cout << ">>> YOU LOSE..." << endl;
-        return false;
-      }
-    }
-
-  post_skill_decision:
-    cout << "[1] ÆÕÍ¨¹¥»÷  [2] Ê¹ÓÃ¼¼ÄÜ" << endl;
-    int ac;
-    ac = safeReadInt();
-
-    auto doAttack = [&]() {
-      if (monster.hasAffix(Affix::SHIELDING)) {
-        cout << ">>> " << monster.getname() << "¡¾»¤¶Ü¡¿<<<" << endl;
-        int shield = 8 + monster.getlevel() * 6; // »¤¶ÜËæµÈ¼¶¸üÇ¿
-        int dealt = max(0, hero.getattack() - shield);
-        if (dealt > 0) {
-          cout << "ÄãÍ»ÆÆÁË»¤¶Ü£¬Ôì³É " << dealt << " µãÉËº¦£¡" << endl;
-          hero.attacktargetDealt(monster, dealt);
-        } else {
-          cout << "¹¥»÷ÎŞ·¨´©Í¸»¤¶Ü£¡" << endl;
-        }
-      } else {
-        hero.attacktarget(monster);
-      }
-    };
-
-    if (ac == 1) {
-      doAttack();
-    } else if (ac == 2) {
+  if (!monster.isalive() || !hero.isalive())
+    return false;
+  cout << "\n>>> " << monster.getname() << " å‡ºç°äº†ï¼<<<" << endl;
+  BattleSession combat(hero, monster);
+  while (combat.beginTurn()) {
+    monster.displayIntent();
+    cout << "HP " << hero.gethp() << "/" << hero.getmaxhp()
+         << " | MP " << hero.getmp() << "/" << hero.getmaxmp() << endl;
+    cout << "[1] æ™®æ”»  [2] æŠ€èƒ½  [3] æ ¼æŒ¡ï¼ˆå‡ä¼¤50%ï¼Œå›6MPï¼‰  [4] è¯æ°´" << endl;
+    int choice = safeReadInt();
+    BattleAction action{ActionType::Attack};
+    if (choice == 2) {
       hero.showSkills(hero);
-      cout << "Ñ¡Ôñ¼¼ÄÜ (1-" << hero.getSkillCount() << "): ";
-      int sc;
-      sc = safeReadInt();
-      if (!hero.useSkill(sc, monster)) {
-        cout << "¼¼ÄÜÊ¹ÓÃÊ§°Ü£¡" << endl;
-        goto post_skill_decision;
-      }
-    } else {
-      cout << "ÎŞĞ§Ñ¡Ôñ£¬Ä¬ÈÏÆÕÍ¨¹¥»÷¡£" << endl;
-      doAttack();
+      cout << "é€‰æ‹©æŠ€èƒ½ï¼ˆ0è¿”å›ï¼‰ï¼š";
+      action = {ActionType::Skill, safeReadInt()};
+      if (action.index == 0) continue;
+    } else if (choice == 3) {
+      action.type = ActionType::Guard;
+    } else if (choice == 4) {
+      hero.printBackpack();
+      cout << "é€‰æ‹©è¯æ°´ï¼ˆ0è¿”å›ï¼›ä½¿ç”¨ä¼šæ¶ˆè€—æœ¬å›åˆï¼‰ï¼š";
+      action = {ActionType::Potion, safeReadInt()};
+      if (action.index == 0) continue;
+    } else if (choice != 1) {
+      cout << "æ— æ•ˆé€‰æ‹©ï¼Œè¯·é‡æ–°é€‰æ‹©ã€‚" << endl;
+      continue;
     }
-
-    // ÅĞ¶Ï¹ÖÎïÊÇ·ñËÀÍö
-    if (monster.gethp() <= 0) {
-      if (monster.hasAffix(Affix::EXPLOSIVE)) {
-        cout << ">>> " << monster.getname() << "¡¾±¬Õ¨¡¿<<<" << endl;
-        int expDmg = 15 + monster.getlevel() * 8; // ±¬Õ¨£º¸ß²ã¸üÎ£ÏÕ
-        hero.takedamage(expDmg);
-        cout << "ÄãÊÜµ½ÁË " << expDmg << " µã±¬Õ¨ÉËº¦£¡(HP: " << hero.gethp()
-             << "/" << hero.getmaxhp() << ")" << endl;
-        if (hero.gethp() <= 0) {
-          cout << ">>> " << hero.getname() << " ±»±¬Õ¨»÷°Ü£¡" << endl;
-          cout << ">>> YOU LOSE..." << endl;
-          return false;
-        }
-      }
-      cout << ">>> " << monster.getname() << " ±»»÷°ÜÁË£¡" << endl;
-      hero.gainexp(monster.getexp_reward());
-      hero.gaincoin(monster.getcoin_reward());
-      hero.heal(hero.getmaxhp() / 10); // »÷É±»Ø¸´10%HP£¬ÓĞÒâÒåµ«²»¹ıÇ¿
-      cout << ">>> YOU WIN!" << endl;
-      // µôÂä
-      if (rand() % 100 < 60) { // 60%µôÂäÂÊ
-        Item dropped = generateRandomItem(monster.getlevel());
-        cout << "µôÂäÁË"
-             << (dropped.getType() == Potion   ? "Ò©Ë®"
-                 : dropped.getType() == Weapon ? "ÎäÆ÷"
-                                               : "·À¾ß")
-             << "£º" << dropped.getName() << endl;
-        hero.addItem(dropped);
-      }
-      return true;
-    }
-
-    // ¹ÖÎï»ØºÏ
-    cout << ">>> " << monster.getname() << " µÄ»ØºÏ£¡<<<" << endl;
-    monster.attacktarget(hero);
-    if (monster.hasAffix(Affix::HEALING)) {
-      cout << ">>> " << monster.getname() << "¡¾ÖÎÁÆ¡¿<<<" << endl;
-      int healAmt = 12 + monster.getlevel() * 6; // ÖÎÁÆ´Ê×º£ºµĞ·½»ØÑª¸ü¿É¹Û
-      monster.heal(healAmt);
-      cout << monster.getname() << " »Ö¸´ÁË " << healAmt
-           << " µã HP£¡(HP: " << monster.gethp() << "/" << monster.getmaxhp()
-           << ")" << endl;
-    }
-    if (hero.gethp() <= 0) {
-      cout << ">>> " << hero.getname() << " ±»»÷°ÜÁË£¡" << endl;
-      cout << ">>> YOU LOSE..." << endl;
-      return false;
-    }
+    if (!combat.act(action))
+      cout << "è¡ŒåŠ¨æœªæ‰§è¡Œï¼Œè¯·é‡æ–°é€‰æ‹©ã€‚" << endl;
   }
-  return false;
+  if (!hero.isalive()) {
+    cout << ">>> YOU LOSE..." << endl;
+    return false;
+  }
+  hero.gainexp(monster.getexp_reward());
+  hero.gaincoin(monster.getcoin_reward());
+  int recoveryPercent = hero.getHighestFloor() < 40 ? 10 : 4;
+  hero.heal(hero.getmaxhp() * recoveryPercent / 100);
+  if (rand() % 100 < 60) {
+    int dropFloor = monster.isBoss() ? monster.getlevel() - 3 : monster.getlevel();
+    Item dropped = generateRandomItem(dropFloor);
+    cout << "æ‰è½ï¼š" << dropped.getName() << endl;
+    hero.addItem(dropped);
+  }
+  cout << ">>> YOU WIN!ï¼ˆ" << combat.turns() << " å›åˆï¼‰" << endl;
+  return true;
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //  main
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 int main() {
   srand((unsigned)time(nullptr));
 
-  cout << "=== Link Start! »¶Ó­À´µ½ Aincrad! ===" << endl;
-  cout << "¹æÔòÌáĞÑ£º\n"
-       << "  - 10Â¥Ç°ËÀÍöÇÒÓĞÃâ·Ñ¸´»î´ÎÊı¡úÃâ·Ñ¸´»î»ØµÚ1²ã\n"
-       << "  - ÓĞ½ğ±ÒËÀÍö¡úËğÊ§Ò»°ë½ğ±Ò£¬ÍËºóÒ»²ã\n"
-       << "  - ÇëÕäÏ§ÉúÃü¡¢½ğ±ÒÓëÃâ·Ñ¸´»î»ú»á£¡\n"
+  cout << "=== Link Start! æ¬¢è¿æ¥åˆ° Aincrad! ===" << endl;
+  cout << "è§„åˆ™æé†’ï¼š\n"
+       << "  - æ­»äº¡å¯ä½¿ç”¨å…è´¹å¤æ´»ï¼Œé€€åä¸€å±‚\n"
+       << "  - æœ‰é‡‘å¸æ­»äº¡â†’æŸå¤±ä¸€åŠé‡‘å¸ï¼Œé€€åä¸€å±‚\n"
+       << "  - è¯·çæƒœç”Ÿå‘½ã€é‡‘å¸ä¸å…è´¹å¤æ´»æœºä¼šï¼\n"
        << endl;
 
-  // ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-  //  ¡ï ´æµµ¼ì²â£ºÑ¯ÎÊÊÇ·ñ¶Áµµ
-  // ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  â˜… å­˜æ¡£æ£€æµ‹ï¼šè¯¢é—®æ˜¯å¦è¯»æ¡£
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   unique_ptr<player> ptr;
   int floor = 1;
 
   if (SaveSystem::hasSaveFile()) {
-    cout << "¼ì²âµ½´æµµÎÄ¼ş£¡\n"
-         << "[1] ¶ÁÈ¡´æµµ¼ÌĞøÓÎÏ·\n"
-         << "[2] ¿ªÊ¼ĞÂÓÎÏ·£¨½«¸²¸Ç´æµµ£©\n"
-         << "ÇëÑ¡Ôñ£º";
+    cout << "æ£€æµ‹åˆ°å­˜æ¡£æ–‡ä»¶ï¼\n"
+         << "[1] è¯»å–å­˜æ¡£ç»§ç»­æ¸¸æˆ\n"
+         << "[2] å¼€å§‹æ–°æ¸¸æˆï¼ˆå°†è¦†ç›–å­˜æ¡£ï¼‰\n"
+         << "è¯·é€‰æ‹©ï¼š";
     int loadChoice;
     loadChoice = safeReadInt();
     if (loadChoice == 1) {
       ptr = SaveSystem::loadGame(floor);
       if (!ptr) {
-        cout << "¶ÁµµÊ§°Ü£¬½«¿ªÊ¼ĞÂÓÎÏ·¡£" << endl;
+        cout << "è¯»æ¡£å¤±è´¥ï¼Œå°†å¼€å§‹æ–°æ¸¸æˆã€‚" << endl;
       }
     } else {
       SaveSystem::deleteSave();
     }
   }
 
-  // ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-  //  Î´¶Áµµ ¡ú ĞÂ½¨½ÇÉ«
-  // ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  æœªè¯»æ¡£ â†’ æ–°å»ºè§’è‰²
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (!ptr) {
-    cout << "ÇëÊäÈëÄãµÄÃû×Ö£º";
+    cout << "è¯·è¾“å…¥ä½ çš„åå­—ï¼š";
     string player_name;
     cin >> player_name;
-    cout << "Ñ¡ÔñÖ°Òµ£º[1] Õ½Ê¿  [2] ·¨Ê¦  [3] ´Ì¿Í" << endl;
+    cout << "é€‰æ‹©èŒä¸šï¼š[1] æˆ˜å£«  [2] æ³•å¸ˆ  [3] åˆºå®¢" << endl;
     int job_choice;
     job_choice = safeReadInt();
     switch (job_choice) {
@@ -551,24 +341,25 @@ int main() {
       ptr = make_unique<Assassin>(player_name);
       break;
     default:
-      cout << "ÎŞĞ§Ö°Òµ£¬Ä¬ÈÏÑ¡ÔñÕ½Ê¿¡£" << endl;
+      cout << "æ— æ•ˆèŒä¸šï¼Œé»˜è®¤é€‰æ‹©æˆ˜å£«ã€‚" << endl;
       ptr = make_unique<Warrior>(player_name);
     }
   }
 
-  // ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-  //  Ö÷Ñ­»·
-  // ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  ä¸»å¾ªç¯
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   while (floor <= 100) {
+    ptr->setHighestFloor(floor);
     vector<Item> shopItems;
     for (int i = 0; i < 5; i++)
       shopItems.push_back(generateRandomItem(floor));
 
-    // ÄÚ²ã£º±¾²ãË¢¹Ö
-    // needNewMonster ¿ØÖÆÊÇ·ñÖØĞÂÉú³É¹ÖÎï
-    // ³õ´Î½øÈë»òÕ½¶·½áÊøºó²ÅÉú³ÉĞÂ¹Ö£¬²é¿´±³°ü/×´Ì¬µÈ²»Ë¢ĞÂ
+    // å†…å±‚ï¼šæœ¬å±‚åˆ·æ€ª
+    // needNewMonster æ§åˆ¶æ˜¯å¦é‡æ–°ç”Ÿæˆæ€ªç‰©
+    // åˆæ¬¡è¿›å…¥æˆ–æˆ˜æ–—ç»“æŸåæ‰ç”Ÿæˆæ–°æ€ªï¼ŒæŸ¥çœ‹èƒŒåŒ…/çŠ¶æ€ç­‰ä¸åˆ·æ–°
     bool needNewMonster = true;
-    enemy monster = generateEnemy(floor); // Õ¼Î»³õÊ¼»¯£¬ÂíÉÏ±»¸²¸Ç
+    enemy monster = generateEnemy(floor); // å ä½åˆå§‹åŒ–ï¼Œé©¬ä¸Šè¢«è¦†ç›–
 
     while (true) {
       if (needNewMonster) {
@@ -577,20 +368,20 @@ int main() {
         needNewMonster = false;
       }
       cout << "\n========================================" << endl;
-      cout << "Â¥²ã£º" << floor << endl;
-      cout << "Íæ¼Ò£ºLv." << ptr->getlevel() << " | HP£º" << ptr->gethp()
-           << " | ½ğ±Ò£º" << ptr->getcoin() << " | MP£º" << ptr->getmp()
+      cout << "æ¥¼å±‚ï¼š" << floor << endl;
+      cout << "ç©å®¶ï¼šLv." << ptr->getlevel() << " | HPï¼š" << ptr->gethp()
+           << " | é‡‘å¸ï¼š" << ptr->getcoin() << " | MPï¼š" << ptr->getmp()
            << endl;
-      cout << "µĞÈË£ºLv." << monster.getlevel() << " | HP£º" << monster.gethp()
+      cout << "æ•Œäººï¼šLv." << monster.getlevel() << " | HPï¼š" << monster.gethp()
            << endl;
       cout << "----------------------------------------" << endl;
-      cout << "[1] Õ½¶·  [2] ±³°ü  [3] ×°±¸  [4] ÍË³ö\n"
-           << "[5] ´æµµ  [6] ²é¿´×´Ì¬" << endl; // ¡ï ĞÂÔöÑ¡Ïî 5 / 6
+      cout << "[1] æˆ˜æ–—  [2] èƒŒåŒ…  [3] è£…å¤‡  [4] é€€å‡º\n"
+           << "[5] å­˜æ¡£  [6] æŸ¥çœ‹çŠ¶æ€  [7] æŠ€èƒ½" << endl;
 
       int choice;
       choice = safeReadInt();
 
-      // ©¤©¤ ´æµµ ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // â”€â”€ å­˜æ¡£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (choice == 5) {
         SaveSystem::saveGame(*ptr, floor);
         continue;
@@ -601,20 +392,25 @@ int main() {
         continue;
       }
 
+      if (choice == 7) {
+        manageSkills(*ptr);
+        continue;
+      }
+
       if (choice == 2) {
         ptr->printBackpack();
-        cout << "[1] Ê¹ÓÃÎïÆ·  [2] ×°±¸ÎïÆ·  [3] ¶ªÆúÎïÆ·  [4] ·µ»Ø" << endl;
+        cout << "[1] ä½¿ç”¨ç‰©å“  [2] è£…å¤‡ç‰©å“  [3] ä¸¢å¼ƒç‰©å“  [4] è¿”å›" << endl;
         int bmc = safeReadInt();
         if (bmc == 1) {
-          cout << "ÊäÈëÎïÆ·ĞòºÅ£º";
+          cout << "è¾“å…¥ç‰©å“åºå·ï¼š";
           int idx = safeReadInt();
           ptr->useItem(idx);
         } else if (bmc == 2) {
-          cout << "ÊäÈëÎïÆ·ĞòºÅ£º";
+          cout << "è¾“å…¥ç‰©å“åºå·ï¼š";
           int idx = safeReadInt();
           ptr->equipItem(idx);
         } else if (bmc == 3) {
-          cout << "ÊäÈëÒª¶ªÆúµÄÎïÆ·ĞòºÅ£¨¶ªÆú¿É»ñµÃÉÙÁ¿½ğ±Ò£©£º";
+          cout << "è¾“å…¥è¦ä¸¢å¼ƒçš„ç‰©å“åºå·ï¼ˆä¸¢å¼ƒå¯è·å¾—å°‘é‡é‡‘å¸ï¼‰ï¼š";
           int idx = safeReadInt();
           ptr->dropItem(idx);
         }
@@ -627,90 +423,55 @@ int main() {
       }
 
       if (choice == 4) {
-        // ©¤©¤ ÍË³öÇ°Ñ¯ÎÊÊÇ·ñ´æµµ ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-        cout << "ÍË³öÇ°ÊÇ·ñ±£´æÓÎÏ·£¿[1] ÊÇ  [2] ·ñ" << endl;
+        // â”€â”€ é€€å‡ºå‰è¯¢é—®æ˜¯å¦å­˜æ¡£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        cout << "é€€å‡ºå‰æ˜¯å¦ä¿å­˜æ¸¸æˆï¼Ÿ[1] æ˜¯  [2] å¦" << endl;
         int sc;
         sc = safeReadInt();
         if (sc == 1)
           SaveSystem::saveGame(*ptr, floor);
-        cout << "ÔÙ¼û£¡" << endl;
+        cout << "å†è§ï¼" << endl;
         return 0;
       }
 
-      // ©¤©¤ Õ½¶· ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // â”€â”€ æˆ˜æ–— â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (choice == 1) {
-        // ÊÂ¼ş
+        // äº‹ä»¶
         bool eventKilled = hadEvent(*ptr, floor);
-        if (eventKilled) {
-          if (ptr->getfreerevives() > 0 && floor < 10) {
-            cout << "ÄãÓĞ " << ptr->getfreerevives()
-                 << " ´ÎÃâ·Ñ¸´»î»ú»á£¬ÊÇ·ñÊ¹ÓÃ£¿[1] ÊÇ  [2] ·ñ" << endl;
-            int rc;
-            rc = safeReadInt();
-            if (rc == 1) {
-              ptr->decreaserevives();
-              ptr->revive();
-              floor = 1;
-              break;
-            } else {
-              cout << "ÓÎÏ·½áÊø¡£" << endl;
-              return 0;
-            }
-          } else if (ptr->getcoin() >= 20) {
-            cout << "ÊÇ·ñ»¨·Ñ 20 ½ğ±Ò¸´»î£¿[1] ÊÇ  [2] ·ñ" << endl;
-            int rc;
-            rc = safeReadInt();
-            if (rc == 1) {
-              ptr->costcoin(20);
-              ptr->revive();
-              if (floor > 1)
-                floor--;
-              break;
-            } else {
-              cout << "ÓÎÏ·½áÊø¡£" << endl;
-              return 0;
-            }
-          } else {
-            cout << "½ğ±Ò²»×ã£¬ÎŞ·¨¸´»î£¬ÓÎÏ·½áÊø£¡" << endl;
-            return 0;
-          }
-        }
-
-        bool won = battle(*ptr, monster);
+        bool won = !eventKilled && battle(*ptr, monster);
 
         if (won) {
-          // ©¤©¤ Õ½ºó²Ëµ¥ ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+          // â”€â”€ æˆ˜åèœå• â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         post_battle_decision:
-          cout << "\nÕ½ºóÑ¡Ôñ£º\n"
-               << "[1] ¼ÌĞøË¢¹Ö  [2] Ç°ÍùÏÂÒ»²ã  [3] ÍË³ö\n"
-               << "[4] ²é¿´×´Ì¬  [5] ±³°ü        [6] ×°±¸\n"
-               << "[7] ÉÌµê      [8] ¼¼ÄÜ        [9] ´æµµ" << endl; // ¡ï Ñ¡Ïî 9
+          cout << "\næˆ˜åé€‰æ‹©ï¼š\n"
+               << "[1] ç»§ç»­åˆ·æ€ª  [2] å‰å¾€ä¸‹ä¸€å±‚  [3] é€€å‡º\n"
+               << "[4] æŸ¥çœ‹çŠ¶æ€  [5] èƒŒåŒ…        [6] è£…å¤‡\n"
+               << "[7] å•†åº—      [8] æŠ€èƒ½        [9] å­˜æ¡£" << endl; // â˜… é€‰é¡¹ 9
 
           int pbc;
           pbc = safeReadInt();
 
           if (pbc == 1) {
-            needNewMonster = true; // Éú³ÉĞÂ¹ÖÎï
+            needNewMonster = true; // ç”Ÿæˆæ–°æ€ªç‰©
             continue;
           }
 
           else if (pbc == 2) {
             if (floor == 100)
-              cout << "¹§Ï²Í¨¹Ø£¡" << endl;
+              cout << "æ­å–œé€šå…³ï¼" << endl;
             else
-              cout << "Ç°ÍùÏÂÒ»²ã..." << endl;
+              cout << "å‰å¾€ä¸‹ä¸€å±‚..." << endl;
             shopItems.clear();
             floor++;
             break;
           }
 
           else if (pbc == 3) {
-            cout << "ÍË³öÇ°ÊÇ·ñ±£´æÓÎÏ·£¿[1] ÊÇ  [2] ·ñ" << endl;
+            cout << "é€€å‡ºå‰æ˜¯å¦ä¿å­˜æ¸¸æˆï¼Ÿ[1] æ˜¯  [2] å¦" << endl;
             int sc;
             sc = safeReadInt();
             if (sc == 1)
               SaveSystem::saveGame(*ptr, floor);
-            cout << "ÔÙ¼û£¡" << endl;
+            cout << "å†è§ï¼" << endl;
             return 0;
           }
 
@@ -721,19 +482,19 @@ int main() {
 
           else if (pbc == 5) {
             ptr->printBackpack();
-            cout << "[1] Ê¹ÓÃÎïÆ·  [2] ×°±¸ÎïÆ·  [3] ¶ªÆúÎïÆ·  [4] ·µ»Ø"
+            cout << "[1] ä½¿ç”¨ç‰©å“  [2] è£…å¤‡ç‰©å“  [3] ä¸¢å¼ƒç‰©å“  [4] è¿”å›"
                  << endl;
             int bc = safeReadInt();
             if (bc == 1) {
-              cout << "ÊäÈëÎïÆ·ĞòºÅ£º";
+              cout << "è¾“å…¥ç‰©å“åºå·ï¼š";
               int idx = safeReadInt();
               ptr->useItem(idx);
             } else if (bc == 2) {
-              cout << "ÊäÈëÎïÆ·ĞòºÅ£º";
+              cout << "è¾“å…¥ç‰©å“åºå·ï¼š";
               int idx = safeReadInt();
               ptr->equipItem(idx);
             } else if (bc == 3) {
-              cout << "ÊäÈëÒª¶ªÆúµÄÎïÆ·ĞòºÅ£¨¶ªÆú¿É»ñµÃÉÙÁ¿½ğ±Ò£©£º";
+              cout << "è¾“å…¥è¦ä¸¢å¼ƒçš„ç‰©å“åºå·ï¼ˆä¸¢å¼ƒå¯è·å¾—å°‘é‡é‡‘å¸ï¼‰ï¼š";
               int idx = safeReadInt();
               ptr->dropItem(idx);
             }
@@ -742,11 +503,11 @@ int main() {
 
           else if (pbc == 6) {
             ptr->showEquippedItems();
-            cout << "[1] Ğ¶ÏÂ×°±¸  [2] ·µ»Ø" << endl;
+            cout << "[1] å¸ä¸‹è£…å¤‡  [2] è¿”å›" << endl;
             int ec;
             ec = safeReadInt();
             if (ec == 1) {
-              cout << "ÊäÈë×°±¸ĞòºÅ£º";
+              cout << "è¾“å…¥è£…å¤‡åºå·ï¼š";
               int idx;
               idx = safeReadInt();
               ptr->unequipItem(idx);
@@ -757,14 +518,14 @@ int main() {
           else if (pbc == 7) {
             showshop(*ptr, floor, shopItems);
           post_shop_decision:
-            cout << "[1] ¹ºÂò  [2] ·µ»Ø  [3] Ë¢ĞÂÉÌµê£¨50½ğ±Ò£©" << endl;
+            cout << "[1] è´­ä¹°  [2] è¿”å›  [3] åˆ·æ–°å•†åº—ï¼ˆ50é‡‘å¸ï¼‰" << endl;
             int sc;
             sc = safeReadInt();
             if (sc == 1) {
               bool buying = true;
               while (buying) {
                 if (shopItems.empty()) {
-                  cout << "ÉÌµêÒÑÊÛóÀ£¡ÊÇ·ñË¢ĞÂ£¨50½ğ±Ò£©£¿[1] ÊÇ  [2] ·ñ"
+                  cout << "å•†åº—å·²å”®ç½„ï¼æ˜¯å¦åˆ·æ–°ï¼ˆ50é‡‘å¸ï¼‰ï¼Ÿ[1] æ˜¯  [2] å¦"
                        << endl;
                   int rc;
                   rc = safeReadInt();
@@ -776,7 +537,7 @@ int main() {
                   } else
                     break;
                 }
-                cout << "ÊäÈë¹ºÂòĞòºÅ£º";
+                cout << "è¾“å…¥è´­ä¹°åºå·ï¼š";
                 int bi;
                 bi = safeReadInt();
                 if (bi >= 1 && bi <= (int)shopItems.size()) {
@@ -785,13 +546,13 @@ int main() {
                     ptr->costcoin(item.getPrice());
                     ptr->addItem(item);
                     shopItems.erase(shopItems.begin() + bi - 1);
-                    cout << "¹ºÂòÁË " << item.getName() << "£¡" << endl;
+                    cout << "è´­ä¹°äº† " << item.getName() << "ï¼" << endl;
                   } else
-                    cout << "½ğ±Ò²»×ã£¡" << endl;
+                    cout << "é‡‘å¸ä¸è¶³ï¼" << endl;
                 } else
-                  cout << "ÎŞĞ§ĞòºÅ£¡" << endl;
+                  cout << "æ— æ•ˆåºå·ï¼" << endl;
                 showshop(*ptr, floor, shopItems);
-                cout << "¼ÌĞø¹ºÂò£¿[1] ÊÇ  [2] ·ñ" << endl;
+                cout << "ç»§ç»­è´­ä¹°ï¼Ÿ[1] æ˜¯  [2] å¦" << endl;
                 int again;
                 again = safeReadInt();
                 if (again != 1)
@@ -805,40 +566,33 @@ int main() {
                   shopItems.push_back(generateRandomItem(floor));
                 showshop(*ptr, floor, shopItems);
               } else
-                cout << "½ğ±Ò²»×ã£¬ÎŞ·¨Ë¢ĞÂÉÌµê£¡" << endl;
+                cout << "é‡‘å¸ä¸è¶³ï¼Œæ— æ³•åˆ·æ–°å•†åº—ï¼" << endl;
               goto post_shop_decision;
             }
             goto post_battle_decision;
           }
 
           else if (pbc == 8) {
-          post_skill_up:
-            ptr->showSkills(*ptr);
-            cout << "[1] Éı¼¶¼¼ÄÜ  [2] ·µ»Ø" << endl;
-            int su;
-            su = safeReadInt();
-            if (su == 1) {
-              cout << "ÊäÈë¼¼ÄÜĞòºÅ£º";
-              int si;
-              si = safeReadInt();
-              ptr->levelUpSkill(si);
-              goto post_skill_up;
-            }
+            manageSkills(*ptr);
             goto post_battle_decision;
           }
 
-          // ¡ï Õ½ºó´æµµÑ¡Ïî
+          // â˜… æˆ˜åå­˜æ¡£é€‰é¡¹
           else if (pbc == 9) {
             SaveSystem::saveGame(*ptr, floor);
             goto post_battle_decision;
           }
+          else {
+            cout << "æ— æ•ˆé€‰æ‹©ï¼Œè¯·é‡æ–°é€‰æ‹©ã€‚" << endl;
+            goto post_battle_decision;
+          }
 
         } else {
-          // ©¤©¤ ËÀÍö´¦Àí ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-          // ÓÅÏÈÊ¹ÓÃÃâ·Ñ¸´»î£¨ÎŞÂ¥²ãÏŞÖÆ£©
+          // â”€â”€ æ­»äº¡å¤„ç† â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // ä¼˜å…ˆä½¿ç”¨å…è´¹å¤æ´»ï¼ˆæ— æ¥¼å±‚é™åˆ¶ï¼‰
           if (ptr->getfreerevives() > 0) {
-            cout << "Äã»¹ÓĞ " << ptr->getfreerevives()
-                 << " ´ÎÃâ·Ñ¸´»î»ú»á£¬ÊÇ·ñÊ¹ÓÃ£¿[1] ÊÇ  [2] ·ñ" << endl;
+            cout << "ä½ è¿˜æœ‰ " << ptr->getfreerevives()
+                 << " æ¬¡å…è´¹å¤æ´»æœºä¼šï¼Œæ˜¯å¦ä½¿ç”¨ï¼Ÿ[1] æ˜¯  [2] å¦" << endl;
             int rc;
             rc = safeReadInt();
             if (rc == 1) {
@@ -847,32 +601,32 @@ int main() {
               if (floor > 1) {
                 floor--;
               }
-              cout << "ÒÑÃâ·Ñ¸´»î£¡ÍË»Øµ½µÚ " << floor << " ²ã¡£" << endl;
+              cout << "å·²å…è´¹å¤æ´»ï¼é€€å›åˆ°ç¬¬ " << floor << " å±‚ã€‚" << endl;
               break;
             }
           }
-          // ÎŞÃâ·Ñ¸´»î£º³¢ÊÔ»¨½ğ±Ò¸´»î
+          // æ— å…è´¹å¤æ´»ï¼šå°è¯•èŠ±é‡‘å¸å¤æ´»
           if (ptr->getcoin() == 0) {
-            cout << "Ã»ÓĞ½ğ±Ò£¬Ò²Ã»ÓĞÃâ·Ñ¸´»î´ÎÊı£¡ÓÎÏ·½áÊø£¡" << endl;
+            cout << "æ²¡æœ‰é‡‘å¸ï¼Œä¹Ÿæ²¡æœ‰å…è´¹å¤æ´»æ¬¡æ•°ï¼æ¸¸æˆç»“æŸï¼" << endl;
             return 0;
           }
           int coinLoss = max(1, ptr->getcoin() / 2);
-          cout << "\nÊÇ·ñ»¨·Ñ " << coinLoss << " ½ğ±Ò¸´»î£¿"
-               << "[1] ¸´»î£¨ÍËºóÒ»²ã£©  [2] ·ÅÆú" << endl;
+          cout << "\næ˜¯å¦èŠ±è´¹ " << coinLoss << " é‡‘å¸å¤æ´»ï¼Ÿ"
+               << "[1] å¤æ´»ï¼ˆé€€åä¸€å±‚ï¼‰  [2] æ”¾å¼ƒ" << endl;
           int rc;
           rc = safeReadInt();
           if (rc == 1) {
             ptr->revive();
             ptr->costcoin(coinLoss);
-            cout << "ÒÑ¸´»î£¡ËğÊ§ " << coinLoss << " ½ğ±Ò¡£" << endl;
+            cout << "å·²å¤æ´»ï¼æŸå¤± " << coinLoss << " é‡‘å¸ã€‚" << endl;
             if (floor > 1) {
               floor--;
-              cout << "ÍË»Øµ½µÚ " << floor << " ²ã¡£" << endl;
+              cout << "é€€å›åˆ°ç¬¬ " << floor << " å±‚ã€‚" << endl;
             } else
-              cout << "ÔÚµÚ 1 ²ã¸´»î¡£" << endl;
+              cout << "åœ¨ç¬¬ 1 å±‚å¤æ´»ã€‚" << endl;
             break;
           } else {
-            cout << "ÓÎÏ·½áÊø£¡" << endl;
+            cout << "æ¸¸æˆç»“æŸï¼" << endl;
             return 0;
           }
         }
@@ -880,6 +634,6 @@ int main() {
     } // end inner while
   } // end outer while
 
-  cout << "ÓÎÏ·½áÊø£¡¸ĞĞ»ÓÎÍæ£¡" << endl;
+  cout << "æ¸¸æˆç»“æŸï¼æ„Ÿè°¢æ¸¸ç©ï¼" << endl;
   return 0;
 }

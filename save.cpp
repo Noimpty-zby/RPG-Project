@@ -1,32 +1,57 @@
 #include "save.h"
 #include "jobs.h"
 #include "skills.h"
+#include <algorithm>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace std;
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  ÄÚ²¿¸¨Öú£º·Ö¸î×Ö·û´®
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-static vector<string> split(const string &s, char delim) {
+namespace {
+constexpr int kMaxStat = 1000000;
+constexpr int kMaxItems = 10000;
+constexpr int kMaxLegacySkillRank = 1000;
+
+vector<string> split(const string &s, char delim) {
   vector<string> tokens;
   stringstream ss(s);
   string tok;
   while (getline(ss, tok, delim))
     tokens.push_back(tok);
+  if (!s.empty() && s.back() == delim)
+    tokens.emplace_back();
   return tokens;
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  Item ĞòÁĞ»¯ / ·´ĞòÁĞ»¯
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+int parseNumber(const string &text, int minimum, int maximum,
+                const string &field) {
+  istringstream input(text);
+  long long value;
+  if (!(input >> value) || value < minimum || value > maximum)
+    throw runtime_error("æ— æ•ˆæ•°å€¼: " + field);
+  input >> ws;
+  if (!input.eof())
+    throw runtime_error("æ•°å€¼åŒ…å«å¤šä½™å­—ç¬¦: " + field);
+  return static_cast<int>(value);
+}
+
+bool canEquip(const Item &item, const string &job) {
+  const JobReq requirement = item.getJobRequirement();
+  return requirement == AnyJob ||
+         (requirement == WarriorOnly && job == "Warrior") ||
+         (requirement == MageOnly && job == "Mage") ||
+         (requirement == AssassinOnly && job == "Assassin");
+}
+} // namespace
+
 string SaveSystem::serializeItem(const Item &item) {
-  // ¸ñÊ½£ºÃû³Æ|µÈ¼¶ĞèÇó|ÀàĞÍ|ÊıÖµ|ÄÍ¾Ã|¼Û¸ñ|ÊıÁ¿|Ö°ÒµÏŞÖÆ
   ostringstream oss;
   oss << item.getName() << "|" << item.getLevelRequirement() << "|"
       << static_cast<int>(item.getType()) << "|" << item.getValue() << "|"
@@ -37,37 +62,35 @@ string SaveSystem::serializeItem(const Item &item) {
 }
 
 Item SaveSystem::deserializeItem(const string &line) {
-  auto tok = split(line, '|');
-  if (tok.size() < 7)
-    throw runtime_error("´æµµÎïÆ·¸ñÊ½´íÎó: " + line);
-
-  string name = tok[0];
-  int levelReq = stoi(tok[1]);
-  ItemType type = static_cast<ItemType>(stoi(tok[2]));
-  int value = stoi(tok[3]);
-  int durability = stoi(tok[4]);
-  int price = stoi(tok[5]);
-  int quantity = stoi(tok[6]);
-  // tok[7] ¿ÉÄÜ²»´æÔÚ£¨¾É´æµµ¼æÈİ£©
-  JobReq jobReq = AnyJob;
-  if (tok.size() >= 8)
-    jobReq = static_cast<JobReq>(stoi(tok[7]));
-
-  return Item(name, levelReq, type, value, durability, price, quantity, jobReq);
+  const auto tok = split(line, '|');
+  if ((tok.size() != 7 && tok.size() != 8) || tok[0].empty())
+    throw runtime_error("å­˜æ¡£ç‰©å“æ ¼å¼é”™è¯¯");
+  const int levelReq = parseNumber(tok[1], 1, 10000, "ç‰©å“ç­‰çº§");
+  const auto type = static_cast<ItemType>(parseNumber(tok[2], Weapon, Potion,
+                                                     "ç‰©å“ç±»å‹"));
+  const int value = parseNumber(tok[3], 0, kMaxStat, "ç‰©å“æ•°å€¼");
+  const int durability = parseNumber(tok[4], 0, kMaxStat, "è€ä¹…");
+  const int price = parseNumber(tok[5], 0, 1000000000, "ä»·æ ¼");
+  const int quantity = parseNumber(tok[6], 1, 1000000000, "æ•°é‡");
+  // Older saves omit the class restriction column.
+  const auto jobReq = tok.size() == 8
+      ? static_cast<JobReq>(parseNumber(tok[7], AnyJob, AssassinOnly, "èŒä¸šé™åˆ¶"))
+      : AnyJob;
+  return Item(tok[0], levelReq, type, value, durability, price, quantity, jobReq);
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  ±£´æÓÎÏ·
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
 bool SaveSystem::saveGame(const player &hero, int floor,
                           const string &filename) {
-  ofstream ofs(filename);
-  if (!ofs.is_open()) {
-    cerr << "[´æµµ] ÎŞ·¨´ò¿ªÎÄ¼ş: " << filename << endl;
+  if (floor < 1 || floor > 101) {
+    cerr << "[å­˜æ¡£] æ¥¼å±‚æ— æ•ˆã€‚" << endl;
     return false;
   }
-
-  ofs << "VERSION 1\n";
+  ofstream ofs(filename);
+  if (!ofs.is_open()) {
+    cerr << "[å­˜æ¡£] æ— æ³•æ‰“å¼€æ–‡ä»¶: " << filename << endl;
+    return false;
+  }
+  ofs << "VERSION 2\n";
   ofs << "NAME " << hero.getname() << "\n";
   ofs << "JOB " << hero.getjob() << "\n";
   ofs << "LEVEL " << hero.getlevel() << "\n";
@@ -81,225 +104,180 @@ bool SaveSystem::saveGame(const player &hero, int floor,
   ofs << "CRIT_RATE " << hero.getcritRate() << "\n";
   ofs << "FREE_REVIVES " << hero.getfreerevives() << "\n";
   ofs << "FLOOR " << floor << "\n";
-
-  // ©¤©¤ ±³°ü ©¤©¤
+  ofs << "HIGHEST_FLOOR " << min(100, max(floor, hero.getHighestFloor())) << "\n";
   const auto &bp = hero.getSaveBackpack();
   ofs << "BACKPACK_COUNT " << bp.size() << "\n";
   for (const auto &item : bp)
     ofs << "ITEM " << serializeItem(item) << "\n";
-
-  // ©¤©¤ ÒÑ×°±¸ ©¤©¤
   const auto &eq = hero.getSaveEquipments();
   ofs << "EQUIP_COUNT " << eq.size() << "\n";
   for (const auto &item : eq)
     ofs << "EQUIP " << serializeItem(item) << "\n";
-
-  // ©¤©¤ ¼¼ÄÜ£¨±£´æ¼¼ÄÜµÈ¼¶Óëµ±Ç°ÀäÈ´£© ©¤©¤
-  int skillCount = hero.getSkillCount();
-  ofs << "SKILL_COUNT " << skillCount << "\n";
-  for (int i = 1; i <= skillCount; ++i) {
+  ofs << "SKILL_COUNT " << hero.getSkillCount() << "\n";
+  for (int i = 1; i <= hero.getSkillCount(); ++i) {
     const skill *s = hero.getSkill(i);
     if (s)
       ofs << "SKILL " << s->getskillid() << "|" << s->getskilllevel() << "|"
           << s->getcurrentcooldown() << "\n";
   }
-
   ofs.flush();
-  cout << "[´æµµ] ÓÎÏ·ÒÑ±£´æµ½ " << filename << endl;
+  if (!ofs) {
+    cerr << "[å­˜æ¡£] å†™å…¥å¤±è´¥: " << filename << endl;
+    return false;
+  }
+  cout << "[å­˜æ¡£] æ¸¸æˆå·²ä¿å­˜åˆ° " << filename << endl;
   return true;
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  ¶Áµµ
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
 unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
   ifstream ifs(filename);
   if (!ifs.is_open()) {
-    cerr << "[¶Áµµ] ÎŞ·¨´ò¿ªÎÄ¼ş: " << filename << endl;
+    cerr << "[è¯»æ¡£] æ— æ³•æ‰“å¼€æ–‡ä»¶: " << filename << endl;
     return nullptr;
   }
-
-  // ©¤©¤ ÖğĞĞ¶ÁÈ¡ËùÓĞ key-value ©¤©¤
-  string name, job;
-  int level = 1, exp = 0, coin = 0;
-  int hp = 0, max_hp = 0, attack_val = 0, mp = 0, max_mp = 0;
-  int critRate = 10, freeRevives = 3;
-  floor = 1;
-
-  vector<Item> backpackItems;
-  vector<Item> equippedItems;
-
-  // ¼¼ÄÜ»Ö¸´Êı¾İ£ºid -> (skilllevel, currentcooldown)
-  // Ë÷Òı¶ÔÓ¦¼¼ÄÜ²ÛÎ»£¨°´¶ÁÈ¡Ë³Ğò£©
-  vector<tuple<int, int, int>> skillData; // (id, level, cooldown)
-
-  string line;
-  while (getline(ifs, line)) {
-    // È¥³ıÄ©Î² \r£¨Windows »»ĞĞ£©
-    if (!line.empty() && line.back() == '\r')
-      line.pop_back();
-    if (line.empty() || line[0] == '#')
-      continue;
-
-    istringstream iss(line);
-    string key;
-    iss >> key;
-
-    if (key == "VERSION") { /* ¼æÈİĞÔÔ¤Áô */
-    } else if (key == "NAME") {
-      getline(iss >> ws, name);
-    } else if (key == "JOB") {
-      iss >> job;
-    } else if (key == "LEVEL") {
-      iss >> level;
-    } else if (key == "EXP") {
-      iss >> exp;
-    } else if (key == "COIN") {
-      iss >> coin;
-    } else if (key == "HP") {
-      iss >> hp;
-    } else if (key == "MAX_HP") {
-      iss >> max_hp;
-    } else if (key == "ATTACK") {
-      iss >> attack_val;
-    } else if (key == "MP") {
-      iss >> mp;
-    } else if (key == "MAX_MP") {
-      iss >> max_mp;
-    } else if (key == "CRIT_RATE") {
-      iss >> critRate;
-    } else if (key == "FREE_REVIVES") {
-      iss >> freeRevives;
-    } else if (key == "FLOOR") {
-      iss >> floor;
-    } else if (key == "BACKPACK_COUNT") { /* ÊıÁ¿ÓÉ ITEM ĞĞ¾ö¶¨ */
-    } else if (key == "ITEM") {
-      string rest;
+  // Parse and validate the complete file before changing caller state.
+  try {
+    string name, job;
+    int version = 0, level = 1, exp = 0, coin = 0;
+    int hp = 0, maxHp = 0, attack = 0, mp = 0, maxMp = 0;
+    int critRate = 0, freeRevives = 0, savedFloor = 1, highestFloor = 0;
+    int backpackCount = 0, equipCount = 0, skillCount = 0;
+    vector<Item> backpackItems, equippedItems;
+    vector<tuple<int, int, int>> skillData;
+    set<string> seen;
+    set<int> skillIds;
+    long long totalQuantity = 0;
+    string line;
+    while (getline(ifs, line)) {
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+      if (line.size() > 4096)
+        throw runtime_error("å­˜æ¡£è¡Œè¿‡é•¿");
+      istringstream iss(line);
+      string key, rest;
+      if (!(iss >> key) || key[0] == '#')
+        continue;
       getline(iss >> ws, rest);
-      try {
-        backpackItems.push_back(deserializeItem(rest));
-      } catch (const exception &e) {
-        cerr << "[¶Áµµ] ±³°üÎïÆ·½âÎöÊ§°Ü: " << e.what() << endl;
-      }
-    } else if (key == "EQUIP_COUNT") { /* Ìø¹ı */
-    } else if (key == "EQUIP") {
-      string rest;
-      getline(iss >> ws, rest);
-      try {
-        equippedItems.push_back(deserializeItem(rest));
-      } catch (const exception &e) {
-        cerr << "[¶Áµµ] ×°±¸½âÎöÊ§°Ü: " << e.what() << endl;
-      }
-    } else if (key == "SKILL_COUNT") { /* Ìø¹ı */
-    } else if (key == "SKILL") {
-      string rest;
-      getline(iss >> ws, rest);
-      auto tok = split(rest, '|');
-      if (tok.size() >= 3) {
-        int sid = stoi(tok[0]);
-        int slv = stoi(tok[1]);
-        int scd = stoi(tok[2]);
-        skillData.emplace_back(sid, slv, scd);
+      if (key != "ITEM" && key != "EQUIP" && key != "SKILL" &&
+          !seen.insert(key).second)
+        throw runtime_error("é‡å¤å­—æ®µ: " + key);
+      if (key == "VERSION")
+        version = parseNumber(rest, 1, 2, key);
+      else if (key == "NAME") name = rest;
+      else if (key == "JOB") job = rest;
+      else if (key == "LEVEL") level = parseNumber(rest, 1, 10000, key);
+      else if (key == "EXP") exp = parseNumber(rest, 0, 1000000000, key);
+      else if (key == "COIN") coin = parseNumber(rest, 0, 1000000000, key);
+      else if (key == "HP") hp = parseNumber(rest, 0, kMaxStat, key);
+      else if (key == "MAX_HP") maxHp = parseNumber(rest, 1, kMaxStat, key);
+      else if (key == "ATTACK") attack = parseNumber(rest, 1, kMaxStat, key);
+      else if (key == "MP") mp = parseNumber(rest, 0, kMaxStat, key);
+      else if (key == "MAX_MP") maxMp = parseNumber(rest, 0, kMaxStat, key);
+      else if (key == "CRIT_RATE") critRate = parseNumber(rest, 0, 100, key);
+      else if (key == "FREE_REVIVES") freeRevives = parseNumber(rest, 0, 1000, key);
+      else if (key == "FLOOR") savedFloor = parseNumber(rest, 1, 101, key);
+      else if (key == "HIGHEST_FLOOR") highestFloor = parseNumber(rest, 1, 100, key);
+      else if (key == "BACKPACK_COUNT") backpackCount = parseNumber(rest, 0, kMaxItems, key);
+      else if (key == "EQUIP_COUNT") equipCount = parseNumber(rest, 0, 2, key);
+      else if (key == "SKILL_COUNT") skillCount = parseNumber(rest, 0, 15, key);
+      else if (key == "ITEM" || key == "EQUIP") {
+        auto &items = key == "ITEM" ? backpackItems : equippedItems;
+        if (items.size() >= static_cast<size_t>(key == "ITEM" ? kMaxItems : 2))
+          throw runtime_error("ç‰©å“è¡Œæ•°è¿‡å¤š");
+        items.push_back(deserializeItem(rest));
+        totalQuantity += items.back().getQuantity();
+        if (totalQuantity > 1000000000)
+          throw runtime_error("ç‰©å“æ€»æ•°é‡è¿‡å¤š");
+      } else if (key == "SKILL") {
+        const auto tok = split(rest, '|');
+        if (tok.size() != 3 || skillData.size() >= 15)
+          throw runtime_error("æŠ€èƒ½æ ¼å¼é”™è¯¯");
+        const int id = parseNumber(tok[0], 1, 1000, "æŠ€èƒ½ID");
+        const int rank = parseNumber(tok[1], 1, kMaxLegacySkillRank, "æŠ€èƒ½ç­‰çº§");
+        const int cooldown = parseNumber(tok[2], 0, 1000, "æŠ€èƒ½å†·å´");
+        if (!skillIds.insert(id).second)
+          throw runtime_error("é‡å¤æŠ€èƒ½ID");
+        skillData.emplace_back(id, rank, cooldown);
+      } else {
+        throw runtime_error("æœªçŸ¥å­—æ®µ: " + key);
       }
     }
-  }
-  ifs.close();
-
-  if (name.empty() || job.empty()) {
-    cerr << "[¶Áµµ] ´æµµÎÄ¼şËğ»µ»ò¸ñÊ½´íÎó£¡" << endl;
-    return nullptr;
-  }
-
-  // ©¤©¤ ´´½¨¶ÔÓ¦Ö°ÒµµÄ½ÇÉ«£¨¹¹Ôìº¯Êı»áÉèÖÃ»ù´¡ÊôĞÔ²¢Ñ§Ï°¼¼ÄÜ£© ©¤©¤
-  unique_ptr<player> hero;
-  if (job == "Warrior")
-    hero = make_unique<Warrior>(name);
-  else if (job == "Mage")
-    hero = make_unique<Mage>(name);
-  else if (job == "Assassin")
-    hero = make_unique<Assassin>(name);
-  else {
-    cerr << "[¶Áµµ] Î´ÖªÖ°Òµ: " << job << endl;
-    return nullptr;
-  }
-
-  // ©¤©¤ ¼ÆËã×°±¸¼Ó³É£¬»¹Ô­»ù´¡ÊôĞÔ ©¤©¤
-  // saveGame ±£´æµÄ ATTACK/MAX_HP ÊÇº¬×°±¸¼Ó³ÉµÄ×îÖÕÖµ¡£
-  // equipItem_T »áÔÙ´Îµş¼Ó£¬ËùÒÔÏÈ¿Û³ı¼Ó³É£¬ÈÃ equipItem_T
-  // ÖØĞÂ¼Ó»Ø£¬±ÜÃâË«ÖØµş¼Ó¡£
-  int equip_attack_bonus = 0;
-  int equip_hp_bonus = 0;
-  for (const auto &item : equippedItems) {
-    if (item.getType() == Weapon)
-      equip_attack_bonus += item.getValue();
-    else if (item.getType() == Armor)
-      equip_hp_bonus += item.getValue();
-  }
-
-  int base_attack = attack_val - equip_attack_bonus;
-  int base_max_hp = max_hp - equip_hp_bonus;
-  // hp ²»³¬¹ı base_max_hp£¬·ÀÖ¹ loadStats ½Ø¶Ï
-  int base_hp = (hp <= base_max_hp) ? hp : base_max_hp;
-
-  // ©¤©¤ »Ö¸´»ù´¡ÊıÖµ£¨×°±¸¼Ó³ÉÉĞÎ´°üº¬£© ©¤©¤
-  hero->loadStats(level, exp, coin, base_hp, base_max_hp, base_attack, mp,
-                  max_mp, critRate, freeRevives);
-
-  // ©¤©¤ »Ö¸´±³°ü ©¤©¤
-  for (const auto &item : backpackItems)
-    hero->addItem(item);
-
-  // ©¤©¤ »Ö¸´×°±¸£¨equipItem_T »á½«¼Ó³ÉÕıÈ·µØÖØĞÂµş¼Ó£© ©¤©¤
-  for (const auto &item : equippedItems)
-    hero->equipItem_T(item);
-
-  // ©¤©¤ »Ö¸´¼¼ÄÜµÈ¼¶ÓëÀäÈ´ ©¤©¤
-  for (size_t i = 0; i < skillData.size(); ++i) {
-    auto [sid, slv, scd] = skillData[i];
-    skill *s = hero->getSkill(static_cast<int>(i) + 1);
-    if (s) {
-      s->setskilllevelup(slv);
-      // Ã¿ÉıÒ»¼¶²¹³¥ÉËº¦ºÍMPÏûºÄ£¨¶ÔÓ¦ levelUpSkill µÄÂß¼­£©
-      // slv-1 ´ÎÉı¼¶£¨³õÊ¼Îª1£©
-      int extraLevels = slv - 1;
-      s->setdamage(s->getdamage() + extraLevels * 10);
-      s->setcostmp(s->getcostmp() + extraLevels * 2);
-      // »Ö¸´µ±Ç°ÀäÈ´
-      for (int cd = 0; cd < scd; ++cd)
-        s->resetcooldown(); // ÏÈÉè×î´óÖµ
-      // Ö±½ÓÊÖ¶¯ patch µ±Ç°ÀäÈ´
-      // ÒòÎª skill Ã»ÓĞ setCurrentCooldown£¬ÔÚ´Ë¶à¼õÒ»²½
-      // ÎÒÃÇµ÷ÓÃÄÚ²¿ÖØÖÃÔÙÖğ²½¼õ
-      s->resetcurrentcooltime(); // ÖÃ0
-      for (int cd = 0; cd < scd; ++cd)
-        s->resetcooldown(); // ÖÃÂú£¬È»ºó¡­
-      // ÖØĞÂÖÃ0£¬ÔÙ»Ö¸´ÕıÈ·µÄÊ£ÓàÀäÈ´
-      s->resetcurrentcooltime();
-      if (scd > 0) {
-        // ½«ÀäÈ´ÖÃÎª scd£ºÏÈÂúºó¼õ
-        s->resetcooldown(); // currentcooldown = cooldown
-        int fullCd = s->getcooldown();
-        for (int cd = 0; cd < (fullCd - scd); ++cd)
-          s->reducecooldown(); // ¼õµ½ scd
-      }
+    if (ifs.bad()) throw runtime_error("è¯»å–æ–‡ä»¶å¤±è´¥");
+    for (const char *key : {"VERSION", "NAME", "JOB", "LEVEL", "EXP", "COIN",
+                            "HP", "MAX_HP", "ATTACK", "MP", "MAX_MP",
+                            "CRIT_RATE", "FREE_REVIVES", "FLOOR",
+                            "BACKPACK_COUNT", "EQUIP_COUNT", "SKILL_COUNT"}) {
+      if (!seen.count(key)) throw runtime_error(string("ç¼ºå°‘å­—æ®µ: ") + key);
     }
-  }
+    if (name.empty() || name.size() > 256 || hp > maxHp || mp > maxMp)
+      throw runtime_error("è§’è‰²å±æ€§æ— æ•ˆ");
+    if (version == 2 && !seen.count("HIGHEST_FLOOR"))
+      throw runtime_error("ç¼ºå°‘æœ€é«˜æ¥¼å±‚");
+    if (!seen.count("HIGHEST_FLOOR"))
+      highestFloor = min(savedFloor, 100); // v1, including a cleared tower.
+    if (highestFloor < min(savedFloor, 100))
+      throw runtime_error("æœ€é«˜æ¥¼å±‚å°äºå½“å‰æ¥¼å±‚");
+    if (backpackCount != static_cast<int>(backpackItems.size()) ||
+        equipCount != static_cast<int>(equippedItems.size()) ||
+        skillCount != static_cast<int>(skillData.size()))
+      throw runtime_error("ç‰©å“æˆ–æŠ€èƒ½æ•°é‡ä¸åŒ¹é…");
+    unique_ptr<player> hero;
+    if (job == "Warrior") hero = make_unique<Warrior>(name);
+    else if (job == "Mage") hero = make_unique<Mage>(name);
+    else if (job == "Assassin") hero = make_unique<Assassin>(name);
+    else throw runtime_error("æœªçŸ¥èŒä¸š: " + job);
 
-  cout << "[¶Áµµ] »¶Ó­»ØÀ´£¬" << name << "£¡µ±Ç°Â¥²ã£º" << floor << endl;
-  return hero;
+    int attackBonus = 0, hpBonus = 0;
+    set<ItemType> equipmentSlots;
+    for (const auto &item : equippedItems) {
+      if (item.getType() == Potion || item.getQuantity() != 1 ||
+          !equipmentSlots.insert(item.getType()).second || !canEquip(item, job))
+        throw runtime_error("è£…å¤‡æ§½ä½ã€æ•°é‡æˆ–èŒä¸šé™åˆ¶æ— æ•ˆ");
+      if (item.getType() == Weapon) attackBonus += item.getValue();
+      else hpBonus += item.getValue();
+    }
+    if (attack <= attackBonus || maxHp <= hpBonus)
+      throw runtime_error("è£…å¤‡åŠ æˆè¶…å‡ºè§’è‰²å±æ€§");
+    if (skillCount != hero->getSkillCount())
+      throw runtime_error("èŒä¸šæŠ€èƒ½æ•°é‡ä¸åŒ¹é…");
+    // Match stable skill IDs, never the order of SKILL lines in the save.
+    for (const auto &[id, rank, cooldown] : skillData) {
+      skill *matched = nullptr;
+      for (int slot = 1; slot <= hero->getSkillCount(); ++slot) {
+        skill *candidate = hero->getSkill(slot);
+        if (candidate && candidate->getskillid() == id) {
+          matched = candidate;
+          break;
+        }
+      }
+      if (!matched || cooldown > matched->getcooldown())
+        throw runtime_error("æœªçŸ¥èŒä¸šæŠ€èƒ½æˆ–å†·å´è¶…å‡ºä¸Šé™");
+      matched->restoreProgress(rank, cooldown);
+    }
+    // Stored totals include gear; equipItem_T applies its bonuses again.
+    hero->loadStats(level, exp, coin, min(hp, maxHp - hpBonus), maxHp - hpBonus,
+                    attack - attackBonus, mp, maxMp, critRate, freeRevives);
+    hero->setHighestFloor(highestFloor);
+    for (const auto &item : backpackItems) hero->addItem(item);
+    for (const auto &item : equippedItems) hero->equipItem_T(item, true);
+    hero->sethp(hp); // Restore saved HP after armor has restored maximum HP.
+    floor = savedFloor;
+    cout << "[è¯»æ¡£] æ¬¢è¿å›æ¥ï¼Œ" << name << "ï¼å½“å‰æ¥¼å±‚ï¼š" << floor << endl;
+    return hero;
+  } catch (const exception &error) {
+    cerr << "[è¯»æ¡£] å­˜æ¡£æ–‡ä»¶æŸåæˆ–æ ¼å¼é”™è¯¯: " << error.what() << endl;
+    return nullptr;
+  }
 }
 
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-//  ¹¤¾ßº¯Êı
-// ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
 bool SaveSystem::hasSaveFile(const string &filename) {
-  ifstream f(filename);
-  return f.good();
+  ifstream file(filename);
+  return file.good();
 }
 
 void SaveSystem::deleteSave(const string &filename) {
   if (remove(filename.c_str()) == 0)
-    cout << "[´æµµ] ´æµµÎÄ¼şÒÑÉ¾³ı¡£" << endl;
+    cout << "[å­˜æ¡£] å­˜æ¡£æ–‡ä»¶å·²åˆ é™¤ã€‚" << endl;
   else
-    cerr << "[´æµµ] É¾³ı´æµµÊ§°Ü£ºÎÄ¼ş²»´æÔÚ»òÎŞÈ¨ÏŞ¡£" << endl;
+    cerr << "[å­˜æ¡£] åˆ é™¤å­˜æ¡£å¤±è´¥ï¼šæ–‡ä»¶ä¸å­˜åœ¨æˆ–æ— æƒé™ã€‚" << endl;
 }

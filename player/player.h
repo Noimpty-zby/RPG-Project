@@ -14,6 +14,10 @@ protected:
   int coin;
   int free_revives;
   int critRate;
+  int highestFloor = 1;
+  int healingPercent = 100;
+  bool guarding = false;
+  bool guardPierced = false;
   std::vector<Item> backpack;
   std::vector<Item> equipments;
   std::vector<std::unique_ptr<skill>> skills;
@@ -23,47 +27,52 @@ public:
          int coin, int critRate);
   virtual ~player();
 
-  // ©¤©¤ »ù±¾ÊôĞÔ ©¤©¤
+  // â”€â”€ åŸºæœ¬å±æ€§ â”€â”€
   int getlevel() const;
   int getexp() const;
   int getcoin() const;
   int getfreerevives() const;
   int getcritRate() const;
+  int getHighestFloor() const;
+  void setHighestFloor(int floor);
 
-  // ©¤©¤ ¾­Ñé / ½ğ±Ò / Éı¼¶ ©¤©¤
+  // â”€â”€ ç»éªŒ / é‡‘å¸ / å‡çº§ â”€â”€
   void gainexp(int exp);
   void gaincoin(int coin);
   virtual void levelup();
   void costcoin(int amount);
 
-  // ©¤©¤ ¸´»î ©¤©¤
+  // â”€â”€ å¤æ´» â”€â”€
   void revive();
   void decreaserevives();
   void resetFreeRevive();
 
-  // ©¤©¤ Õ½¶· ©¤©¤
+  // â”€â”€ æˆ˜æ–— â”€â”€
   virtual void attacktarget(Character &target) override;
   virtual void takedamage(int damage) override;
   void attacktargetDealt(Character &target, int damage);
   void heal(int amount);
+  void setHealingPercent(int percent);
+  void guard(bool pierced);
+  void clearCombatModifiers();
 
-  // ©¤©¤ Ö°Òµ£¨´¿Ğé£© ©¤©¤
+  // â”€â”€ èŒä¸šï¼ˆçº¯è™šï¼‰ â”€â”€
   virtual std::string getjob() const = 0;
 
-  // ©¤©¤ ÏÔÊ¾ ©¤©¤
+  // â”€â”€ æ˜¾ç¤º â”€â”€
   void printstats() const;
 
-  // ©¤©¤ ±³°ü / ×°±¸ ©¤©¤
+  // â”€â”€ èƒŒåŒ… / è£…å¤‡ â”€â”€
   void addItem(const Item &item);
   void printBackpack() const;
-  void useItem(int index);
+  bool useItem(int index);
   void equipItem(int index);
   void unequipItem(int index);
   void showEquippedItems() const;
-  void equipItem_T(const Item &item); // Ö±½Ó×°±¸£¨ÎŞµÈ¼¶¼ì²é£©
-  void dropItem(int index);           // ¶ªÆú±³°üÎïÆ·
+  void equipItem_T(const Item &item, bool restoring = false);
+  void dropItem(int index);           // ä¸¢å¼ƒèƒŒåŒ…ç‰©å“
 
-  // ©¤©¤ ¼¼ÄÜ ©¤©¤
+  // â”€â”€ æŠ€èƒ½ â”€â”€
   void showSkills(player &hero) const;
   bool useSkill(int index, enemy &target);
   void learnSkill(std::unique_ptr<skill> newSkill);
@@ -72,13 +81,13 @@ public:
   void reduceallCooldowns();
   void levelUpSkill(int index);
 
-  // ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-  //  ´æµµ / ¶Áµµ×¨ÓÃ½Ó¿Ú
-  // ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  å­˜æ¡£ / è¯»æ¡£ä¸“ç”¨æ¥å£
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /**
-   * loadStats ¡ª ¶ÁµµÊ±Ò»´ÎĞÔ»Ö¸´ËùÓĞºËĞÄÊıÖµ¡£
-   * ²ÎÊıË³Ğò£ºlevel, exp, coin,
+   * loadStats â€” è¯»æ¡£æ—¶ä¸€æ¬¡æ€§æ¢å¤æ‰€æœ‰æ ¸å¿ƒæ•°å€¼ã€‚
+   * å‚æ•°é¡ºåºï¼šlevel, exp, coin,
    *           hp, max_hp,
    *           attack, mp, max_mp,
    *           critRate, free_revives
@@ -86,9 +95,9 @@ public:
   void loadStats(int level, int exp, int coin, int hp, int max_hp, int attack,
                  int mp, int max_mp, int critRate, int free_revives);
 
-  /** Ö»¶ÁÒıÓÃ£º±©Â¶±³°ü¸ø SaveSystem ĞòÁĞ»¯ */
+  /** åªè¯»å¼•ç”¨ï¼šæš´éœ²èƒŒåŒ…ç»™ SaveSystem åºåˆ—åŒ– */
   const std::vector<Item> &getSaveBackpack() const { return backpack; }
 
-  /** Ö»¶ÁÒıÓÃ£º±©Â¶ÒÑ×°±¸ÁĞ±í¸ø SaveSystem ĞòÁĞ»¯ */
+  /** åªè¯»å¼•ç”¨ï¼šæš´éœ²å·²è£…å¤‡åˆ—è¡¨ç»™ SaveSystem åºåˆ—åŒ– */
   const std::vector<Item> &getSaveEquipments() const { return equipments; }
 };

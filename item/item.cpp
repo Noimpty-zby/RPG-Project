@@ -19,13 +19,13 @@ JobReq Item::getJobRequirement() const { return jobRequirement; }
 string Item::getJobRequirementName() const {
   switch (jobRequirement) {
   case WarriorOnly:
-    return "战士专用";
+    return "鎴樺＋涓撶敤";
   case MageOnly:
-    return "法师专用";
+    return "娉曞笀涓撶敤";
   case AssassinOnly:
-    return "刺客专用";
+    return "鍒哄涓撶敤";
   default:
-    return "通用";
+    return "閫氱敤";
   }
 }
 

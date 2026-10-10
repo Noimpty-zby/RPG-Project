@@ -4,9 +4,9 @@
 
 class player;
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  skill »ùÀà
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  skill åŸºç±»
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 class skill {
   int skillid;
   int levelrequired;
@@ -15,24 +15,28 @@ class skill {
   int cooldown;
   int currentcooldown;
   int damage;
+  int basecostmp;
+  int basedamage;
   std::string skillname;
 
 public:
   skill(int skillid, int levelrequired, int costmp, int cooldown, int damage,
         int level, std::string skillname);
 
-  // ©¤©¤ Getters ©¤©¤
+  // â”€â”€ Getters â”€â”€
   int getskillid() const;
   int getlevelrequired() const;
+  int getunlockfloor() const;
   int getcostmp() const;
   int getcooldown() const;
   int getdamage() const;
+  int getScaledDamage(const player &hero) const;
   int getlevelUpCost() const;
   int getskilllevel() const;
   int getcurrentcooldown() const;
   std::string getskillname() const;
 
-  // ©¤©¤ Setters ©¤©¤
+  // â”€â”€ Setters â”€â”€
   void setskillid(int skillid);
   void setlevelrequired(int levelrequired);
   void setcostmp(int costmp);
@@ -41,29 +45,31 @@ public:
   void setskillname(std::string skillname);
   void setskilllevelup(int level);
 
-  // ©¤©¤ ÀäÈ´¿ØÖÆ ©¤©¤
+  // â”€â”€ å†·å´æ§åˆ¶ â”€â”€
   void reducecooldown();
   void resetcooldown();
   void resetcurrentcooltime();
+  void restoreProgress(int level, int cooldown);
 
-  // ©¤©¤ Âß¼­ ©¤©¤
-  bool canUse(player &hero) const;
-  void levelUpSkill(int playerLevel, int costcoins);
+  // â”€â”€ é€»è¾‘ â”€â”€
+  virtual bool canUse(player &hero) const;
+  bool canUpgrade(int playerLevel, int highestFloor) const;
+  bool levelUpSkill(int playerLevel, int costcoins, int highestFloor);
   void learnSkill(int playerlevel);
 
   virtual ~skill() = default;
   virtual bool useSkill(player &hero, enemy &target) = 0;
 };
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  Õ½Ê¿¼¼ÄÜ£¨5¸ö£©
-//  Ö÷Ìâ£º¼áÊØÓë±¬·¢£¬"Ô½Õ½Ô½ÓÂ"
-//  Lv.1  ¡¾ÃÍ»÷¡¿      ¿ìËÙµ¥Ìå£¬Ö÷Á¦Êä³ö£¬µÍCD
-//  Lv.8  ¡¾Õ½ºğÕ¶¡¿    ÉËº¦+×ÔÉí»ØÑª£¬¹¥·ÀÒ»Ìå
-//  Lv.18 ¡¾¶Ü·´¡¿      ²»Ôì³ÉÉËº¦£¬´ó·ùÏ÷¼õµĞ·½¹¥»÷£¨·ÀÓù¿ØÖÆ£©
-//  Lv.28 ¡¾ÑªÅ­¡¿      HPÔ½µÍ±¶ÂÊÔ½¸ß£¬¾ø¾³±¬·¢
-//  Lv.40 ¡¾ÎŞË«Õ¶¡¿    ÖÕ¼«´óÕĞ£¬¼«¸ßÉËº¦+³¤ÀäÈ´
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  æˆ˜å£«æŠ€èƒ½ï¼ˆ5ä¸ªï¼‰
+//  ä¸»é¢˜ï¼šåšå®ˆä¸çˆ†å‘ï¼Œ"è¶Šæˆ˜è¶Šå‹‡"
+//  Lv.1  ã€çŒ›å‡»ã€‘      å¿«é€Ÿå•ä½“ï¼Œä¸»åŠ›è¾“å‡ºï¼Œä½CD
+//  Lv.8  ã€æˆ˜å¼æ–©ã€‘    ä¼¤å®³+è‡ªèº«å›è¡€ï¼Œæ”»é˜²ä¸€ä½“
+//  Lv.18 ã€ç›¾åã€‘      ä¸é€ æˆä¼¤å®³ï¼Œå¤§å¹…å‰Šå‡æ•Œæ–¹æ”»å‡»ï¼ˆé˜²å¾¡æ§åˆ¶ï¼‰
+//  Lv.28 ã€è¡€æ€’ã€‘      HPè¶Šä½å€ç‡è¶Šé«˜ï¼Œç»å¢ƒçˆ†å‘
+//  Lv.40 ã€æ— åŒæ–©ã€‘    ç»ˆæå¤§æ‹›ï¼Œæé«˜ä¼¤å®³+é•¿å†·å´
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 class Warriorskill_1 : public skill {
 public:
   Warriorskill_1();
@@ -90,15 +96,15 @@ public:
   bool useSkill(player &hero, enemy &target) override;
 };
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  ·¨Ê¦¼¼ÄÜ£¨5¸ö£©
-//  Ö÷Ìâ£ºÔªËØÄ§·¨ÌåÏµ£¬"MP¼´Á¦Á¿"
-//  Lv.1  ¡¾»ğÇòÊõ¡¿    ÎÈ¶¨»ğÑæµ¥Ìå
-//  Lv.8  ¡¾±ùËªĞÂĞÇ¡¿  ÉËº¦+Ï÷¼õµĞ·½¹¥»÷Á¦£¨¶³½á¼õ¹¥£©
-//  Lv.18 ¡¾¶¾ÔÆÊõ¡¿    ²»ÏûºÄMP·´¶ø»Ø¸´MP£¨ÌØÊâ»úÖÆ£©£¬¸½´øÖĞ¶¾ÉËº¦
-//  Lv.28 ¡¾°ÂÊõ±¬·¢¡¿  ÏûºÄµ±Ç°Ò»°ëMP£¬ÉËº¦ÓëÏûºÄÁ¿³ÉÕı±È£¨¸ß·çÏÕ¸ß»Ø±¨£©
-//  Lv.40 ¡¾Á÷ĞÇÔÉÂä¡¿  ×î¸ßµ¥ÌåÉËº¦£¬¼«³¤ÀäÈ´
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  æ³•å¸ˆæŠ€èƒ½ï¼ˆ5ä¸ªï¼‰
+//  ä¸»é¢˜ï¼šå…ƒç´ é­”æ³•ä½“ç³»ï¼Œ"MPå³åŠ›é‡"
+//  Lv.1  ã€ç«çƒæœ¯ã€‘    ç¨³å®šç«ç„°å•ä½“
+//  Lv.8  ã€å†°éœœæ–°æ˜Ÿã€‘  ä¼¤å®³+å‰Šå‡æ•Œæ–¹æ”»å‡»åŠ›ï¼ˆå†»ç»“å‡æ”»ï¼‰
+//  Lv.18 ã€æ¯’äº‘æœ¯ã€‘    ä¸æ¶ˆè€—MPåè€Œå›å¤MPï¼ˆç‰¹æ®Šæœºåˆ¶ï¼‰ï¼Œé™„å¸¦ä¸­æ¯’ä¼¤å®³
+//  Lv.28 ã€å¥¥æœ¯çˆ†å‘ã€‘  æ¶ˆè€—å½“å‰ä¸€åŠMPï¼Œä¼¤å®³ä¸æ¶ˆè€—é‡æˆæ­£æ¯”ï¼ˆé«˜é£é™©é«˜å›æŠ¥ï¼‰
+//  Lv.40 ã€æµæ˜Ÿé™¨è½ã€‘  æœ€é«˜å•ä½“ä¼¤å®³ï¼Œæé•¿å†·å´
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 class Mageskill_1 : public skill {
 public:
   Mageskill_1();
@@ -117,6 +123,7 @@ public:
 class Mageskill_4 : public skill {
 public:
   Mageskill_4();
+  bool canUse(player &hero) const override;
   bool useSkill(player &hero, enemy &target) override;
 };
 class Mageskill_5 : public skill {
@@ -125,15 +132,15 @@ public:
   bool useSkill(player &hero, enemy &target) override;
 };
 
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
-//  ´Ì¿Í¼¼ÄÜ£¨5¸ö£©
-//  Ö÷Ìâ£º°µÓ°Á¬»÷£¬"¿ì¡¢×¼¡¢ºİ"
-//  Lv.1  ¡¾´©´Ì¡¿      µÍCD¿ìËÙ´Ì»÷
-//  Lv.8  ¡¾Ó°Ï®¡¿      ±Ø¶¨´¥·¢±©»÷£¨¡Á2ÉËº¦£©
-//  Lv.18 ¡¾Á¬»·´Ì¡¿    Ëæ»úÁ¬»÷2~4´Î£¬µ¥´ÎÉËº¦µÍ£¬×ÜÉËº¦¸ß
-//  Lv.28 ¡¾ÎüÑªÈĞ¡¿    ÉËº¦+ÎüÊÕÔì³ÉÉËº¦µÄ40%ÎªHP
-//  Lv.40 ¡¾Ë²É±¡¿      ÎŞÊÓ»¤¶Ü£¬Ö±½ÓÔì³ÉµĞ·½µ±Ç°HPµÄ50%ÉËº¦
-// ¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T¨T
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  åˆºå®¢æŠ€èƒ½ï¼ˆ5ä¸ªï¼‰
+//  ä¸»é¢˜ï¼šæš—å½±è¿å‡»ï¼Œ"å¿«ã€å‡†ã€ç‹ "
+//  Lv.1  ã€ç©¿åˆºã€‘      ä½CDå¿«é€Ÿåˆºå‡»
+//  Lv.8  ã€å½±è¢­ã€‘      å¿…å®šè§¦å‘æš´å‡»ï¼ˆÃ—2ä¼¤å®³ï¼‰
+//  Lv.18 ã€è¿ç¯åˆºã€‘    éšæœºè¿å‡»2~4æ¬¡ï¼Œå•æ¬¡ä¼¤å®³ä½ï¼Œæ€»ä¼¤å®³é«˜
+//  Lv.28 ã€å¸è¡€åˆƒã€‘    ä¼¤å®³+å¸æ”¶é€ æˆä¼¤å®³çš„40%ä¸ºHP
+//  Lv.40 ã€ç¬æ€ã€‘      æ— è§†æŠ¤ç›¾ï¼Œç›´æ¥é€ æˆæ•Œæ–¹å½“å‰HPçš„50%ä¼¤å®³
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 class Assassinskill_1 : public skill {
 public:
   Assassinskill_1();

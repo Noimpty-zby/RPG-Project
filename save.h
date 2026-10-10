@@ -4,48 +4,49 @@
 #include <string>
 
 // =========================================================
-// SaveSystem ¡ª¡ª ´æµµ / ¶ÁµµÏµÍ³
+// SaveSystem â€”â€” å­˜æ¡£ / è¯»æ¡£ç³»ç»Ÿ
 //
-// ´æµµ¸ñÊ½£¨´¿ÎÄ±¾£¬UTF-8£©£º
-//   VERSION 1
-//   NAME   Ó¢ĞÛ
+// å­˜æ¡£æ ¼å¼ï¼ˆçº¯æ–‡æœ¬ï¼ŒUTF-8ï¼‰ï¼š
+//   VERSION 2ï¼ˆå…¼å®¹ VERSION 1ï¼‰
+//   NAME   è‹±é›„
 //   JOB    Warrior | Mage | Assassin
 //   LEVEL  5   EXP 200   COIN 500
 //   HP 165  MAX_HP 165  ATTACK 25  MP 20  MAX_MP 20
 //   CRIT_RATE 10  FREE_REVIVES 3
 //   FLOOR  3
+//   HIGHEST_FLOOR 65ï¼ˆå†å²æœ€é«˜æ¥¼å±‚ï¼Œæ—§å­˜æ¡£å–å½“å‰æ¥¼å±‚ï¼‰
 //   BACKPACK_COUNT 2
-//   ITEM  ÎïÆ·Ãû|µÈ¼¶ĞèÇó|ÀàĞÍ|ÊıÖµ|ÄÍ¾Ã|¼Û¸ñ|ÊıÁ¿
+//   ITEM  ç‰©å“å|ç­‰çº§éœ€æ±‚|ç±»å‹|æ•°å€¼|è€ä¹…|ä»·æ ¼|æ•°é‡
 //   ...
 //   EQUIP_COUNT 1
-//   EQUIP ÎïÆ·Ãû|µÈ¼¶ĞèÇó|ÀàĞÍ|ÊıÖµ|ÄÍ¾Ã|¼Û¸ñ|ÊıÁ¿
+//   EQUIP ç‰©å“å|ç­‰çº§éœ€æ±‚|ç±»å‹|æ•°å€¼|è€ä¹…|ä»·æ ¼|æ•°é‡
 //   ...
 //   SKILL_COUNT 3
-//   SKILL ¼¼ÄÜid|¼¼ÄÜµÈ¼¶|µ±Ç°ÀäÈ´
+//   SKILL æŠ€èƒ½id|æŠ€èƒ½ç­‰çº§|å½“å‰å†·å´
 //   ...
 // =========================================================
 
 class SaveSystem {
 public:
-  // ±£´æÓÎÏ·£»³É¹¦·µ»Ø true
+  // ä¿å­˜æ¸¸æˆï¼›æˆåŠŸè¿”å› true
   static bool saveGame(const player &hero, int floor,
                        const std::string &filename = "save.dat");
 
-  // ¶Áµµ£»³É¹¦·µ»ØÓĞĞ§µÄ player Ö¸Õë²¢Ğ´Èë floor£¬
-  // Ê§°Ü·µ»Ø nullptr
+  // è¯»æ¡£ï¼›æˆåŠŸè¿”å›æœ‰æ•ˆçš„ player æŒ‡é’ˆå¹¶å†™å…¥ floorï¼Œ
+  // å¤±è´¥è¿”å› nullptrï¼Œä¸”ä¸ä¿®æ”¹ floor
   static std::unique_ptr<player>
   loadGame(int &floor, const std::string &filename = "save.dat");
 
-  // ¼ì²éÊÇ·ñ´æÔÚ´æµµÎÄ¼ş
+  // æ£€æŸ¥æ˜¯å¦å­˜åœ¨å­˜æ¡£æ–‡ä»¶
   static bool hasSaveFile(const std::string &filename = "save.dat");
 
-  // É¾³ı´æµµÎÄ¼ş
+  // åˆ é™¤å­˜æ¡£æ–‡ä»¶
   static void deleteSave(const std::string &filename = "save.dat");
 
 private:
-  // °Ñ Item ĞòÁĞ»¯³ÉÒ»ĞĞ pipe ·Ö¸ôµÄ×Ö·û´®
+  // æŠŠ Item åºåˆ—åŒ–æˆä¸€è¡Œ pipe åˆ†éš”çš„å­—ç¬¦ä¸²
   static std::string serializeItem(const Item &item);
 
-  // ´ÓÒ»ĞĞ pipe ·Ö¸ôµÄ×Ö·û´®·´ĞòÁĞ»¯ Item
+  // ä»ä¸€è¡Œ pipe åˆ†éš”çš„å­—ç¬¦ä¸²ååºåˆ—åŒ– Item
   static Item deserializeItem(const std::string &line);
 };

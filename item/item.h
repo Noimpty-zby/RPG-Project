@@ -2,7 +2,7 @@
 #include <string>
 
 enum ItemType { Weapon = 1, Armor = 2, Potion = 3 };
-// Ö°ÒµÏŞÖÆ£º0=Í¨ÓÃ£¬1=Õ½Ê¿£¬2=·¨Ê¦£¬3=´Ì¿Í
+// èŒä¸šé™åˆ¶ï¼š0=é€šç”¨ï¼Œ1=æˆ˜å£«ï¼Œ2=æ³•å¸ˆï¼Œ3=åˆºå®¢
 enum JobReq { AnyJob = 0, WarriorOnly = 1, MageOnly = 2, AssassinOnly = 3 };
 
 class Item {
@@ -14,10 +14,10 @@ private:
   int durability;
   int price;
   int quantity;
-  JobReq jobRequirement; // ¡ï ĞÂÔö£ºÖ°ÒµÏŞÖÆ
+  JobReq jobRequirement; // â˜… æ–°å¢ï¼šèŒä¸šé™åˆ¶
 
 public:
-  // jobRequirement Ä¬ÈÏ AnyJob£¬Ïòºó¼æÈİ
+  // jobRequirement é»˜è®¤ AnyJobï¼Œå‘åå…¼å®¹
   Item(std::string name, int levelRequirement, ItemType type, int value,
        int durability, int price, int quantity, JobReq jobRequirement = AnyJob);
 
@@ -30,7 +30,7 @@ public:
   int getQuantity() const;
   JobReq getJobRequirement() const;
 
-  // Ö°ÒµÃû×Ö·û´®£¨ÓÃÓÚÏÔÊ¾£©
+  // èŒä¸šåå­—ç¬¦ä¸²ï¼ˆç”¨äºæ˜¾ç¤ºï¼‰
   std::string getJobRequirementName() const;
 
   void setQuantity(int quantity);
