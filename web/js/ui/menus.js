@@ -121,7 +121,6 @@ export class Menus {
           default: return this.systemView(m);
         }
       },
-      onClose: () => this.app.hud.refresh(),
     });
   }
 
@@ -133,8 +132,14 @@ export class Menus {
       const actions = [];
       if (item.getType() === ItemType.Potion) {
         actions.push(button('使用', () => {
+          const before = hero.gethp();
           const { ok } = this.game.act(() => hero.useItem(index));
-          if (!ok) { sfx('error'); toast('无法使用：生命已满。'); } else sfx('heal');
+          if (!ok) { sfx('error'); toast('无法使用：生命已满。'); } else {
+            sfx('heal');
+            const restored = hero.gethp() - before;
+            const overflow = item.getValue() - restored;
+            toast(`恢复 ${restored} 生命${overflow > 0 ? `（溢出 ${overflow}）` : ''}，当前 ${hero.gethp()}/${hero.getmaxhp()}。`);
+          }
           m.refresh();
         }, { cls: 'small', disabled: hero.gethp() >= hero.getmaxhp() }));
       } else {
@@ -337,7 +342,7 @@ export class Menus {
       h('p', { class: 'muted', style: { fontSize: '12px' } }, '每场战斗结算和换层时会自动写入「自动存档」。存档保存在本浏览器中。'),
       h('h3', {}, '声音'),
       h('div', { class: 'choice-row' },
-        button(audio.muted ? '取消静音' : '静音', () => { setAudio({ muted: !audio.muted }); this.app.hud.refresh(); m.refresh(); }, { cls: 'small' }),
+        button(audio.muted ? '取消静音' : '静音', () => { setAudio({ muted: !audio.muted }); m.refresh(); }, { cls: 'small' }),
         button(`音效 ${Math.round(audio.sfx * 100)}%`, () => { setAudio({ sfx: audio.sfx >= 1 ? 0 : Math.round((audio.sfx + 0.2) * 10) / 10 }); m.refresh(); }, { cls: 'small' }),
         button(`音乐 ${Math.round(audio.music * 100)}%`, () => { setAudio({ music: audio.music >= 1 ? 0 : Math.round((audio.music + 0.2) * 10) / 10 }); m.refresh(); }, { cls: 'small' })),
       h('h3', {}, '其他'),
@@ -375,7 +380,6 @@ export class Menus {
                     toast(rests === 0 ? '本章休息次数已用完。' : hero.gethp() === hero.getmaxhp() && hero.getmp() === hero.getmaxmp() ? '生命和魔力都是满的。' : `金币不足（需要 ${price}）。`);
                   } else { sfx('heal'); scene?.fx.burst(scene.player.x + 8, scene.player.y, { color: ['#63c74d', '#ffffff'], count: 16, speed: 30, gravity: -40 }); }
                   m.refresh();
-                  this.app.hud.refresh();
                 }, { cls: 'small good', disabled: rests === 0 }))),
               h('div', { class: 'row-item' }, h('div', { class: 'icon', style: { display: 'grid', placeItems: 'center', color: '#feae34' } }, '令'),
                 h('div', {}, h('div', { class: 'title' }, '章节订单'),
@@ -404,7 +408,6 @@ export class Menus {
                   const { ok } = game.act(() => hero.enhanceEquipment(i + 1));
                   if (!ok) { sfx('error'); toast('金币不足。'); } else { sfx('levelup'); toast(`${item.getDisplayName()} 强化成功！`); }
                   m.refresh();
-                  this.app.hud.refresh();
                 }, { cls: 'small primary', disabled: hero.getcoin() < cost })
                 : h('span', { class: 'muted' }, '已满级')] });
             })) : h('p', {}, '没有装备任何物品！'));
@@ -420,7 +423,6 @@ export class Menus {
                   const { ok } = game.act(() => hero.repairEquipment(i + 1));
                   if (!ok) { sfx('error'); toast('金币不足。'); } else { sfx('guard'); toast('修理完成。'); }
                   m.refresh();
-                  this.app.hud.refresh();
                 }, { cls: 'small', disabled: hero.getcoin() < cost })
                 : h('span', { class: 'muted' }, '无需修理')] });
             })) : h('p', {}, '没有装备任何物品！'));
@@ -442,7 +444,6 @@ export class Menus {
         }
         return this.skillsView(m);
       },
-      onClose: () => this.app.hud.refresh(),
     });
   }
 
@@ -479,7 +480,6 @@ export class Menus {
           h('h3', {}, '出售背包物品'),
           h('p', { class: 'muted' }, '按单价的三分之一卖出；在背包（Esc → 背包）里可以按数量卖出、锁定或批量拆解。'));
       },
-      onClose: () => this.app.hud.refresh(),
     });
   }
 
@@ -575,6 +575,7 @@ export class Menus {
     }
     const preview = Campaign.makeEnemy(game.hero, game.floor);
     const rules = Campaign.rulesFor(game.hero, game.floor);
+    preview.setTacticalPressure(rules.difficulty);
     const first = !game.cleared();
     const sprite = Sprites.monster(preview.bestiaryEntry()).idle;
     const goalText = {

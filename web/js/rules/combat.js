@@ -19,7 +19,7 @@ export class BattleSession {
     this.intent = null;
     this.report = {
       turns: 0, damageTaken: 0, poisonDamage: 0, suppressedHealing: 0, readPunishments: 0,
-      potionsUsed: 0, guards: 0, interrupts: 0, timeout: false,
+      potionsUsed: 0, guards: 0, waitingGuards: 0, interrupts: 0, timeout: false,
     };
     this.awaitingAction = false;
     this.objectiveComplete = false;
@@ -147,6 +147,9 @@ export class BattleSession {
         hero.guard(intent.piercesGuard);
         actionId = -1;
         ++this.report.guards;
+        // Guarding a plain attack, a charge or a rest is waiting, not answering a threat.
+        if (intent.kind === Intent.Attack || intent.kind === Intent.Charge || intent.kind === Intent.Recover)
+          ++this.report.waitingGuards;
         break;
       case ActionType.Potion:
         if (!hero.useItem(action.index)) return false;
@@ -164,7 +167,9 @@ export class BattleSession {
       monster.interruptCharge()) {
       interrupted = true;
       ++this.report.interrupts;
-      emit('interrupt', '【打断成功】普通攻击打断蓄力，下回合敌人休整。', { side: 'enemy' });
+      emit('interrupt', monster.interruptGrantsRecovery()
+        ? '【打断成功】普通攻击打断蓄力，下回合敌人休整。'
+        : '【打断成功】普通攻击打断蓄力，重击取消；该敌人不休整，下回合仍会行动。', { side: 'enemy' });
     }
 
     if (!monster.isalive()) {

@@ -1,4 +1,5 @@
 #include "core/random.h"
+#include "game/campaign.h"
 #include "game/combat.h"
 #include "player/jobs.h"
 #include "player/skills.h"
@@ -106,6 +107,39 @@ void testChargeCounterAndRecovery() {
   require(missBattle.report().interrupts == 0 &&
               dodging.getIntent().kind == EnemyIntentKind::HeavyStrike,
           "A missed attack must not count as an interruption");
+}
+
+// Every text about an interrupt must match what the enemy then does: ordinary
+// fights and bosses rest, scarce-supply and elite fights do not.
+void testInterruptTextsMatchRecovery() {
+  struct Case { int floor; bool boss; int difficulty; bool elite; };
+  const Case cases[] = {{4, false, 0, false}, {4, false, 1, true}, {4, false, 1, false},
+                        {4, false, 2, true},  {10, true, 0, false}, {10, true, 1, false}};
+  for (const Case &c : cases) {
+    auto h = hero(); auto e = foe(c.floor, c.boss, 0);
+    EncounterRules rules;
+    rules.difficulty = c.difficulty;
+    rules.elite = c.elite;
+    BattleSession b(*h, e, rules);
+    for (int i = 0; i < 30 && !e.getIntent().interruptible; ++i) turn(b, {ActionType::Guard});
+    require(e.getIntent().interruptible, "Interrupt text fixture must reach a charge");
+    const std::string hint = e.getTacticalHint();
+    std::ostringstream shown;
+    auto *previous = std::cout.rdbuf(shown.rdbuf());
+    e.displayIntent();
+    turn(b, {ActionType::Attack});
+    std::cout.rdbuf(previous);
+    const bool rests = e.getIntent().kind == EnemyIntentKind::Recover;
+    require(b.report().interrupts == 1 && rests == (c.difficulty == 0),
+            "Only unpressured enemies rest after an interrupt");
+    const std::string text = shown.str();
+    require(rests == (text.find("敌人随后休整一回合") != std::string::npos) &&
+                rests == (text.find("下回合敌人休整") != std::string::npos) &&
+                rests != (text.find("不休整") != std::string::npos),
+            "Charge intent and interrupt log must promise rest exactly when it follows");
+    require(c.boss || rests != (hint.find("不休整") != std::string::npos),
+            "The charge guard's tactical hint must match the interrupt rule");
+  }
 }
 
 void testSuppressionAndShatterCounters() {
@@ -309,6 +343,45 @@ void testHealingAffixAndInterrupts() {
           "Interrupting the charge must deny the heal");
 }
 
+// Poison alone is no sign of stalling: the advice needs a Defeat fight where
+// the player guarded while nothing called for it.
+void testPoisonAdviceFollowsBehavior() {
+  const auto advice = [](const BattleSession &b) {
+    std::ostringstream shown;
+    auto *previous = std::cout.rdbuf(shown.rdbuf());
+    Campaign::printBattleReport(b);
+    std::cout.rdbuf(previous);
+    return shown.str().find("格挡等待") != std::string::npos;
+  };
+  const auto waiting = [](EnemyIntentKind kind) {
+    return kind == EnemyIntentKind::Attack || kind == EnemyIntentKind::Charge ||
+           kind == EnemyIntentKind::Recover;
+  };
+
+  auto survivor = hero(); auto toxic = foe(1, false, 0);
+  giveAffix(toxic, Affix::POISONOUS);
+  BattleSession survive(*survivor, toxic, {EncounterObjective::Survive, 5});
+  while (!survive.finished()) turn(survive, {ActionType::Guard});
+  require(survive.won() && survive.report().poisonDamage > 0 && !advice(survive),
+          "Waiting out a survival objective must not be called stalling");
+
+  auto attacker = hero(); auto toxicBoss = foe(10, true, 0);
+  giveAffix(toxicBoss, Affix::POISONOUS);
+  BattleSession assault(*attacker, toxicBoss);
+  for (int i = 0; i < 6; ++i) turn(assault, {ActionType::Attack});
+  require(assault.report().poisonDamage > 0 && assault.report().waitingGuards == 0 &&
+              !advice(assault),
+          "Attacking every turn must not be called stalling");
+
+  auto staller = hero(); auto toxicFoe = foe(1, false, 0);
+  giveAffix(toxicFoe, Affix::POISONOUS);
+  BattleSession stall(*staller, toxicFoe);
+  for (int i = 0; i < 30 && stall.report().waitingGuards < 2; ++i)
+    turn(stall, {waiting(toxicFoe.getIntent().kind) ? ActionType::Guard : ActionType::Attack});
+  require(stall.report().waitingGuards == 2 && advice(stall),
+          "Guarding while nothing threatens in a poisoned Defeat fight is stalling");
+}
+
 void testAssassinCannotDodgeUnavoidableDamage() {
   // Poison ticks and death blasts bypass the assassin's passive dodge.
   auto assassin = std::make_unique<Assassin>("dodger");
@@ -344,6 +417,7 @@ int main() {
     Random::seed(42);
     testInvalidActionsAndResources();
     testChargeCounterAndRecovery();
+    testInterruptTextsMatchRecovery();
     testSuppressionAndShatterCounters();
     testReadCounterAndReport();
     testObjectivesAndSettlement();
@@ -352,6 +426,7 @@ int main() {
     testCleanupAndSabotage();
     testAssassinCannotDodgeUnavoidableDamage();
     testHealingAffixAndInterrupts();
+    testPoisonAdviceFollowsBehavior();
     std::cout.rdbuf(previous);
     std::cout << "combat objective tests passed\n";
   } catch (const std::exception &error) {

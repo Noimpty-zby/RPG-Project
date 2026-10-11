@@ -183,7 +183,7 @@ export class Skill {
         if (branch === 2) out += '；不回血，命中恢复6MP';
         else out += `；基础生命恢复 ${percent(hero.getRecoveryBaseHp(), branch === 1 ? 25 : 15)}`;
       }
-      if (id === 3) out += `；敌攻击-35%，持续 ${controlDuration(hero, 2)} 次行动`;
+      if (id === 3) out += `；无视护盾；敌攻击-35%，持续 ${controlDuration(hero, 2)} 次行动`;
       if (id === 4) out += '；生命比例>60%/30—60%/<30%对应1/1.8/3倍';
       if (id === 5) out += `；恢复 ${10 * this.getEffectiveRank()} HP`;
     } else if (hero.job() === Job.Mage) {

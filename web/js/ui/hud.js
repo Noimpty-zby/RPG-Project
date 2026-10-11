@@ -1,6 +1,6 @@
 // Exploration HUD: hero card, floor card, menu/sound buttons, prompts and
 // touch controls.
-import { h, bar } from './dom.js';
+import { h, bar, onModalChange } from './dom.js';
 import * as Campaign from '../rules/campaign.js';
 import { Objective } from '../rules/combat.js';
 import { chapterOf } from '../rules/config.js';
@@ -17,6 +17,7 @@ export class Hud {
     this.promptEl = document.getElementById('prompt');
     this.touch = document.getElementById('touch');
     this.coarse = matchMedia('(pointer: coarse)').matches;
+    onModalChange(() => this.refresh());
     document.getElementById('btn-menu').addEventListener('click', () => { if (!this.app.busy) this.app.menus.openMain(); });
     const sound = document.getElementById('btn-sound');
     sound.addEventListener('click', () => {

@@ -25,6 +25,8 @@ struct BattleReport {
   int readPunishments = 0;
   int potionsUsed = 0;
   int guards = 0;
+  // Guards against a plain attack, a charge or a rest: waiting, not answering a threat.
+  int waitingGuards = 0;
   int interrupts = 0;
   bool timeout = false;
 };

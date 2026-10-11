@@ -225,6 +225,17 @@ void testDamageAndBossIdentity() {
   require(warrior.useSkill(1, shielded) &&
               10000 - shielded.gethp() >= raw - raw / 2,
           "shield absorbed more than half a skill hit");
+  // Shield Counter pierces shields, and its preview must say so.
+  auto unshielded = shielded;
+  unshielded.applySabotage();
+  const int shieldedBefore = shielded.gethp(), unshieldedBefore = unshielded.gethp();
+  require(warrior.useSkill(3, shielded), "Shield Counter could not be cast");
+  warrior.getSkill(3)->resetcurrentcooltime();
+  require(warrior.useSkill(3, unshielded) &&
+              shieldedBefore - shielded.gethp() == unshieldedBefore - unshielded.gethp(),
+          "Shield Counter lost damage to a shield");
+  require(warrior.getSkill(3)->getPreview(warrior).find("无视护盾") != std::string::npos,
+          "Shield Counter preview must state that it ignores shields");
 
   Assassin assassin("assassin");
   prepare(assassin);

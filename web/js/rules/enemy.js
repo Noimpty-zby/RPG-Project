@@ -83,6 +83,8 @@ const TacticHints = [
   '在你格挡后发动无视格挡的破防攻击，此时主动出手更划算。蓄力时普攻可打断。',
   '记录你的出招习惯并预判重复行动，改变行动可让预判落空。蓄力时普攻可打断。',
 ];
+// The Charge hint for pressured enemies, which do not rest after an interrupt.
+const PressuredChargeHint = '会蓄力并在下回合重击；普攻实际命中可以打断，但它被打断后不休整，下回合仍会行动。';
 
 export const bossAttackPercent = (floor) => BossProfiles[chapterOf(floor)].attackPercent;
 
@@ -237,7 +239,11 @@ export class Enemy extends Character {
   }
   getTacticalHint() {
     if (this.bossEncounter) return BossProfiles[chapterOf(this.encounterFloor)].hint;
-    if (this.encounterFloor > 0) return TacticHints[this.encounterFloor % 4];
+    if (this.encounterFloor > 0) {
+      const slot = this.encounterFloor % 4;
+      if (slot === 0 && !this.interruptGrantsRecovery()) return PressuredChargeHint;
+      return TacticHints[slot];
+    }
     return '观察早期意图：普攻命中可打断蓄力；格挡能抗重击，换招能避开预判。';
   }
   primaryTactic() {
@@ -329,7 +335,9 @@ export class Enemy extends Character {
       case Intent.Attack:
         return '普通攻击：造成 100% 攻击伤害，可格挡减半。';
       case Intent.Charge: {
-        let text = '蓄力：本回合不攻击；普通攻击实际命中即可打断，敌人随后休整一回合。未打断则下回合重击（' +
+        let text = (this.interruptGrantsRecovery()
+          ? '蓄力：本回合不攻击；普通攻击实际命中即可打断，敌人随后休整一回合。'
+          : '蓄力：本回合不攻击；普通攻击实际命中即可打断，但该敌人被打断后不休整。') + '未打断则下回合重击（' +
           `${this.makeIntent(Intent.HeavyStrike).damagePercent}%），可格挡减半。`;
         if (this.hasAffix(Affix.HEALING))
           text += `【治疗】蓄力完成会回复 ${IntentTuning.HealingAffixPercent}% 最大生命。`;
@@ -355,12 +363,15 @@ export class Enemy extends Character {
   interruptCharge() {
     if (this.getIntent().kind !== Intent.Charge) return false;
     this.chargePending = false;
-    this.recoveryTurns = this.tacticalPressure === 0 ? 1 : 0;
+    this.recoveryTurns = this.interruptGrantsRecovery() ? 1 : 0;
     this.interruptedThisTurn = true;
     this.specialCooldown = Math.max(1, 3 - this.tacticalPressure) + (this.sabotaged ? 1 : 0);
     return true;
   }
   setObjectivePressure(enabled) { this.objectivePressure = enabled; }
+  // Pressured enemies (challenges, elites) shake off an interrupt at once.
+  // Every text that promises the rest reads this so it never contradicts the rule.
+  interruptGrantsRecovery() { return this.tacticalPressure === 0; }
   setTacticalPressure(difficulty) { this.tacticalPressure = clamp(difficulty, 0, 2); }
   applySabotage() {
     this.removeAffix(Affix.SHIELDING);

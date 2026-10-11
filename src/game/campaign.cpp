@@ -367,7 +367,11 @@ void printBattleReport(const BattleSession &battle) {
     << " 次；药水 " << r.potionsUsed << "。\n";
   if (r.readPunishments) std::cout << "调整建议：留意预测行动，改变已被识破的出招。\n";
   if (r.suppressedHealing) std::cout << "调整建议：优先在无重伤的回合恢复，危险时仍可应急治疗。\n";
-  if (r.poisonDamage) std::cout << "调整建议：剧毒持续消耗，避免为了等冷却而无限拖延。\n";
+  // Only Defeat fights let the player set the pace; the other objectives ask
+  // them to wait, so poison alone is no sign of stalling.
+  if (r.poisonDamage && battle.objective() == EncounterObjective::Defeat && r.waitingGuards >= 2)
+    std::cout << "调整建议：剧毒每回合持续消耗，本场有 " << r.waitingGuards
+      << " 次在敌人普攻、蓄力或休整时格挡等待；用普攻或技能推进可以缩短战斗。\n";
 }
 void printJournal(const player &hero, int floor) {
   const auto &run = hero.runState();

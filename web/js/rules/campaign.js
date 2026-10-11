@@ -381,7 +381,10 @@ export function battleReview(battle) {
   const lines = [`战斗复盘：${battle.turns()}回合，承伤 ${r.damageTaken}，其中剧毒 ${r.poisonDamage}；抑疗损失 ${r.suppressedHealing}；被识破 ${r.readPunishments} 次；打断 ${r.interrupts} 次；药水 ${r.potionsUsed}。`];
   if (r.readPunishments) lines.push('调整建议：留意预测行动，改变已被识破的出招。');
   if (r.suppressedHealing) lines.push('调整建议：优先在无重伤的回合恢复，危险时仍可应急治疗。');
-  if (r.poisonDamage) lines.push('调整建议：剧毒持续消耗，避免为了等冷却而无限拖延。');
+  // Only Defeat fights let the player set the pace; the other objectives ask
+  // them to wait, so poison alone is no sign of stalling.
+  if (r.poisonDamage && battle.objective() === Objective.Defeat && r.waitingGuards >= 2)
+    lines.push(`调整建议：剧毒每回合持续消耗，本场有 ${r.waitingGuards} 次在敌人普攻、蓄力或休整时格挡等待；用普攻或技能推进可以缩短战斗。`);
   return lines;
 }
 
