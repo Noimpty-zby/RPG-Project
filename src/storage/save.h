@@ -7,7 +7,7 @@
 // SaveSystem —— 存档 / 读档系统
 //
 // 存档格式（纯文本，UTF-8）：
-//   VERSION 4（兼容 VERSION 1/2/3；V1/V2 显式保留旧规则标记）
+//   VERSION 5（兼容 VERSION 1/2/3/4；V5 增加章节悬赏进度，V1/V2 显式保留旧规则标记）
 //   NAME   英雄
 //   JOB    Warrior | Mage | Assassin
 //   LEVEL  5   EXP 200   COIN 500

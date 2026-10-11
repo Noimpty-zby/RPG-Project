@@ -45,6 +45,20 @@ int purchasePrice(const player &hero, int floor, const Item &item);
 bool purchase(player &hero, int floor, int slot);
 bool refreshShop(player &hero, int floor);
 bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int floor);
+// Chapter bounties: two optional goals per chapter, chosen from the run seed
+// (no rules randomness is consumed) and counted over every won fight on that
+// chapter's floors. Reaching a goal pays BountyMaterials and a potion once.
+constexpr int BountyKinds = 6;
+constexpr int BountyMaterials = 3;
+struct Bounty {
+  const char *name;
+  const char *before; // goal text around the target number
+  const char *after;
+  int target;
+};
+const Bounty &bounty(int kind);
+std::string bountyGoal(int kind);
+std::array<int, 2> chapterBounties(const player &hero, int chapter);
 bool revive(player &hero, bool useFree);
 void printJournal(const player &hero, int floor);
 void printBattleReport(const BattleSession &battle);

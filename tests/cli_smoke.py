@@ -18,7 +18,7 @@ for job in (1, 2, 3):
         assert "最高层 1" in first
         save = pathlib.Path(workspace, "save.dat")
         saved = save.read_text(encoding="utf-8")
-        assert "VERSION 4\n" in saved and "HIGHEST_FLOOR 1\n" in saved
+        assert "VERSION 5\n" in saved and "BOUNTIES " in saved and "HIGHEST_FLOOR 1\n" in saved
         loaded = run("1\n6\n8\n0\n2\n0\n9\n4\n2\n")
         assert f"Smoke{job}" in loaded and "先完成本层目标" in loaded
         assert save.read_text(encoding="utf-8") == saved
@@ -77,5 +77,5 @@ for job in (1, 2, 3):
         run("1\n")
         assert profile.read_text(encoding="utf-8").count("RECORD ") == 1
 
-print("CLI smoke passed: three jobs, V4 round-trip, camp, inventory, input bounds, battle cancellation, EOF, "
+print("CLI smoke passed: three jobs, V5 round-trip, camp, inventory, input bounds, battle cancellation, EOF, "
       "old save preservation, help, archive, travel, inspect, stack sales, batch potions, enhance/repair, run records.")

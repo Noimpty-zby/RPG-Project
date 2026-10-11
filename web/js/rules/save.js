@@ -42,7 +42,7 @@ function validateRun(run, highestFloor) {
   require(isInt(run.seed, 0, 4294967295), '种子');
   const arrays = [['routes', 10, 3], ['events', 10, 2], ['campRested', 10, MaxRestsPerChapter],
     ['ordersClaimed', 10, 1], ['shopRefreshes', 10, 20], ['shopPurchased', 10, 31],
-    ['cleared', 101, 1], ['attempts', 101, MaxCounter]];
+    ['cleared', 101, 1], ['attempts', 101, MaxCounter], ['bounties', 20, 99]];
   for (const [field, length, maximum] of arrays) {
     require(Array.isArray(run[field]) && run[field].length === length, `${field} 长度无效`);
     require(run[field].every((value) => isInt(value, 0, maximum)), `${field} 数值无效`);

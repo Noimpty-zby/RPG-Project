@@ -137,6 +137,7 @@ bool BattleSession::act(BattleAction action) {
       std::cout << "【落空返还】技能被完全闪避，返还 " << hero.getmp() - mpBefore << " MP。" << std::endl;
     }
     actionId = action.index;
+    ++battleReport.skillsUsed;
     break;
   }
   case ActionType::Guard:
@@ -146,6 +147,7 @@ bool BattleSession::act(BattleAction action) {
     if (intent.kind == EnemyIntentKind::Attack || intent.kind == EnemyIntentKind::Charge ||
         intent.kind == EnemyIntentKind::Recover)
       ++battleReport.waitingGuards;
+    if (intent.kind == EnemyIntentKind::HeavyStrike) ++battleReport.heavyGuards;
     break;
   case ActionType::Potion:
     if (!hero.useItem(action.index)) return false;

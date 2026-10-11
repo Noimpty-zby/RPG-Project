@@ -19,7 +19,7 @@ export class BattleSession {
     this.intent = null;
     this.report = {
       turns: 0, damageTaken: 0, poisonDamage: 0, suppressedHealing: 0, readPunishments: 0,
-      potionsUsed: 0, guards: 0, waitingGuards: 0, interrupts: 0, timeout: false,
+      potionsUsed: 0, guards: 0, waitingGuards: 0, heavyGuards: 0, skillsUsed: 0, interrupts: 0, timeout: false,
     };
     this.awaitingAction = false;
     this.objectiveComplete = false;
@@ -151,6 +151,7 @@ export class BattleSession {
           emit('mana', `【落空返还】技能被完全闪避，返还 ${amount} MP。`, { side: 'hero', amount });
         }
         actionId = action.index;
+        ++this.report.skillsUsed;
         break;
       }
       case ActionType.Guard:
@@ -160,6 +161,7 @@ export class BattleSession {
         // Guarding a plain attack, a charge or a rest is waiting, not answering a threat.
         if (intent.kind === Intent.Attack || intent.kind === Intent.Charge || intent.kind === Intent.Recover)
           ++this.report.waitingGuards;
+        if (intent.kind === Intent.HeavyStrike) ++this.report.heavyGuards;
         break;
       case ActionType.Potion:
         if (!hero.useItem(action.index)) return false;

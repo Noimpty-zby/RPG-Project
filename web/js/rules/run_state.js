@@ -16,6 +16,7 @@ export function newRunState() {
     shopPurchased: new Array(10).fill(0),
     cleared: new Array(101).fill(0),
     attempts: new Array(101).fill(0),
+    bounties: new Array(20).fill(0), // chapter bounty progress, index chapter * 2 + slot
     battles: 0,
     turns: 0,
     potionsUsed: 0,

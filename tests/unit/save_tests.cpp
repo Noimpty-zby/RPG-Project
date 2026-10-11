@@ -135,7 +135,7 @@ void roundTrip(player &hero, Fixture &fixture) {
   }
   require(SaveSystem::saveGame(hero, 40, fixture.name()), "save succeeds");
   const auto original = fixture.read();
-  require(original.find("VERSION 4\n") != std::string::npos, "save version");
+  require(original.find("VERSION 5\n") != std::string::npos, "save version");
   fixture.write(reorderSkills(original));
   int floor = -99;
   auto restored = SaveSystem::loadGame(floor, fixture.name());
@@ -271,7 +271,8 @@ std::string version3(const std::string &modern) {
   std::istringstream input(modern);
   std::string line, output;
   while (std::getline(input, line)) {
-    if (line == "VERSION 4") line = "VERSION 3";
+    if (line == "VERSION 5") line = "VERSION 3";
+    if (line.rfind("BOUNTIES ", 0) == 0) continue;
     if (line.rfind("ITEM ", 0) == 0 || line.rfind("EQUIP ", 0) == 0)
       for (int field = 0; field < 2; ++field) line.resize(line.rfind('|'));
     output += line + "\n";
@@ -295,7 +296,31 @@ void version3Saves(Fixture &fixture) {
   require(weapon.getDurability() == 12 && weapon.getMaxDurability() == 12 && weapon.getEnhanceLevel() == 0,
           "v3 items take their current durability as the cap and no enhancement");
   require(SaveSystem::saveGame(*restored, floor, fixture.name()) &&
-          fixture.read().find("VERSION 4\n") != std::string::npos, "v3 saves upgrade to v4 when saved");
+          fixture.read().find("VERSION 5\n") != std::string::npos, "v3 saves upgrade to v5 when saved");
+}
+
+// V4 saves predate chapter bounties: they load with no progress, and a V5 save
+// must carry its bounty line.
+void version4Saves(Fixture &fixture) {
+  Warrior hero("V4 hero");
+  hero.runState().bounties[3] = 2;
+  require(SaveSystem::saveGame(hero, 1, fixture.name()), "v5 source save");
+  const std::string modern = fixture.read();
+  require(modern.find("BOUNTIES 0|0|0|2|") != std::string::npos, "v5 saves bounty progress");
+  int floor = 0;
+  auto restored = SaveSystem::loadGame(floor, fixture.name());
+  require(restored && restored->runState().bounties[3] == 2, "bounty progress round-trips");
+  std::string v4;
+  std::istringstream input(modern);
+  for (std::string line; std::getline(input, line);) {
+    if (line == "VERSION 5") line = "VERSION 4";
+    if (line.rfind("BOUNTIES ", 0) != 0) v4 += line + "\n";
+  }
+  fixture.write(v4);
+  restored = SaveSystem::loadGame(floor, fixture.name());
+  require(restored && restored->runState().bounties[3] == 0, "v4 saves load with no bounty progress");
+  fixture.write(replaceLine(v4, "VERSION ", "VERSION 5"));
+  require(!SaveSystem::loadGame(floor, fixture.name()), "a v5 save without bounties is rejected");
 }
 
 void corruptSaves(Fixture &fixture) {
@@ -460,6 +485,7 @@ int main() {
     legacySaves(fixture);
     legacyRetreat(fixture);
     version3Saves(fixture);
+    version4Saves(fixture);
     extremeLegacyValues(fixture);
     corruptSaves(fixture);
     atomicSave(fixture);
@@ -472,6 +498,6 @@ int main() {
     std::cerr << "Save tests FAILED: " << failure << "\n" << gameLog.str();
     return 1;
   }
-  std::cout << "Save tests passed: all classes, V3 upgrade, legacy migration, skill order, HP, malformed saves.\n";
+  std::cout << "Save tests passed: all classes, V3/V4 upgrade, bounties, legacy migration, skill order, HP, malformed saves.\n";
   return 0;
 }

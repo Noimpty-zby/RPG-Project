@@ -220,6 +220,62 @@ void testEventsPersistWithoutNewFields() {
     std::remove(path.c_str()); std::remove((path + ".bak").c_str());
   }
 }
+// Bounties are fixed by the seed, two distinct kinds per chapter; won fights
+// on the chapter's floors advance them, lost fights do not, and the reward is
+// paid once.
+void testBounties() {
+  Warrior probe("bounty");
+  std::set<int> kindsSeen;
+  for (unsigned seed = 1; seed <= 200; ++seed) {
+    probe.runState().seed = seed;
+    for (int c = 0; c < 10; ++c) {
+      const auto kinds = Campaign::chapterBounties(probe, c);
+      require(kinds[0] != kinds[1] && kinds[0] >= 0 && kinds[1] < Campaign::BountyKinds,
+              "A chapter must offer two distinct bounties");
+      require(kinds == Campaign::chapterBounties(probe, c), "Bounties must not depend on earlier calls");
+      kindsSeen.insert(kinds[0]); kindsSeen.insert(kinds[1]);
+    }
+  }
+  require(static_cast<int>(kindsSeen.size()) == Campaign::BountyKinds, "Every bounty kind must be offered");
+
+  Warrior hero("quick"); prepareEventHero(hero);
+  // A seed whose chapter one pairs the quick-win bounty with one that quick
+  // wins cannot complete (interrupts, a potion-free elite, heavy strikes).
+  for (unsigned seed = 1;; ++seed) {
+    hero.runState().seed = seed;
+    const auto kinds = Campaign::chapterBounties(hero, 0);
+    if ((kinds[0] == 3 && kinds[1] <= 2) || (kinds[1] == 3 && kinds[0] <= 2)) break;
+  }
+  const int slot = Campaign::chapterBounties(hero, 0)[0] == 3 ? 0 : 1;
+  const auto quickWin = [&](int floor) {
+    enemy weak("weak", 1, 0, 0, 0, 0, 1);
+    weak.configureEncounter(floor, false); weak.setdodgeRate(0);
+    BattleSession battle(hero, weak);
+    require(battle.beginTurn() && battle.act({ActionType::Attack}) && battle.won(), "Quick-win fixture failed");
+    return Campaign::settleEncounter(hero, weak, battle, floor);
+  };
+  const int materials = hero.runState().materials;
+  // Floors 3 and 7 pay first-clear materials of their own, so avoid them.
+  for (int floor : {1, 2, 4}) require(quickWin(floor), "Quick win must settle");
+  require(hero.runState().bounties[slot] == 3 && hero.runState().materials == materials,
+          "Three quick wins advance the bounty without paying it yet");
+  const auto potions = [&] {
+    int count = 0;
+    for (const Item &item : hero.getSaveBackpack()) if (item.getType() == Potion) count += item.getQuantity();
+    return count;
+  };
+  const int before = potions();
+  require(quickWin(1), "A replayed quick win must settle");
+  require(hero.runState().bounties[slot] == 4 &&
+              hero.runState().materials == materials + Campaign::BountyMaterials && potions() == before + 1,
+          "Reaching the target pays materials and a potion");
+  require(quickWin(2) && hero.runState().bounties[slot] == 4 &&
+              hero.runState().materials == materials + Campaign::BountyMaterials && potions() == before + 1,
+          "A completed bounty pays only once");
+  require(hero.runState().bounties[2] == 0 && hero.runState().bounties[3] == 0,
+          "Fights in chapter one never advance chapter two");
+}
+
 void testLivingTimeoutIsNotADeath() {
   Warrior hero("timeout"); prepareEventHero(hero);
   enemy blocker("blocker", 1000000, 0, 0, 100, 100, 1);
@@ -337,6 +393,7 @@ int main() {
   testEventEnemyEffectsAndPrices();
   testEventsPersistWithoutNewFields();
   testLivingTimeoutIsNotADeath();
+  testBounties();
   testEliteEncounters();
   testReadiness();
   Warrior hero("campaign");
@@ -455,5 +512,5 @@ int main() {
   assert(Campaign::revive(fragile, true) && fragile.isalive());
   assert(!Campaign::revive(fragile, true));
   std::cout.rdbuf(original);
-  std::cout << "Campaign tests passed: routes, goals, rewards, economy, persistence, replay safety.\n";
+  std::cout << "Campaign tests passed: routes, goals, rewards, bounties, economy, persistence, replay safety.\n";
 }

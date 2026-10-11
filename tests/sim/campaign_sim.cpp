@@ -153,6 +153,8 @@ struct Pacing {
   long long eliteAttempts = 0, eliteWins = 0, eliteTurns = 0;
   long long enhanceCoins = 0, repairCoins = 0, restCoins = 0, endCoins = 0, runs = 0;
   std::array<std::array<int, 2>, 10> bossFirstAttempts{}; // {wins, attempts} per chapter
+  // Bounties of chapters whose boss was cleared: {completed, offered} per kind and policy.
+  std::array<std::array<std::array<int, 2>, Campaign::BountyKinds>, 2> bounties{};
 };
 std::array<Pacing, 3> pacing{};
 Result run(int job, unsigned seed, int route, int challenge, bool aware) {
@@ -207,6 +209,15 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
     if (!won) break;
   }
   if (challenge == 0) {
+    for (int c = 0; c < 10; ++c) {
+      if (!hero->runState().cleared[(c + 1) * 10]) continue;
+      const auto kinds = Campaign::chapterBounties(*hero, c);
+      for (int slot = 0; slot < 2; ++slot) {
+        auto &tally = stats.bounties[aware][kinds[slot]];
+        tally[0] += hero->runState().bounties[c * 2 + slot] >= Campaign::bounty(kinds[slot]).target;
+        ++tally[1];
+      }
+    }
     stats.enhanceCoins += spend.enhance;
     stats.repairCoins += spend.repair;
     stats.restCoins += spend.rest;
@@ -287,6 +298,18 @@ int main(int argc, char **argv) {
       for (const auto &tally : pacing[job].bossFirstAttempts)
         std::cout << std::setw(5) << (tally[1] ? tally[0] * 100 / tally[1] : -1);
       std::cout << '\n';
+    }
+    std::cout << "\nChapter bounties completed without aiming for them, % (fixed / aware)\n";
+    for (int kind = 0; kind < Campaign::BountyKinds; ++kind) {
+      std::array<int, 2> done{}, offered{};
+      for (const auto &p : pacing)
+        for (int aware = 0; aware < 2; ++aware) {
+          done[aware] += p.bounties[aware][kind][0];
+          offered[aware] += p.bounties[aware][kind][1];
+        }
+      for (int aware = 0; aware < 2; ++aware)
+        std::cout << std::setw(6) << (offered[aware] ? done[aware] * 100 / offered[aware] : -1);
+      std::cout << "  " << Campaign::bountyGoal(kind) << " (" << offered[0] + offered[1] << " offered)\n";
     }
   } else {
     std::cout << csv;

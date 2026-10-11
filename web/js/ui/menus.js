@@ -302,6 +302,10 @@ export class Menus {
       h('p', {}, '本章遭遇：', j.goals.map((g) => h('span', { class: `tag ${g.label === '精英' ? 'elite' : g.label === 'Boss' ? 'boss' : 'goal'}` },
         `${g.floor}层 ${g.label}`))),
       h('p', {}, j.eventText),
+      h('h3', {}, '本章悬赏'),
+      h('p', { class: 'muted' }, `可选目标，在本章楼层获胜的战斗都计入（重玩也算），达成各奖励 ${Campaign.BountyMaterials} 材料与 1 瓶药水。`),
+      h('ul', { class: 'lines' }, j.bounties.map((b) => h('li', { class: b.progress >= b.target ? 'good' : '' },
+        `${b.name}：${b.goal}（${b.progress >= b.target ? '已完成' : `${b.progress}/${b.target}`}）`))),
       j.letter ? h('p', { class: 'cyan' }, j.letter) : null,
       h('h3', {}, '远征统计'),
       h('p', { class: 'muted' }, `种子 ${j.seed} · 挑战 ${j.challenge} · 战斗 ${j.battles} · 回合 ${j.turns} · 阵亡 ${j.deaths} · 药水 ${j.potions} · 装备提升 ${j.usefulDrops} · 最长装备空窗 ${j.longestGearDrought} 层`));
@@ -693,6 +697,8 @@ export class Menus {
       rules.elite ? h('p', { class: 'bad' }, '【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁且被打断后不休整；首通必得本层最高品质档的目标装备。') : null,
       rules.bossSabotaged ? h('p', { class: 'good' }, '供能设施已破坏，Boss 护盾失效、重击减弱。') : null,
       rules.elite || game.floor % 10 === 0 ? this.readinessView() : null,
+      h('p', { class: 'muted', style: { fontSize: '13px' } }, '本章悬赏：', game.journal().bounties.map((b) =>
+        `${b.goal}（${b.progress >= b.target ? '已完成' : `${b.progress}/${b.target}`}）`).join('；')),
       h('p', { class: 'muted' }, `战术提示：${preview.getTacticalHint()}`),
       preview.getAffixes().length ? h('ul', { class: 'lines muted', style: { fontSize: '13px' } }, preview.getAffixes().map((a) => h('li', {}, `[${affixName(a)}] ${affixDescription(a)}`))) : null,
       first ? null : h('p', { class: 'muted' }, '已首通：重复挑战的奖励逐次降低（30% → 10% → 0）。')),

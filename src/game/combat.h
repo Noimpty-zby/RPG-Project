@@ -27,6 +27,8 @@ struct BattleReport {
   int guards = 0;
   // Guards against a plain attack, a charge or a rest: waiting, not answering a threat.
   int waitingGuards = 0;
+  int heavyGuards = 0; // guards against a heavy strike
+  int skillsUsed = 0;
   int interrupts = 0;
   bool timeout = false;
 };

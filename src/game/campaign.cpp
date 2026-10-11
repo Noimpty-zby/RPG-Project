@@ -69,6 +69,27 @@ void giveItem(player &hero, const Item &item) {
   hero.addItem(item);
   std::cout << "获得：" << item.getDisplayName() << "（数值 " << item.getValue() << "）\n";
 }
+// Each asks for something an intent-reading player does not do by default;
+// the targets are set so the simulator's aware policy meets them by chance in
+// roughly 0-40% of chapters (see campaign_sim --report).
+constexpr Campaign::Bounty bounties[Campaign::BountyKinds] = {
+  {"连断", "在 ", " 场战斗中各打断 2 次", 3},
+  {"节药", "不喝药击败本章精英或首领 ", " 次", 1},
+  {"挡重击", "格挡化解 ", " 次重击", 3},
+  {"速胜", "3 回合内赢下 ", " 场", 4},
+  {"轻伤", "承伤不超过最大生命一成赢下 ", " 场", 4},
+  {"朴拙", "只用普攻和格挡赢下 ", " 场", 2}};
+int bountyGain(int kind, const player &hero, const BattleSession &battle, int floor) {
+  const auto &r = battle.report();
+  switch (kind) {
+  case 0: return r.interrupts >= 2;
+  case 1: return (floor % 10 == 0 || Campaign::isEliteFloor(floor)) && r.potionsUsed == 0;
+  case 2: return r.heavyGuards;
+  case 3: return battle.turns() <= 3;
+  case 4: return static_cast<long long>(r.damageTaken) * 100 <= static_cast<long long>(hero.getmaxhp()) * 10;
+  default: return r.skillsUsed == 0 && r.potionsUsed == 0;
+  }
+}
 }
 
 namespace Campaign {
@@ -338,6 +359,17 @@ bool refreshShop(player &hero, int floor) {
   run.shopPurchased[c] = 0;
   return true;
 }
+const Bounty &bounty(int kind) { return bounties[std::clamp(kind, 0, BountyKinds - 1)]; }
+std::string bountyGoal(int kind) {
+  const Bounty &b = bounty(kind);
+  return std::string(b.before) + std::to_string(b.target) + b.after;
+}
+std::array<int, 2> chapterBounties(const player &hero, int chapter) {
+  std::uint32_t h = hero.runState().seed * 2654435761u + static_cast<std::uint32_t>(chapter + 1) * 40503u;
+  h ^= h >> 15;
+  const int first = static_cast<int>(h % BountyKinds);
+  return {first, static_cast<int>((first + 1 + (h >> 8) % (BountyKinds - 1)) % BountyKinds)};
+}
 bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int floor) {
   if (!validFloor(floor) || !battle.claimSettlement()) return false;
   auto &run = hero.runState();
@@ -376,6 +408,17 @@ bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int fl
   if (first && local == 10) {
     run.materials = std::min(GameConfig::MaxMaterials, run.materials + 3);
     std::cout << "章节完成：" << chapter(floor).name << "；专精与改造可在营地重新准备。\n";
+  }
+  const auto kinds = chapterBounties(hero, c);
+  for (int slot = 0; slot < 2; ++slot) {
+    int &progress = run.bounties[c * 2 + slot];
+    const Bounty &b = bounty(kinds[slot]);
+    if (progress >= b.target) continue;
+    progress = std::min(b.target, progress + bountyGain(kinds[slot], hero, battle, floor));
+    if (progress < b.target) continue;
+    run.materials = std::min(GameConfig::MaxMaterials, run.materials + BountyMaterials);
+    std::cout << "【悬赏完成】" << bountyGoal(kinds[slot]) << "：获得 " << BountyMaterials << " 材料与药水。\n";
+    giveItem(hero, generateTargetedItem(floor, AnyJob, Potion));
   }
   run.cleared[floor] = 1;
   run.longestGearDrought = std::max(run.longestGearDrought, run.gearDrought);
@@ -431,7 +474,14 @@ void printJournal(const player &hero, int floor) {
     if (rules.elite) std::cout << " 第" << targetFloor << "层精英";
   }
   std::cout << "；第" << (c + 1) * 10 << "层击败Boss。\n"
-    << eventOutcome(eventType(floor), run.events[c]) << "。\n";
+    << eventOutcome(eventType(floor), run.events[c]) << "。\n本章悬赏（可选，各奖励 " << BountyMaterials << " 材料与药水）：";
+  const auto kinds = chapterBounties(hero, c);
+  for (int slot = 0; slot < 2; ++slot) {
+    const int progress = run.bounties[c * 2 + slot], target = bounty(kinds[slot]).target;
+    std::cout << (slot ? "；" : "") << bountyGoal(kinds[slot])
+      << (progress >= target ? "（已完成）" : "（" + std::to_string(progress) + "/" + std::to_string(target) + "）");
+  }
+  std::cout << "。\n";
   if (c > 0 && run.events[c - 1] == 1)
     std::cout << "来自" << chapter(floor - 10).ally << "的信：上一章的合作已经记入远征日志，效果限于当地。\n";
 }

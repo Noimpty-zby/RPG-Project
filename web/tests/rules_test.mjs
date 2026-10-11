@@ -80,6 +80,12 @@ for (const job of [Job.Warrior, Job.Mage, Job.Assassin]) {
   const badRun = clone(data);
   badRun.run.cleared[90] = 1;
   rejects(badRun, 'cleared floor beyond highest');
+  const badBounties = clone(data);
+  badBounties.run.bounties = badBounties.run.bounties.slice(1);
+  rejects(badBounties, 'bounty progress of the wrong length');
+  const oldSave = clone(data);
+  delete oldSave.run.bounties;
+  check(deserializeGame(oldSave).hero.runState().bounties.every((v) => v === 0), 'saves without bounties load with no progress');
   const badSkill = clone(data);
   badSkill.skills[0].rank = 5;
   rejects(badSkill, 'rank above cap');

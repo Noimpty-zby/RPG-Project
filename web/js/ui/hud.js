@@ -89,10 +89,16 @@ export class Hud {
     else if (rules.elite) tags.push(h('span', { class: 'tag elite' }, '精英'));
     if (rules.objective !== Objective.Defeat) tags.push(h('span', { class: 'tag goal' }, Campaign.objectiveName(rules.objective)));
     this.floorEl.className = 'hud-card panel';
+    const bounties = Campaign.chapterBounties(hero, c).map((kind, slot) => {
+      const progress = game.run.bounties[c * 2 + slot];
+      const { name, target } = Campaign.bounty(kind);
+      return h('span', { class: progress >= target ? 'good' : 'muted' }, `${name} ${progress >= target ? '✓' : `${progress}/${target}`}`);
+    });
     this.floorEl.replaceChildren(
       h('div', { class: 'title' }, `第 ${floor} 层`),
       h('div', { class: 'line' }, `第${c + 1}章 · ${Campaign.chapter(floor).name}`),
       h('div', { class: 'line' }, tags.length ? tags : h('span', { class: 'muted' }, '待完成')),
+      h('div', { class: 'line', title: '本章悬赏（告示牌查看详情）' }, '悬赏 ', bounties[0], ' · ', bounties[1]),
     );
   }
 

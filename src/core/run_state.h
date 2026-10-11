@@ -19,6 +19,7 @@ struct RunState {
   std::array<int, 10> shopPurchased{}; // 5-bit stock mask
   std::array<int, 101> cleared{};
   std::array<int, 101> attempts{};
+  std::array<int, 20> bounties{}; // chapter bounty progress, index chapter * 2 + slot
   int battles = 0;
   int turns = 0;
   int potionsUsed = 0;

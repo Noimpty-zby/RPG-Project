@@ -149,6 +149,7 @@ void writeRun(ostream &output, const RunState &run) {
   writeArray(output, "SHOP_PURCHASED", run.shopPurchased);
   writeArray(output, "CLEARED", run.cleared);
   writeArray(output, "ATTEMPTS", run.attempts);
+  writeArray(output, "BOUNTIES", run.bounties);
   output << "BATTLES " << run.battles << "\nTURNS " << run.turns
          << "\nPOTIONS_USED " << run.potionsUsed << "\nDEATHS " << run.deaths
          << "\nDAMAGE_TAKEN " << run.damageTaken << "\nUSEFUL_DROPS " << run.usefulDrops
@@ -224,7 +225,7 @@ string SaveSystem::serializeItem(const Item &item) {
 
 Item SaveSystem::deserializeItem(const string &line) {
   const auto tok = split(line, '|');
-  // 7/8 fields: V1/V2; 12: V3; 14: V4 adds the durability cap and enhancement level.
+  // 7/8 fields: V1/V2; 12: V3; 14: V4/V5 add the durability cap and enhancement level.
   if (tok.size() != 7 && tok.size() != 8 && tok.size() != 12 && tok.size() != 14)
     throw runtime_error("存档物品格式错误");
   const bool modern = tok.size() >= 12;
@@ -271,7 +272,7 @@ bool SaveSystem::saveGame(const player &hero, int floor, const string &filename)
     requireRange(hero.getcritRate(), 0, 100, "暴击");
     requireRange(hero.getfreerevives(), 0, 1000, "复活");
     ostringstream output;
-    output << "VERSION 4\nNAME " << hero.getname() << "\nJOB " << hero.getjob()
+    output << "VERSION 5\nNAME " << hero.getname() << "\nJOB " << hero.getjob()
            << "\nLEVEL " << hero.getlevel() << "\nEXP " << hero.getexp()
            << "\nCOIN " << hero.getcoin() << "\nHP " << hero.gethp()
            << "\nMAX_HP " << hero.getmaxhp() << "\nATTACK " << hero.getattack()
@@ -355,7 +356,7 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       getline(row >> ws, value);
       if (key != "ITEM" && key != "EQUIP" && key != "SKILL" && !seen.insert(key).second)
         throw runtime_error("重复字段: " + key);
-      if (key == "VERSION") version = parseNumber(value, 1, 4, key);
+      if (key == "VERSION") version = parseNumber(value, 1, 5, key);
       else if (key == "NAME") name = value;
       else if (key == "JOB") job = value;
       else if (key == "LEVEL") level = parseNumber(value, 1, 10000, key);
@@ -385,6 +386,7 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       else if (key == "SHOP_PURCHASED") run.shopPurchased = parseArray<10>(value, 0, 31, key);
       else if (key == "CLEARED") run.cleared = parseArray<101>(value, 0, 1, key);
       else if (key == "ATTEMPTS") run.attempts = parseArray<101>(value, 0, GameConfig::MaxCounter, key);
+      else if (key == "BOUNTIES") run.bounties = parseArray<20>(value, 0, 99, key);
       else if (key == "BATTLES") run.battles = parseNumber(value, 0, GameConfig::MaxCounter, key);
       else if (key == "TURNS") run.turns = parseNumber(value, 0, GameConfig::MaxCounter, key);
       else if (key == "POTIONS_USED") run.potionsUsed = parseNumber(value, 0, GameConfig::MaxCounter, key);
@@ -434,7 +436,8 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
     if (version >= 3) {
       for (const auto &key : runKeys)
         if (!seen.count(key)) throw runtime_error("缺少章节字段: " + key);
-      const int expected = version == 4 ? v4Items : v3Items;
+      if (version >= 5 && !seen.count("BOUNTIES")) throw runtime_error("缺少章节字段: BOUNTIES");
+      const int expected = version >= 4 ? v4Items : v3Items;
       if (expected != backpackCount + equipCount || modernSkills != skillCount)
         throw runtime_error("V" + to_string(version) + "缺少物品或专精字段");
     } else {
