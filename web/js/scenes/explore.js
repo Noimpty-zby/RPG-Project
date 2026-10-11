@@ -128,6 +128,7 @@ export class ExploreScene {
     this.spawnAt = 'start';
     this.player = { tx: spawn.x, ty: spawn.y, x: spawn.x * TILE, y: spawn.y * TILE, dir: 'right', moving: null, step: 0, walk: 0 };
     this.camera = { x: this.player.x, y: this.player.y };
+    this.route = null;
   }
 
   // Re-check entity states after menus change the run (events, clears).
@@ -148,6 +149,73 @@ export class ExploreScene {
     if (e && e.type === 'stairs') return this.game.cleared();
     return !e || !e.solid;
   }
+  // Landmarks for quick travel, most useful first. The map holds no fights
+  // besides the guardian, so every walk is safe to automate.
+  travelTargets() {
+    const { game } = this;
+    const byType = (type) => this.entities.find((e) => e.type === type);
+    const list = [];
+    const add = (entity, label, primary = false) => { if (entity) list.push({ entity, label, primary }); };
+    if (this.chest && !this.chest.entity.opened) add(this.chest.entity, '宝箱', true);
+    if (game.cleared()) add(this.stairs, game.floor === MaxFloor ? '天顶之门' : '楼梯（下一层）', true);
+    else add(this.guardian, `守卫：${this.guardian.name}`, true);
+    add(byType('campfire'), '营火');
+    add(byType('merchant'), '商人');
+    add(byType('waystone'), '传送石');
+    add(byType('sign'), '告示牌');
+    add(byType('ally'), byType('ally')?.name);
+    add(byType('device'), '装置');
+    if (game.cleared()) add(this.guardian, `再次挑战：${this.guardian.name}`);
+    return list;
+  }
+  // Walk the shortest path to an entity, then use it. Stairs are walked onto;
+  // anything else is approached from a free side and faced.
+  travelTo(entity) {
+    const route = this.pathTo(entity);
+    if (!route) {
+      sfx('error');
+      this.app.toast('走不到那里。');
+      return;
+    }
+    this.route = { ...route, target: entity };
+  }
+  pathTo(entity) {
+    const { w } = this.layout;
+    const p = this.player;
+    const key = (x, y) => y * w + x;
+    const goals = new Map();
+    if (entity.type === 'stairs') {
+      if (this.walkable(entity.x, entity.y)) goals.set(key(entity.x, entity.y), null);
+    } else {
+      const tiles = entity.w === 2 ? [[entity.x, entity.y], [entity.x + 1, entity.y]] : [[entity.x, entity.y]];
+      for (const [tx, ty] of tiles)
+        for (const [dir, [dx, dy]] of Object.entries(Dirs)) {
+          const nx = tx - dx;
+          const ny = ty - dy;
+          if (this.walkable(nx, ny) || (nx === p.tx && ny === p.ty)) goals.set(key(nx, ny), dir);
+        }
+    }
+    const from = new Map([[key(p.tx, p.ty), null]]);
+    const queue = [[p.tx, p.ty]];
+    while (queue.length) {
+      const [x, y] = queue.shift();
+      if (goals.has(key(x, y))) {
+        const steps = [];
+        for (let k = key(x, y); from.get(k); k = from.get(k).prev) steps.unshift(from.get(k).dir);
+        return { steps, face: goals.get(key(x, y)) };
+      }
+      for (const [dir, [dx, dy]] of Object.entries(Dirs)) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (!from.has(key(nx, ny)) && this.walkable(nx, ny)) {
+          from.set(key(nx, ny), { prev: key(x, y), dir });
+          queue.push([nx, ny]);
+        }
+      }
+    }
+    return null;
+  }
+
   facing() {
     const [dx, dy] = Dirs[this.player.dir];
     return this.entityAt(this.player.tx + dx, this.player.ty + dy);
@@ -168,6 +236,7 @@ export class ExploreScene {
       for (const key of keys) {
         if (key === 'action') this.interact(this.facing());
         if (key === 'menu') this.app.menus.openMain();
+        if (key === 'travel') this.app.menus.openTravel(this);
       }
     }
     this.updatePlayer(dt, busy);
@@ -195,7 +264,7 @@ export class ExploreScene {
     const p = this.player;
     if (p.moving) {
       p.moving.t += dt;
-      const t = Math.min(1, p.moving.t / MoveTime);
+      const t = Math.min(1, p.moving.t / (p.moving.fast ? MoveTime / 2 : MoveTime));
       p.x = (p.moving.fx + (p.tx - p.moving.fx) * t) * TILE;
       p.y = (p.moving.fy + (p.ty - p.moving.fy) * t) * TILE;
       if (t >= 1) {
@@ -208,18 +277,31 @@ export class ExploreScene {
     const input = this.app.input;
     let dir = null;
     for (const d of ['up', 'down', 'left', 'right']) if (input.held(d)) dir = d;
+    if (dir) this.route = null;
+    else if (this.route) {
+      const route = this.route;
+      dir = route.steps.shift();
+      if (!dir) {
+        this.route = null;
+        if (route.face) p.dir = route.face;
+        if (route.target.type !== 'stairs') this.interact(route.target);
+        return;
+      }
+    }
     if (!dir) { p.walk = 0; return; }
     p.dir = dir;
     const [dx, dy] = Dirs[dir];
     const nx = p.tx + dx;
     const ny = p.ty + dy;
     if (this.walkable(nx, ny)) {
-      p.moving = { fx: p.tx, fy: p.ty, t: 0 };
+      p.moving = { fx: p.tx, fy: p.ty, t: 0, fast: Boolean(this.route) };
       p.tx = nx;
       p.ty = ny;
       p.step = p.step === 1 ? 2 : 1;
       p.walk = 1;
       if ((nx + ny) % 2 === 0) sfx('step');
+    } else if (this.route) {
+      this.route = null;
     } else if (this.bumpCooldown <= 0) {
       this.bumpCooldown = 0.35;
       const e = this.entityAt(nx, ny);

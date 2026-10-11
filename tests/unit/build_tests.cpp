@@ -197,6 +197,36 @@ void testInventoryAndWear() {
           "invalid equipment entered inventory");
 }
 }
+// The potion plan avoids overshooting, consumes nothing, and drinking follows it.
+void testPotionPlan() {
+  Warrior hero("potions");
+  prepare(hero);
+  hero.sethp(100);
+  hero.addItem(Item("中药", 1, Potion, 300, 0, 1, 2, AnyJob));
+  hero.addItem(Item("小药", 1, Potion, 50, 0, 1, 5, AnyJob));
+  hero.addItem(Item("大药", 1, Potion, 500, 0, 1, 1, AnyJob));
+  const auto plan = hero.planPotions(1000);
+  require(plan.restored == 900 && plan.overflow == 0 && plan.uses.size() == 3 &&
+              plan.uses[0] == std::make_pair(3, 1) && plan.uses[1] == std::make_pair(1, 1) &&
+              plan.uses[2] == std::make_pair(2, 2),
+          "the plan must take the largest potion that fits, then smaller ones");
+  require(hero.gethp() == 100 && hero.getSaveBackpack()[0].getQuantity() == 2,
+          "planning must not drink anything");
+  require(hero.drinkPotionsTo(1000) == 900 && hero.gethp() == 1000 &&
+              hero.getSaveBackpack().size() == 2 && hero.getSaveBackpack()[0].getQuantity() == 1 &&
+              hero.getSaveBackpack()[1].getQuantity() == 3,
+          "drinking must follow the plan exactly");
+  hero.sethp(900);
+  const auto over = hero.planPotions(1000);
+  require(over.restored == 100 && over.overflow == 0 && over.uses.size() == 1 &&
+              hero.getSaveBackpack()[over.uses[0].first - 1].getName() == "小药" && over.uses[0].second == 2,
+          "small potions that fit beat a large one that overflows");
+  hero.sethp(980);
+  const auto spill = hero.planPotions(1000);
+  require(spill.restored == 20 && spill.overflow == 30, "when every potion overflows, the smallest one is used");
+  require(hero.planPotions(500).uses.empty(), "a target at or below current HP needs no potions");
+}
+
 void testRepair() {
   Warrior hero("smith"); prepare(hero);
   Item epic("epic blade", 1, Weapon, 50, 40, 400, 1, WarriorOnly, 3);
@@ -249,7 +279,7 @@ int main() {
   std::ostringstream log; auto *original = std::cout.rdbuf(log.rdbuf());
   try {
     testGrowthAndTransactions(); testSpecializationTransactions(); testSpecializationEffects();
-    testRecoveryAndResources(); testInventoryAndWear(); testRepair(); testEnhancement();
+    testRecoveryAndResources(); testInventoryAndWear(); testPotionPlan(); testRepair(); testEnhancement();
   } catch (const std::exception &error) {
     std::cout.rdbuf(original); std::cerr << "build tests failed: " << error.what() << '\n' << log.str(); return 1;
   }

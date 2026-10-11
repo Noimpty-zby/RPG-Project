@@ -9,14 +9,18 @@ import { chapterOf, challengeName, EnhancePercent, MaxEnhanceLevel, refreshCost,
 import { Achievements, Profile } from '../rules/profile.js';
 import { HelpTopics } from '../rules/help.js';
 import { h, button, openModal, choose, alertBox, toast } from './dom.js';
-import { itemRow, statsBlock } from './widgets.js';
+import { compareTable, isUpgrade, itemRow, statsBlock } from './widgets.js';
 import * as Sprites from '../engine/sprites.js';
 import { sfx, audioSettings, setAudio } from '../engine/audio.js';
 
 const RouteIcons = ['', '⚒', '✚', '⚗'];
 
 export class Menus {
-  constructor(app) { this.app = app; }
+  constructor(app) {
+    this.app = app;
+    // Backpack filters: item type (0 all), minimum tier, upgrades only.
+    this.bagFilter = { type: 0, tier: 0, upgrades: false };
+  }
   get game() { return this.app.game; }
   get hero() { return this.app.game.hero; }
 
@@ -127,8 +131,12 @@ export class Menus {
   backpackView(m) {
     const hero = this.hero;
     const items = hero.getSaveBackpack();
-    const rows = items.map((item, i) => {
-      const index = i + 1;
+    const f = this.bagFilter;
+    const shown = items.map((item, i) => ({ item, index: i + 1 })).filter(({ item }) =>
+      (!f.type || item.getType() === f.type) &&
+      (item.getType() === ItemType.Potion || item.getTier() >= f.tier) &&
+      (!f.upgrades || isUpgrade(hero, item)));
+    const rows = shown.map(({ item, index }) => {
       const actions = [];
       if (item.getType() === ItemType.Potion) {
         actions.push(button('使用', () => {
@@ -148,6 +156,7 @@ export class Menus {
           if (!ok) { sfx('error'); toast('该物品当前不可装备。'); }
           m.refresh();
         }, { cls: 'small', disabled: !hero.canEquip(item) }));
+        actions.push(button('比较', () => openModal({ title: '装备比较', render: () => compareTable(hero, item) }), { cls: 'small' }));
       }
       actions.push(button(item.isLocked() ? '解锁' : '锁定', () => { hero.toggleItemLock(index); m.refresh(); }, { cls: 'small' }));
       actions.push(button('卖出', async () => {
@@ -160,16 +169,56 @@ export class Menus {
         if (earned) { sfx('coin'); toast(`卖出 ${item.getName()} ×${quantity}，获得 ${earned} 金币。`); }
         m.refresh();
       }, { cls: 'small', disabled: item.isLocked() }));
-      return itemRow(item, { hero, actions, sellPrice: true });
+      return itemRow(item, { hero, actions, sellPrice: true, compareUpgrade: isUpgrade(hero, item) });
     });
+    const pick = (label, active, onClick) => button(label, () => { onClick(); m.refresh(); }, { cls: `small ${active ? 'primary' : ''}` });
+    const filters = h('div', { class: 'filters' },
+      h('div', { class: 'group' }, h('span', { class: 'muted' }, '类型'),
+        [[0, '全部'], [ItemType.Weapon, '武器'], [ItemType.Armor, '防具'], [ItemType.Potion, '药水']]
+          .map(([type, label]) => pick(label, f.type === type, () => { f.type = type; }))),
+      h('div', { class: 'group' }, h('span', { class: 'muted' }, '品质'),
+        [[0, '全部'], [1, '精良+'], [2, '稀有+'], [3, '史诗']].map(([tier, label]) => pick(label, f.tier === tier, () => { f.tier = tier; }))),
+      pick('只看提升', f.upgrades, () => { f.upgrades = !f.upgrades; }),
+      h('span', { class: 'muted' }, `显示 ${shown.length}/${items.length}`));
     return h('div', {},
       h('p', { class: 'muted' }, `金币 ${hero.getcoin()} · 材料 ${hero.runState().materials} · 锁定的物品不会被卖出或拆解。`),
-      rows.length ? h('div', { class: 'grid-list' }, rows) : h('p', {}, '背包空空如也！'),
+      this.potionBar(m),
+      filters,
+      rows.length ? h('div', { class: 'grid-list' }, rows) : h('p', {}, items.length ? '没有符合筛选条件的物品。' : '背包空空如也！'),
       h('div', { style: { marginTop: '10px' } }, button('批量拆解未锁定装备', async () => {
         const ok = await choose('批量拆解', '拆解背包中所有未锁定装备换取材料（保留药水及已穿装备）？',
           [{ label: '确认拆解', value: true, cls: 'danger' }, { label: '取消', value: false }]);
         if (ok) { const gained = hero.salvageUnlocked(); toast(`获得材料：${gained}`); m.refresh(); }
       }, { cls: 'small' })));
+  }
+  // Drink potions up to a share of max HP, after confirming the plan.
+  potionBar(m) {
+    const hero = this.hero;
+    if (!hero.getSaveBackpack().some((item) => item.getType() === ItemType.Potion)) return null;
+    const max = hero.getmaxhp();
+    return h('div', { class: 'filters' },
+      h('span', { class: 'muted' }, `生命 ${hero.gethp()}/${max} · 批量喝药`),
+      [[50, '补到50%'], [80, '补到80%'], [100, '补满']].map(([pct, label]) => {
+        const target = Math.floor(max * pct / 100);
+        return button(label, () => this.drinkTo(m, target), { cls: 'small good', disabled: hero.gethp() >= target });
+      }));
+  }
+  async drinkTo(m, target) {
+    const hero = this.hero;
+    const plan = hero.planPotions(target);
+    if (!plan.uses.length) { sfx('error'); toast('没有可用的药水。'); return; }
+    const items = hero.getSaveBackpack();
+    const after = hero.gethp() + plan.restored;
+    const ok = await choose('批量喝药', h('div', {},
+      h('p', {}, '将使用：', plan.uses.map(({ slot, count }) => `${items[slot - 1].getName()}（${items[slot - 1].getValue()}）×${count}`).join('、')),
+      h('p', {}, `恢复 ${plan.restored}${plan.overflow ? `，溢出 ${plan.overflow}` : '，无溢出'}；之后 HP ${after}/${hero.getmaxhp()}` +
+        `${after < target ? '（药水不足，达不到目标）' : ''}。`)),
+    [{ label: '确认', value: true, cls: 'primary' }, { label: '取消', value: false }]);
+    if (!ok) return;
+    const { result } = this.game.act(() => hero.drinkPotionsTo(target));
+    sfx('heal');
+    toast(`共恢复 ${result} 生命，当前 ${hero.gethp()}/${hero.getmaxhp()}。`);
+    m.refresh();
   }
   askQuantity(item) {
     return new Promise((resolve) => {
@@ -360,6 +409,17 @@ export class Menus {
     const { summary, warning } = Campaign.readiness(this.hero, this.game.floor);
     return h('div', { class: `readiness ${warning ? 'risky' : ''}` },
       h('p', {}, summary), warning ? h('p', { class: 'bad' }, warning) : null);
+  }
+
+  // ---- Quick travel ----------------------------------------------------------------------
+  openTravel(scene) {
+    const spots = scene.travelTargets();
+    openModal({
+      title: '前往', size: 'narrow',
+      render: () => h('p', { class: 'muted' }, '自动走到目的地并与之交互；按方向键可随时停下。'),
+      buttons: spots.map((spot, i) => ({ label: spot.label, key: String(i + 1), cls: spot.primary ? 'primary' : '',
+        onClick: (m) => { m.close(); scene.travelTo(spot.entity); } })),
+    });
   }
 
   // ---- Camp ------------------------------------------------------------------------------

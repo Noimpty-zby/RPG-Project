@@ -43,6 +43,9 @@ protected:
   std::vector<std::unique_ptr<skill>> skills;
 
   player(std::string name, Job job);
+  // Potion choice shared by planPotions and drinkPotionsTo; see below.
+  int potionHeal(const Item &item) const;
+  int nextPotion(const std::vector<int> &left, int missing) const;
 
 public:
   virtual ~player();
@@ -101,6 +104,17 @@ public:
   void addItem(const Item &item);
   void printBackpack() const;
   bool useItem(int index);
+  // Out-of-battle potions up to targetHp: each drink takes the largest potion
+  // that does not overshoot the HP still missing, or the smallest one when
+  // every potion would. planPotions consumes nothing; drinkPotionsTo makes the
+  // same choices and returns the HP restored. Overflow is healing past max HP.
+  struct PotionPlan {
+    std::vector<std::pair<int, int>> uses; // backpack slot (1-based), count
+    int restored = 0;
+    int overflow = 0;
+  };
+  PotionPlan planPotions(int targetHp) const;
+  int drinkPotionsTo(int targetHp);
   bool equipItem(int index);
   void unequipItem(int index);
   void showEquippedItems() const;

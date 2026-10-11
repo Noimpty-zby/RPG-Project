@@ -257,6 +257,52 @@ bool player::useItem(int index) {
   if (item.getQuantity() <= 0) backpack.erase(backpack.begin() + index - 1);
   return true;
 }
+int player::potionHeal(const Item &item) const {
+  if (item.getType() != Potion || item.getValue() <= 0) return 0;
+  return static_cast<int>(static_cast<long long>(item.getValue()) * healingPercent / 100);
+}
+int player::nextPotion(const std::vector<int> &left, int missing) const {
+  int fit = 0, smallest = 0;
+  for (int i = 0; i < static_cast<int>(backpack.size()); ++i) {
+    const int heal = potionHeal(backpack[i]);
+    if (left[i] <= 0 || heal <= 0) continue;
+    if (heal <= missing && (!fit || heal > potionHeal(backpack[fit - 1]))) fit = i + 1;
+    if (!smallest || heal < potionHeal(backpack[smallest - 1])) smallest = i + 1;
+  }
+  return fit ? fit : smallest;
+}
+player::PotionPlan player::planPotions(int targetHp) const {
+  PotionPlan plan;
+  if (!isalive()) return plan;
+  std::vector<int> left;
+  for (const Item &item : backpack) left.push_back(item.getQuantity());
+  const int target = clamp(targetHp, 0, max_hp);
+  for (int current = hp; current < target;) {
+    const int slot = nextPotion(left, target - current);
+    if (!slot) break;
+    const int heal = potionHeal(backpack[slot - 1]);
+    const int restored = min(heal, max_hp - current);
+    plan.restored += restored;
+    plan.overflow += heal - restored;
+    current += restored;
+    --left[slot - 1];
+    auto use = find_if(plan.uses.begin(), plan.uses.end(), [&](const auto &u) { return u.first == slot; });
+    if (use == plan.uses.end()) plan.uses.push_back({slot, 1});
+    else ++use->second;
+  }
+  return plan;
+}
+int player::drinkPotionsTo(int targetHp) {
+  const int before = hp;
+  const int target = clamp(targetHp, 0, max_hp);
+  while (hp < target) {
+    std::vector<int> left;
+    for (const Item &item : backpack) left.push_back(item.getQuantity());
+    const int slot = nextPotion(left, target - hp);
+    if (!slot || !useItem(slot)) break;
+  }
+  return hp - before;
+}
 bool player::equipItem(int index) {
   if (index < 1 || index > static_cast<int>(backpack.size())) return false;
   Item selected = backpack[index - 1];

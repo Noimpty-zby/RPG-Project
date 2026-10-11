@@ -75,7 +75,7 @@ export class Input {
     const map = {
       ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down', ArrowLeft: 'left', a: 'left', A: 'left',
       ArrowRight: 'right', d: 'right', D: 'right', ' ': 'action', Enter: 'action', e: 'action', E: 'action',
-      Escape: 'menu', m: 'menu', M: 'menu', Tab: 'tab',
+      Escape: 'menu', m: 'menu', M: 'menu', Tab: 'tab', f: 'travel', F: 'travel',
     };
     return map[key] ?? key;
   }

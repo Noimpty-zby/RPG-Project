@@ -254,6 +254,55 @@ export class Player extends Character {
     if (item.getQuantity() <= 0) this.backpack.splice(index - 1, 1);
     return true;
   }
+  // Potion choice shared by planPotions and drinkPotionsTo.
+  potionHeal(item) {
+    if (item.getType() !== ItemType.Potion || item.getValue() <= 0) return 0;
+    return idiv(item.getValue() * this.healingPercent, 100);
+  }
+  nextPotion(left, missing) {
+    let fit = 0;
+    let smallest = 0;
+    for (let i = 0; i < this.backpack.length; i++) {
+      const heal = this.potionHeal(this.backpack[i]);
+      if (left[i] <= 0 || heal <= 0) continue;
+      if (heal <= missing && (!fit || heal > this.potionHeal(this.backpack[fit - 1]))) fit = i + 1;
+      if (!smallest || heal < this.potionHeal(this.backpack[smallest - 1])) smallest = i + 1;
+    }
+    return fit || smallest;
+  }
+  // Out-of-battle potions up to targetHp: each drink takes the largest potion
+  // that does not overshoot the HP still missing, or the smallest one when
+  // every potion would. planPotions consumes nothing; drinkPotionsTo makes the
+  // same choices and returns the HP restored. Overflow is healing past max HP.
+  planPotions(targetHp) {
+    const plan = { uses: [], restored: 0, overflow: 0 };
+    if (!this.isalive()) return plan;
+    const left = this.backpack.map((item) => item.getQuantity());
+    const target = clamp(targetHp, 0, this.max_hp);
+    for (let current = this.hp; current < target;) {
+      const slot = this.nextPotion(left, target - current);
+      if (!slot) break;
+      const heal = this.potionHeal(this.backpack[slot - 1]);
+      const restored = Math.min(heal, this.max_hp - current);
+      plan.restored += restored;
+      plan.overflow += heal - restored;
+      current += restored;
+      --left[slot - 1];
+      const use = plan.uses.find((u) => u.slot === slot);
+      if (use) ++use.count;
+      else plan.uses.push({ slot, count: 1 });
+    }
+    return plan;
+  }
+  drinkPotionsTo(targetHp) {
+    const before = this.hp;
+    const target = clamp(targetHp, 0, this.max_hp);
+    while (this.hp < target) {
+      const slot = this.nextPotion(this.backpack.map((item) => item.getQuantity()), target - this.hp);
+      if (!slot || !this.useItem(slot)) break;
+    }
+    return this.hp - before;
+  }
   canEquip(item) {
     return item.getType() !== ItemType.Potion && item.getLevelRequirement() <= this.level &&
       item.getDurability() > 0 && this.canWear(item);

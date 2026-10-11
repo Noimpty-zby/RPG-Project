@@ -42,9 +42,29 @@ void checkAchievements(Profile &profile, const player &hero, const BattleOutcome
 void backpack(player &hero) {
   for (;;) {
     hero.printBackpack();
-    std::cout << "[1] 使用药水 [2] 装备 [3] 卖出 [4] 锁定/解锁 [5] 批量拆解未锁定装备 [0] 返回\n";
+    std::cout << "[1] 使用药水 [2] 装备 [3] 卖出 [4] 锁定/解锁 [5] 批量拆解未锁定装备 [6] 喝药补到指定生命 [0] 返回\n";
     const int action = readInt();
     if (action == 0) return;
+    if (action == 6) {
+      std::cout << "补到最大生命的百分之几（1-100，0取消）：";
+      const int percent = readInt();
+      if (percent < 1 || percent > 100) continue;
+      const int target = static_cast<int>(static_cast<long long>(hero.getmaxhp()) * percent / 100);
+      const auto plan = hero.planPotions(target);
+      if (plan.uses.empty()) {
+        std::cout << (hero.gethp() >= target ? "生命已达到目标。\n" : "没有可用的药水。\n");
+        continue;
+      }
+      std::cout << "将使用：";
+      for (std::size_t i = 0; i < plan.uses.size(); ++i)
+        std::cout << (i ? "、" : "") << hero.getSaveBackpack()[plan.uses[i].first - 1].getName() << "×" << plan.uses[i].second;
+      std::cout << "；恢复 " << plan.restored << "，溢出 " << plan.overflow << "，之后 HP "
+        << hero.gethp() + plan.restored << '/' << hero.getmaxhp() << "。[1] 确认 [0] 取消\n";
+      if (readInt() != 1) continue;
+      const int restored = hero.drinkPotionsTo(target);
+      std::cout << "共恢复 " << restored << " 生命，当前 HP " << hero.gethp() << '/' << hero.getmaxhp() << "。\n";
+      continue;
+    }
     if (action == 5) {
       std::cout << "拆解背包中所有未锁定装备（保留药水及已穿装备）？[1] 确认 [0] 返回\n";
       if (readInt() == 1) std::cout << "获得材料：" << hero.salvageUnlocked() << '\n';

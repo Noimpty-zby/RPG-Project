@@ -54,6 +54,12 @@ for job in (1, 2, 3):
         assert "卖出数量（1-4" in menus and "×2，获得" in menus
         assert save.read_text(encoding="utf-8") == saved
 
+        # Batch potions show their plan before drinking toward the chosen HP.
+        save.write_text(re.sub(r"^HP \d+$", "HP 20", saved, flags=re.MULTILINE), encoding="utf-8")
+        potions = run("1\n2\n6\n100\n1\n0\n4\n2\n")
+        assert "将使用：" in potions and "溢出" in potions and re.search(r"共恢复 [1-9]\d* 生命", potions)
+        save.write_text(saved, encoding="utf-8")
+
         # Inspecting during a fight does not spend the turn; finishing a fight
         # records the enemy in the profile's bestiary.
         fought = run("1\n1\n5\n" + "1\n" * 12 + "4\n2\n")
@@ -72,4 +78,4 @@ for job in (1, 2, 3):
         assert profile.read_text(encoding="utf-8").count("RECORD ") == 1
 
 print("CLI smoke passed: three jobs, V4 round-trip, camp, inventory, input bounds, battle cancellation, EOF, "
-      "old save preservation, help, archive, travel, inspect, stack sales, enhance/repair, run records.")
+      "old save preservation, help, archive, travel, inspect, stack sales, batch potions, enhance/repair, run records.")

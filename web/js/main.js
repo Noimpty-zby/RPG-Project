@@ -82,6 +82,10 @@ const app = {
       loop.setScene(scene);
     });
     for (const line of result.worn) toast(line);
+    if (result.won && !this.travelHinted) {
+      this.travelHinted = true;
+      toast('按 F 或右上角「⇢」可以直接走到宝箱、楼梯或营火。');
+    }
     if (result.summit) this.showEnding();
   },
   showEnding() {

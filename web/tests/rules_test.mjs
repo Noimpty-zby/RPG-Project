@@ -9,6 +9,7 @@ import { Job } from '../js/rules/jobs.js';
 import { Player } from '../js/rules/player.js';
 import { Profile, Achievements } from '../js/rules/profile.js';
 import { deserializeGame, serializeGame } from '../js/rules/save.js';
+import { Item, ItemType } from '../js/rules/item.js';
 import { HelpTopics } from '../js/rules/help.js';
 import { choose } from './campaign_sim.mjs';
 
@@ -233,6 +234,26 @@ check(warrior.getSkill(3).getPreview(warrior).includes('无视护盾'), 'Shield 
   check(assassin.getSkill(4).getUpgradePreview(assassin).includes('升阶不增加实际治疗'), 'capped lifesteal says the upgrade adds no healing');
 }
 
+// The potion plan avoids overshooting, consumes nothing, and drinking follows it.
+{
+  const hero = new Player('喝药测试', Job.Warrior);
+  hero.loadStats(50, 0, 10000, 400, 1000, 100, 1000, 1000, 0, 3);
+  hero.sethp(100);
+  hero.addItem(new Item('中药', 1, ItemType.Potion, 300, 0, 1, 2));
+  hero.addItem(new Item('小药', 1, ItemType.Potion, 50, 0, 1, 5));
+  hero.addItem(new Item('大药', 1, ItemType.Potion, 500, 0, 1, 1));
+  const plan = hero.planPotions(1000);
+  check(plan.restored === 900 && plan.overflow === 0 &&
+    JSON.stringify(plan.uses) === JSON.stringify([{ slot: 3, count: 1 }, { slot: 1, count: 1 }, { slot: 2, count: 2 }]),
+  `potion plan takes the largest that fits, then smaller ones: ${JSON.stringify(plan)}`);
+  check(hero.gethp() === 100 && hero.getSaveBackpack()[0].getQuantity() === 2, 'planning drinks nothing');
+  check(hero.drinkPotionsTo(1000) === 900 && hero.gethp() === 1000 && hero.getSaveBackpack().length === 2 &&
+    hero.getSaveBackpack()[0].getQuantity() === 1 && hero.getSaveBackpack()[1].getQuantity() === 3, 'drinking follows the plan');
+  hero.sethp(980);
+  const spill = hero.planPotions(1000);
+  check(spill.restored === 20 && spill.overflow === 30, 'when every potion overflows, the smallest is used');
+}
+
 // The camp summary names the next hard fight and warns only when that fight
 // is on this floor and the hero lacks half MP or a ready skill.
 {
@@ -260,4 +281,4 @@ if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness.');
+console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans.');
