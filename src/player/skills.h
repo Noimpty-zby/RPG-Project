@@ -41,6 +41,8 @@ public:
   std::string getSpecializationOptions(const player &hero) const;
   static int specializationFloor(int slot) { return slot == 1 ? 10 : 30; }
   std::string getPreview(const player &hero) const;
+  // Current versus next rank at the hero's current stats, or why it cannot rise.
+  std::string getUpgradePreview(const player &hero) const;
   int getlevelUpCost() const;
   int getskilllevel() const;
   int getcurrentcooldown() const;

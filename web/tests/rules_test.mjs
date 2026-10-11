@@ -208,10 +208,56 @@ const stall = poisonFight(1, false, {}, (b, m) => (b.report.waitingGuards >= 2 ?
 check(stall.battle.report.waitingGuards === 2 && stall.advised, 'guarding while nothing threatens in a poisoned Defeat fight is stalling');
 const warrior = new Player('预览测试', Job.Warrior);
 check(warrior.getSkill(3).getPreview(warrior).includes('无视护盾'), 'Shield Counter preview states it ignores shields');
+
+// The upgrade preview predicts exactly what an upgrade does, names what blocks
+// it, and leaves the skill untouched.
+{
+  const hero = new Player('升阶测试', Job.Warrior);
+  hero.loadStats(100, 0, 100000, 100, 1000, 100, 1000, 1000, 0, 3);
+  hero.setHighestFloor(30);
+  const strike = hero.getSkill(1);
+  const damage = strike.getScaledDamage(hero);
+  const cost = strike.getActualCost(hero);
+  const preview = strike.getUpgradePreview(hero);
+  check(strike.getskilllevel() === 1 && strike.getScaledDamage(hero) === damage, 'upgrade preview leaves the skill untouched');
+  check(hero.levelUpSkill(1) && strike.getScaledDamage(hero) === damage + 15 && strike.getActualCost(hero) === cost + 3 &&
+    preview.includes(`伤害 ${damage}→${damage + 15}`) && preview.includes(`MP ${cost}→${cost + 3}`), `upgrade preview matches the upgrade: ${preview}`);
+  check(strike.getUpgradePreview(hero).includes('到达第40层后可升'), 'rank-capped preview names the floor that lifts the cap');
+  strike.restoreProgress(5, 0);
+  check(strike.getUpgradePreview(hero).includes('已满阶'), 'rank-5 preview says it is maxed');
+  const assassin = new Player('吸血测试', Job.Assassin);
+  assassin.loadStats(100, 0, 100000, 100, 1000, 100, 1000, 1000, 0, 3);
+  assassin.setHighestFloor(100);
+  check(!assassin.getSkill(4).getUpgradePreview(assassin).includes('升阶不增加实际治疗'), 'uncapped lifesteal upgrade adds healing');
+  assassin.loadStats(100, 0, 100000, 100, 1000, 2000, 1000, 1000, 0, 3);
+  check(assassin.getSkill(4).getUpgradePreview(assassin).includes('升阶不增加实际治疗'), 'capped lifesteal says the upgrade adds no healing');
+}
+
+// The camp summary names the next hard fight and warns only when that fight
+// is on this floor and the hero lacks half MP or a ready skill.
+{
+  const hero = new Player('出战测试', Job.Warrior);
+  hero.loadStats(50, 0, 10000, 400, 1000, 100, 80, 80, 0, 3);
+  hero.setHighestFloor(100);
+  const elite = Campaign.eliteFloor(7);
+  const ahead = Campaign.readiness(hero, 71);
+  check(ahead.majorFloor === elite && !ahead.warning && ahead.summary.includes(`还有 ${elite - 71} 层`), 'readiness names the next elite');
+  check(!Campaign.readiness(hero, elite).warning && Campaign.readiness(hero, elite).summary.includes('技能全部就绪'), 'rested hero needs no warning');
+  hero.setmp(20);
+  check(Campaign.readiness(hero, elite).warning.includes('MP 不到一半'), 'low MP before an elite warns');
+  hero.setmp(80);
+  hero.getSkill(3).resetcooldown();
+  const cooling = Campaign.readiness(hero, elite);
+  check(cooling.warning.includes('1 个技能仍在冷却') && cooling.summary.includes('盾反 4'), 'cooling skill before an elite warns');
+  hero.runState().cleared[elite] = 1;
+  check(Campaign.readiness(hero, elite).majorFloor === 80 && !Campaign.readiness(hero, elite).warning, 'cleared elite gives way to the boss');
+  hero.runState().cleared[80] = 1;
+  check(Campaign.readiness(hero, elite).majorFloor === 0, 'fully cleared chapter has no major floor');
+}
 check(HelpTopics.every((topic) => topic.lines().length > 0), 'help pages render');
 
 if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts.');
+console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness.');

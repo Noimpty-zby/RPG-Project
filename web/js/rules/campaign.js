@@ -237,6 +237,33 @@ export function restsRemaining(hero, floor) {
   return Math.max(0, limit - hero.runState().campRested[chapterOf(floor)]);
 }
 export const restPrice = (hero, floor) => restCost(floor) * (1 + hero.runState().campRested[chapterOf(floor)]);
+// What the hero carries into the chapter's next hard fight: the first elite or
+// boss floor from here that is not yet cleared (0 if none), a summary line and,
+// when that fight is on this floor and the hero lacks half MP or a ready
+// skill, a warning. Cooldowns only tick during battle turns.
+export function readiness(hero, floor) {
+  const result = { majorFloor: 0, summary: '', warning: '' };
+  if (!validFloor(floor)) return result;
+  const bossFloor = (chapterOf(floor) + 1) * 10;
+  for (let f = floor; f <= bossFloor && !result.majorFloor; ++f)
+    if (!hero.runState().cleared[f] && (f === bossFloor || isEliteFloor(f))) result.majorFloor = f;
+  const cooling = hero.skills.filter((ability) => ability.getcurrentcooldown() > 0)
+    .map((ability) => `${ability.getskillname()} ${ability.getcurrentcooldown()}`);
+  const label = result.majorFloor === bossFloor ? '首领' : '精英';
+  const rests = restsRemaining(hero, floor);
+  let summary = '出战准备：';
+  if (!result.majorFloor) summary += '本章的精英与首领都已通过';
+  else if (result.majorFloor === floor) summary += `本层就是${label}`;
+  else summary += `下一场硬仗是第${result.majorFloor}层${label}（还有 ${result.majorFloor - floor} 层）`;
+  result.summary = `${summary}；MP ${hero.getmp()}/${hero.getmaxmp()}；本章休息剩余 ${rests} 次；` +
+    `${cooling.length ? `冷却中：${cooling.join('、')}（只在战斗回合中恢复）` : '技能全部就绪'}。`;
+  const lowMp = hero.getmp() * 2 < hero.getmaxmp();
+  if (result.majorFloor === floor && (lowMp || cooling.length)) {
+    result.warning = `注意：本层就是${label}，但 ${lowMp ? 'MP 不到一半' : ''}${lowMp && cooling.length ? '、' : ''}` +
+      `${cooling.length ? `${cooling.length} 个技能仍在冷却` : ''}。${rests ? '营火休息可恢复一半 MP。' : '本章休息次数已用完。'}`;
+  }
+  return result;
+}
 export function rest(hero, floor) {
   if (!validFloor(floor) || !hero.isalive() || restsRemaining(hero, floor) === 0) return false;
   const run = hero.runState();

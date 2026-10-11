@@ -1,9 +1,11 @@
 #include "game/campaign.h"
 #include "core/game_config.h"
 #include "core/random.h"
+#include "player/skills.h"
 #include <algorithm>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 
 namespace {
@@ -240,6 +242,41 @@ bool rest(player &hero, int floor) {
   hero.setmp(hero.getmp() + hero.getmaxmp() / 2);
   ++run.campRested[GameConfig::chapter(floor)];
   return true;
+}
+Readiness readiness(const player &hero, int floor) {
+  Readiness result;
+  if (!validFloor(floor)) return result;
+  const int bossFloor = (GameConfig::chapter(floor) + 1) * GameConfig::FloorsPerChapter;
+  for (int f = floor; f <= bossFloor && !result.majorFloor; ++f)
+    if (!hero.runState().cleared[f] && (f == bossFloor || isEliteFloor(f))) result.majorFloor = f;
+  std::string cooling;
+  int coolingCount = 0;
+  for (int slot = 1; slot <= hero.getSkillCount(); ++slot) {
+    const skill &ability = *hero.getSkill(slot);
+    if (ability.getcurrentcooldown() == 0) continue;
+    cooling += (coolingCount++ ? "、" : "") + ability.getskillname() + " " +
+               std::to_string(ability.getcurrentcooldown());
+  }
+  const char *label = result.majorFloor == bossFloor ? "首领" : "精英";
+  const int rests = restsRemaining(hero, floor);
+  std::ostringstream summary;
+  summary << "出战准备：";
+  if (!result.majorFloor) summary << "本章的精英与首领都已通过";
+  else if (result.majorFloor == floor) summary << "本层就是" << label;
+  else summary << "下一场硬仗是第" << result.majorFloor << "层" << label << "（还有 " << result.majorFloor - floor << " 层）";
+  summary << "；MP " << hero.getmp() << '/' << hero.getmaxmp() << "；本章休息剩余 " << rests << " 次；"
+          << (coolingCount ? "冷却中：" + cooling + "（只在战斗回合中恢复）" : "技能全部就绪") << "。";
+  result.summary = summary.str();
+  const bool lowMp = hero.getmp() * 2 < hero.getmaxmp();
+  if (result.majorFloor == floor && (lowMp || coolingCount)) {
+    std::ostringstream warning;
+    warning << "注意：本层就是" << label << "，但 " << (lowMp ? "MP 不到一半" : "")
+            << (lowMp && coolingCount ? "、" : "")
+            << (coolingCount ? std::to_string(coolingCount) + " 个技能仍在冷却" : "") << "。"
+            << (rests ? "营火休息可恢复一半 MP。" : "本章休息次数已用完。");
+    result.warning = warning.str();
+  }
+  return result;
 }
 bool claimOrder(player &hero, int floor) {
   if (!validFloor(floor)) return false;

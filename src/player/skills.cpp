@@ -61,6 +61,24 @@ void strike(const skill &ability, enemy &target, int damage, bool pierce = false
   cout << "【" << ability.getskillname() << "】预计命中伤害 " << amount << "。" << endl;
   target.takedamage(amount);
 }
+// Rank-dependent effects, shared by the skills and their previews.
+int finisherHeal(const skill &ability) { return 10 * ability.getEffectiveRank(); }
+int surgeMana(const skill &ability) { return 20 + (ability.getEffectiveRank() - 1) * 3; }
+int lifestealPercent(const skill &ability) { return 40 + (ability.getEffectiveRank() - 1) * 3; }
+int lifestealCap(const player &hero) { return percent(hero.getRecoveryBaseHp(), 10); }
+// The number a preview leads with: per-hit damage for the combo, the flat
+// bonus for the execute, otherwise the expected direct damage.
+int headlineDamage(const skill &ability, const player &hero) {
+  if (hero.job() == Job::Assassin && ability.getskillid() == 3)
+    return percent(ability.getScaledDamage(hero), 55);
+  if (hero.job() == Job::Assassin && ability.getskillid() == 5) return ability.getdamage();
+  return directDamage(ability, hero);
+}
+// A copy of a skill's state, so a preview can try another rank untouched.
+struct RankProbe final : skill {
+  explicit RankProbe(const skill &source) : skill(source) {}
+  bool useSkill(player &, enemy &) override { return false; }
+};
 }
 
 skill::skill(int skillid, int levelrequired, int costmp, int cooldown,
@@ -152,7 +170,7 @@ string skill::getPreview(const player &hero) const {
   ostringstream out;
   const int amount = directDamage(*this, hero);
   if (hero.job() == Job::Assassin && skillid == 3)
-    out << "2—4次连击，每击 " << percent(getScaledDamage(hero), 55) << "；后续击穿盾";
+    out << "2—4次连击，每击 " << headlineDamage(*this, hero) << "；后续击穿盾";
   else if (hero.job() == Job::Assassin && skillid == 5)
     out << "无视护盾：当前敌HP的普通35%/Boss15% + " << getdamage();
   else out << "当前预计伤害 " << amount << "（未计敌方减免/闪避）";
@@ -164,7 +182,7 @@ string skill::getPreview(const player &hero) const {
     }
     if (skillid == 3) out << "；无视护盾；敌攻击-35%，持续 " << controlDuration(hero, 2) << " 次行动";
     if (skillid == 4) out << "；生命比例>60%/30—60%/<30%对应1/1.8/3倍";
-    if (skillid == 5) out << "；恢复 " << 10 * getEffectiveRank() << " HP";
+    if (skillid == 5) out << "；恢复 " << finisherHeal(*this) << " HP";
   } else if (hero.job() == Job::Mage) {
     if (skillid == 1 && specialization != 2) out << "；消耗专注，最多2层";
     if (skillid == 1 && specialization == 2) out << "；保留并增加1层专注";
@@ -172,7 +190,7 @@ string skill::getPreview(const player &hero) const {
       out << "；敌攻击-" << (specialization == 1 ? "40%" : "30%（强力敌45%）")
           << "，持续 " << controlDuration(hero, specialization == 1 ? 3 : 2) << " 次行动；命中回4MP";
     if (skillid == 2 && specialization == 2) out << "；放弃减攻，命中回6MP";
-    if (skillid == 3) out << "；无视护盾，恢复 " << 20 + (getEffectiveRank() - 1) * 3 << " MP";
+    if (skillid == 3) out << "；无视护盾，恢复 " << surgeMana(*this) << " MP";
     if (skillid == 4) out << "；实际消耗当前MP一半，至少10MP";
     if (skillid == 5) out << "；命中后敌生命<30%时追加其当前生命30%伤害";
   } else {
@@ -180,8 +198,41 @@ string skill::getPreview(const player &hero) const {
                             (specialization == 1 ? "；命中增加2层破绽" : "；命中增加1层破绽"));
     if (skillid == 2 && specialization != 2) out << "；消耗破绽，最多2层";
     if (skillid == 2 && specialization == 2) out << "；命中回8MP并减攻15%一次行动";
-    if (skillid == 4) out << "；吸取实际伤害的 " << 40 + (getEffectiveRank() - 1) * 3 << "%（最多基础生命10%）";
+    if (skillid == 4) out << "；吸取实际伤害的 " << lifestealPercent(*this) << "%（最多基础生命10%，即 "
+                          << lifestealCap(hero) << " HP）";
   }
+  return out.str();
+}
+string skill::getUpgradePreview(const player &hero) const {
+  if (level >= 5) return "已满阶（5阶），无法继续升阶。";
+  RankProbe next(*this);
+  next.restoreProgress(level + 1, currentcooldown);
+  const bool assassin = hero.job() == Job::Assassin;
+  ostringstream out;
+  out << "升至" << level + 1 << "阶（" << getlevelUpCost() << "金币）："
+      << (assassin && skillid == 3 ? "每击伤害 " : assassin && skillid == 5 ? "固定加成 " : "伤害 ")
+      << headlineDamage(*this, hero) << "→" << headlineDamage(next, hero) << "，MP "
+      << getActualCost(hero) << "→" << next.getActualCost(hero) << "，冷却 " << cooldown << " 不变";
+  if (hero.job() == Job::Warrior && skillid == 5)
+    out << "，恢复 " << finisherHeal(*this) << "→" << finisherHeal(next) << " HP";
+  if (hero.job() == Job::Mage && skillid == 3)
+    out << "，回复 " << surgeMana(*this) << "→" << surgeMana(next) << " MP";
+  if (assassin && skillid == 4) {
+    const auto drain = [&](const skill &rank) {
+      return min(percent(headlineDamage(rank, hero), lifestealPercent(rank)), lifestealCap(hero));
+    };
+    out << "，吸血比例 " << lifestealPercent(*this) << "%→" << lifestealPercent(next)
+        << "%；按当前属性预计回复 " << drain(*this) << "→" << drain(next) << " HP（上限 "
+        << lifestealCap(hero) << "）";
+    if (drain(next) == drain(*this)) out << "，已触及上限，升阶不增加实际治疗";
+  }
+  if (hero.getlevel() < levelrequired || hero.getHighestFloor() < getunlockfloor())
+    out << "。技能尚未解锁";
+  else if (level >= Progression::skillRankCap(hero.getHighestFloor()))
+    out << "。当前阶数上限 " << level << "，到达第" << Progression::skillRankFloor(level + 1) << "层后可升";
+  else if (hero.getlevel() < level + 1)
+    out << "。需要角色 Lv." << level + 1;
+  out << "。";
   return out.str();
 }
 
@@ -220,7 +271,7 @@ Warriorskill_5::Warriorskill_5() : skill(5, 9, 35, 6, 180, 1, "无双斩") {}
 bool Warriorskill_5::useSkill(player &hero, enemy &target) {
   if (!beginCast(*this, hero, target)) return false;
   strike(*this, target, directDamage(*this, hero));
-  hero.heal(10 * getEffectiveRank());
+  hero.heal(finisherHeal(*this));
   return true;
 }
 Mageskill_1::Mageskill_1() : skill(1, 1, 10, 2, 40, 1, "火球术") {}
@@ -248,7 +299,7 @@ Mageskill_3::Mageskill_3() : skill(3, 4, 0, 3, 20, 1, "毒云术") {}
 bool Mageskill_3::useSkill(player &hero, enemy &target) {
   if (!beginCast(*this, hero, target)) return false;
   strike(*this, target, directDamage(*this, hero), true);
-  hero.setmp(hero.getmp() + 20 + (getEffectiveRank() - 1) * 3);
+  hero.setmp(hero.getmp() + surgeMana(*this));
   return true;
 }
 Mageskill_4::Mageskill_4() : skill(4, 6, 0, 5, 0, 1, "奥术爆发") {}
@@ -306,7 +357,7 @@ bool Assassinskill_4::useSkill(player &hero, enemy &target) {
   const int before = target.gethp();
   strike(*this, target, directDamage(*this, hero));
   const int actual = max(0, before - target.gethp());
-  const int drain = min(percent(actual, 40 + (getEffectiveRank() - 1) * 3), percent(hero.getRecoveryBaseHp(), 10));
+  const int drain = min(percent(actual, lifestealPercent(*this)), lifestealCap(hero));
   hero.heal(drain);
   return true;
 }

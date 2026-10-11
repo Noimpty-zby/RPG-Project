@@ -402,7 +402,8 @@ void player::showSkills() const {
          << ability.getPreview(*this) << "\n   MP " << ability.getActualCost(*this)
          << " | 冷却 " << ability.getcurrentcooldown() << "/" << ability.getcooldown()
          << " | 等级需求 " << ability.getlevelrequired() << " | 楼层需求 " << ability.getunlockfloor()
-         << " | 升级费用 " << ability.getlevelUpCost() << " | " << (ability.canUse(*this) ? "可用" : "不可用") << endl;
+         << " | 升级费用 " << ability.getlevelUpCost() << " | " << (ability.canUse(*this) ? "可用" : "不可用")
+         << "\n   " << ability.getUpgradePreview(*this) << endl;
     if (i < 2)
       cout << "   专精第" << skill::specializationFloor(i + 1) << "层开放：0基础；"
            << ability.getSpecializationOptions(*this) << "。初选免费，重选费用 "

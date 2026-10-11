@@ -29,6 +29,16 @@ bool resolveEvent(player &hero, int floor, int choice);
 int restsRemaining(const player &hero, int floor);
 int restPrice(const player &hero, int floor);
 bool rest(player &hero, int floor);
+// What the hero carries into the chapter's next hard fight: the first elite or
+// boss floor from here that is not yet cleared (0 if none), a summary line and,
+// when that fight is on this floor and the hero lacks half MP or a ready
+// skill, a warning. Cooldowns only tick during battle turns.
+struct Readiness {
+  int majorFloor = 0;
+  std::string summary;
+  std::string warning;
+};
+Readiness readiness(const player &hero, int floor);
 bool claimOrder(player &hero, int floor);
 std::vector<Item> shopStock(const player &hero, int floor);
 int purchasePrice(const player &hero, int floor, const Item &item);
