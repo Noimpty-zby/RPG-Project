@@ -101,7 +101,7 @@ std::uint64_t campaignFingerprint() {
 
 void testCampaignFingerprint() {
   const std::uint64_t actual = campaignFingerprint();
-  require(actual == 0x1c55df353407b9d7ULL, "campaign fingerprint is " + hex(actual));
+  require(actual == 0x9ef56128f03d9da5ULL, "campaign fingerprint is " + hex(actual));
   require(campaignFingerprint() == actual, "generation must not depend on earlier calls");
 }
 } // namespace

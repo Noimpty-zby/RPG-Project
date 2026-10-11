@@ -185,7 +185,9 @@ struct BossProfile {
   EnemyIntentKind secondary;
   const char *hint;
   // Bosses without a Charge tactic never open an interrupt/recovery window,
-  // so they hit slightly softer to keep chapter difficulty comparable.
+  // so they hit slightly softer to keep chapter difficulty comparable. The
+  // throne priest (floor 90) is softer still: both its tactics punish healing,
+  // and a Wound opener never falls back to an opening Charge as ReadPattern does.
   int attackPercent;
 };
 const BossProfile bossProfiles[] = {
@@ -206,7 +208,7 @@ const BossProfile bossProfiles[] = {
     {"星蚀观测站·蚀星观测者", EnemyIntentKind::Shatter, EnemyIntentKind::ReadPattern,
      "目标：星蚀破防时主动出招，观测者预判时切换行动种类。", 90},
     {"王庭废墟·王座祭司", EnemyIntentKind::Wound, EnemyIntentKind::ReadPattern,
-     "目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。", 90},
+     "目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。", 80},
     {"天顶之门·远征裁决者", EnemyIntentKind::ReadPattern, EnemyIntentKind::Shatter,
      "目标：应对裁决者的读招、破防与低血蓄力，改变行动争取突围窗口。", 100}};
 
