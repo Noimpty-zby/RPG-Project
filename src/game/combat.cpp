@@ -47,7 +47,7 @@ std::string BattleSession::objectiveDescription() const {
            " 个有效回合，或击败敌人（" + std::to_string(turns()) + "/" +
            std::to_string(rules.targetTurns) + "）";
   case EncounterObjective::Disrupt:
-    return "普攻命中蓄力，累计打断 2 次，或击败敌人（" +
+    return "普攻蓄力中的敌人，累计打断 2 次，或击败敌人（" +
            std::to_string(battleReport.interrupts) + "/2；限20回合）";
   case EncounterObjective::Escape:
     return "撑过至少 3 个有效回合，并以格挡撤离，或击败敌人（当前" +
@@ -150,13 +150,15 @@ bool BattleSession::act(BattleAction action) {
   battleReport.suppressedHealing +=
       std::max(0, hero.getSuppressedHealingTotal() - suppressedBefore);
   bool interrupted = false;
-  if (action.type == ActionType::Attack && intent.interruptible &&
-      monster.gethp() < enemyHpBefore && monster.interruptCharge()) {
+  // A plain attack answers a charge even when dodged: the dodge costs the
+  // hit's damage and MP, never the correct read.
+  if (action.type == ActionType::Attack && intent.interruptible && monster.interruptCharge()) {
     interrupted = true;
     ++battleReport.interrupts;
-    std::cout << (monster.interruptGrantsRecovery()
-                      ? "【打断成功】普通攻击打断蓄力，下回合敌人休整。"
-                      : "【打断成功】普通攻击打断蓄力，重击取消；该敌人不休整，下回合仍会行动。")
+    std::cout << (monster.gethp() < enemyHpBefore ? "【打断成功】普通攻击打断蓄力"
+                                                  : "【打断成功】普攻虽被闪避，仍打断了蓄力")
+              << (monster.interruptGrantsRecovery() ? "，下回合敌人休整。"
+                                                    : "，重击取消；该敌人不休整，下回合仍会行动。")
               << std::endl;
   }
 

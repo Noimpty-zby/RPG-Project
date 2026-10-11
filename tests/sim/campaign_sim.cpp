@@ -276,7 +276,7 @@ int main(int argc, char **argv) {
   } else {
     std::cout << csv;
   }
-  // Dodge and emergency healing can make even an aware policy miss a timed
+  // Emergency healing and survival guards can make even an aware policy miss a timed
   // objective. That is a recoverable loss, not an engine hang; the per-fight
   // bound above is mandatory. Every class must still complete non-kill goals
   // and have a reachable standard-mode campaign in these fixtures.

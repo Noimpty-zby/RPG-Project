@@ -101,12 +101,28 @@ void testChargeCounterAndRecovery() {
   require(guardHero->gethp() == 800 - heavy && guardBattle.report().damageTaken == heavy,
           "Basic guard must halve the heavy strike");
 
+  // A dodge costs the hit's damage and MP, never the correct read.
   auto missHero = hero(); auto dodging = foe(10, true); dodging.setdodgeRate(100);
+  missHero->setmp(0);
   BattleSession missBattle(*missHero, dodging);
-  turn(missBattle, {ActionType::Attack});
-  require(missBattle.report().interrupts == 0 &&
-              dodging.getIntent().kind == EnemyIntentKind::HeavyStrike,
-          "A missed attack must not count as an interruption");
+  require(missBattle.beginTurn(), "Expected a live action window");
+  const int dodgingHp = dodging.gethp(), missMp = missHero->getmp();
+  std::ostringstream shown;
+  auto *previous = std::cout.rdbuf(shown.rdbuf());
+  require(missBattle.act({ActionType::Attack}), "Expected an available action");
+  std::cout.rdbuf(previous);
+  require(missBattle.report().interrupts == 1 &&
+              dodging.getIntent().kind == EnemyIntentKind::Recover,
+          "A dodged plain attack must still interrupt the charge");
+  require(dodging.gethp() == dodgingHp && missHero->getmp() == missMp &&
+              shown.str().find("普攻虽被闪避，仍打断了蓄力") != std::string::npos,
+          "A dodged interrupt deals no damage, earns no MP and says why it still worked");
+  auto plainHero = hero(); auto plainDodger = foe(1, false); plainDodger.setdodgeRate(100);
+  BattleSession plainBattle(*plainHero, plainDodger);
+  require(!plainDodger.getIntent().interruptible, "Expected a non-charge opening intent");
+  turn(plainBattle, {ActionType::Attack});
+  require(plainBattle.report().interrupts == 0,
+          "Only a charge can be interrupted, dodged or not");
 }
 
 // Every text about an interrupt must match what the enemy then does: ordinary
@@ -324,7 +340,7 @@ void testCleanupAndSabotage() {
 }
 
 void testHealingAffixAndInterrupts() {
-  // Healers mend while charging; landing a basic attack interrupts it.
+  // Healers mend while charging; a basic attack interrupts it.
   auto ignoring = hero(); auto healer = foe(10, true, 0);
   giveAffix(healer, Affix::HEALING);
   healer.removeAffix(Affix::POISONOUS);

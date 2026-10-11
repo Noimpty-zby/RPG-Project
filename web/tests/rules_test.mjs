@@ -158,6 +158,26 @@ for (const c of [{ floor: 4, boss: false, difficulty: 0, elite: false }, { floor
   check(c.boss || rests !== hint.includes('不休整'), `${label}: tactical hint matches the interrupt rule`);
 }
 
+// A dodge costs the hit's damage and MP, never the correct read.
+{
+  const fighter = new Player('闪避测试', Job.Warrior);
+  const monster = new Enemy('fixture', 100000, 0, 0, 500, 500, 10);
+  monster.configureEncounter(10, true);
+  monster.setdodgeRate(100);
+  fighter.setmp(0);
+  const battle = new BattleSession(fighter, monster);
+  battle.beginTurn();
+  const hp = monster.gethp();
+  const mp = fighter.getmp();
+  const { events } = collect(() => battle.act({ type: ActionType.Attack }));
+  battle.close();
+  check(battle.report.interrupts === 1 && monster.getIntent().kind === Intent.Recover,
+    'a dodged plain attack still interrupts the charge');
+  check(monster.gethp() === hp && fighter.getmp() === mp &&
+    events.some((e) => e.type === 'interrupt' && e.text.includes('普攻虽被闪避，仍打断了蓄力')),
+  'a dodged interrupt deals no damage, earns no MP and says why it still worked');
+}
+
 // Poison alone is no sign of stalling: the advice needs a Defeat fight where
 // the player guarded while nothing called for it.
 function poisonFight(floor, boss, rules, pick) {
@@ -194,4 +214,4 @@ if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, interrupt and review texts.');
+console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts.');

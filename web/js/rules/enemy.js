@@ -78,13 +78,13 @@ export const OrdinaryNames = [
 ];
 export const TacticRoles = ['蓄力守卫', '抑疗猎手', '破阵斥候', '读招追猎者'];
 const TacticHints = [
-  '会蓄力并在下回合重击；普攻实际命中可以打断，换来一回合休整。',
+  '会蓄力并在下回合重击；普攻即可打断（被闪避也算），换来一回合休整。',
   '在你治疗后压制治疗效果；先攻击或格挡，等离开该意图再回血。蓄力时普攻可打断。',
   '在你格挡后发动无视格挡的破防攻击，此时主动出手更划算。蓄力时普攻可打断。',
   '记录你的出招习惯并预判重复行动，改变行动可让预判落空。蓄力时普攻可打断。',
 ];
 // The Charge hint for pressured enemies, which do not rest after an interrupt.
-const PressuredChargeHint = '会蓄力并在下回合重击；普攻实际命中可以打断，但它被打断后不休整，下回合仍会行动。';
+const PressuredChargeHint = '会蓄力并在下回合重击；普攻即可打断（被闪避也算），但它被打断后不休整，下回合仍会行动。';
 
 export const bossAttackPercent = (floor) => BossProfiles[chapterOf(floor)].attackPercent;
 
@@ -244,7 +244,7 @@ export class Enemy extends Character {
       if (slot === 0 && !this.interruptGrantsRecovery()) return PressuredChargeHint;
       return TacticHints[slot];
     }
-    return '观察早期意图：普攻命中可打断蓄力；格挡能抗重击，换招能避开预判。';
+    return '观察早期意图：普攻可打断蓄力；格挡能抗重击，换招能避开预判。';
   }
   primaryTactic() {
     if (this.bossEncounter) return BossProfiles[chapterOf(this.encounterFloor)].primary;
@@ -336,8 +336,8 @@ export class Enemy extends Character {
         return '普通攻击：造成 100% 攻击伤害，可格挡减半。';
       case Intent.Charge: {
         let text = (this.interruptGrantsRecovery()
-          ? '蓄力：本回合不攻击；普通攻击实际命中即可打断，敌人随后休整一回合。'
-          : '蓄力：本回合不攻击；普通攻击实际命中即可打断，但该敌人被打断后不休整。') + '未打断则下回合重击（' +
+          ? '蓄力：本回合不攻击；普通攻击即可打断（被闪避也算），敌人随后休整一回合。'
+          : '蓄力：本回合不攻击；普通攻击即可打断（被闪避也算），但该敌人被打断后不休整。') + '未打断则下回合重击（' +
           `${this.makeIntent(Intent.HeavyStrike).damagePercent}%），可格挡减半。`;
         if (this.hasAffix(Affix.HEALING))
           text += `【治疗】蓄力完成会回复 ${IntentTuning.HealingAffixPercent}% 最大生命。`;
