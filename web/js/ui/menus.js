@@ -205,7 +205,7 @@ export class Menus {
       const slot = i + 1;
       const unlocked = skill.isUnlocked(hero);
       const canUp = skill.canUpgrade(hero.getlevel(), hero.getHighestFloor());
-      const actions = [button(`升阶 ${skill.getlevelUpCost()}金`, () => {
+      const actions = [skill.getskilllevel() >= 5 ? h('span', { class: 'gold' }, '已满阶') : button(`升阶 ${skill.getlevelUpCost()}金`, () => {
         const { ok, events } = this.game.act(() => hero.levelUpSkill(slot));
         if (!ok) { sfx('error'); toast('未升级：检查金币、等级需求、楼层解锁和阶数上限。'); } else { sfx('levelup'); this.report(events); }
         m.refresh();
@@ -233,6 +233,7 @@ export class Menus {
           h('div', { class: 'title' }, `${skill.getskillname()} `, h('span', { class: 'muted' }, `${skill.getskilllevel()}阶 · ${skill.getSpecializationName(hero)}`),
             unlocked ? null : h('span', { class: 'tag elite', style: { marginLeft: '6px' } }, `第${skill.getunlockfloor()}层 / Lv.${skill.getlevelrequired()} 解锁`)),
           h('div', { class: 'meta' }, `MP ${skill.getActualCost(hero)} · 冷却 ${skill.getcurrentcooldown()}/${skill.getcooldown()} · ${skill.getPreview(hero)}`),
+          unlocked ? h('div', { class: 'meta upgrade' }, skill.getUpgradePreview(hero)) : null,
           branches),
         h('div', { class: 'actions' }, actions));
     });
@@ -354,6 +355,13 @@ export class Menus {
       h('p', { class: 'muted', style: { fontSize: '12px', marginTop: '10px' } }, `种子 ${game.run.seed} · ${challengeName(game.run.challenge)}模式`));
   }
 
+  // The next hard fight, MP, rests and cooldowns; red when this floor's fight is at risk.
+  readinessView() {
+    const { summary, warning } = Campaign.readiness(this.hero, this.game.floor);
+    return h('div', { class: `readiness ${warning ? 'risky' : ''}` },
+      h('p', {}, summary), warning ? h('p', { class: 'bad' }, warning) : null);
+  }
+
   // ---- Camp ------------------------------------------------------------------------------
   openCamp(scene) {
     const game = this.game;
@@ -369,6 +377,7 @@ export class Menus {
           const percent = run.challenge === 1 ? 25 : 40;
           const j = game.journal();
           return h('div', {},
+            this.readinessView(),
             h('p', {}, `HP ${hero.gethp()}/${hero.getmaxhp()} · MP ${hero.getmp()}/${hero.getmaxmp()} · 金币 `, h('span', { class: 'gold' }, hero.getcoin())),
             h('div', { class: 'grid-list' },
               h('div', { class: 'row-item' }, h('div', { class: 'icon', style: { display: 'grid', placeItems: 'center', color: '#f77622' } }, '火'),
@@ -594,6 +603,7 @@ export class Menus {
       h('p', {}, h('span', { class: 'gold' }, `目标·${Campaign.objectiveName(rules.objective)}：`), goalText),
       rules.elite ? h('p', { class: 'bad' }, '【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁且被打断后不休整；首通必得本层最高品质档的目标装备。') : null,
       rules.bossSabotaged ? h('p', { class: 'good' }, '供能设施已破坏，Boss 护盾失效、重击减弱。') : null,
+      rules.elite || game.floor % 10 === 0 ? this.readinessView() : null,
       h('p', { class: 'muted' }, `战术提示：${preview.getTacticalHint()}`),
       preview.getAffixes().length ? h('ul', { class: 'lines muted', style: { fontSize: '13px' } }, preview.getAffixes().map((a) => h('li', {}, `[${affixName(a)}] ${affixDescription(a)}`))) : null,
       first ? null : h('p', { class: 'muted' }, '已首通：重复挑战的奖励逐次降低（30% → 10% → 0）。')),

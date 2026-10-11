@@ -3,6 +3,7 @@
 #include "core/random.h"
 #include "game/campaign.h"
 #include "player/jobs.h"
+#include "player/skills.h"
 #include "storage/save.h"
 #include <cassert>
 #include <array>
@@ -32,6 +33,38 @@ bool sameEnemy(const enemy &a, const enemy &b) {
     if (a.hasAffix(affix) != b.hasAffix(affix)) return false;
   return true;
 }
+// The camp summary names the next hard fight and warns only when that fight
+// is on this floor and the hero lacks half MP or a ready skill.
+void testReadiness() {
+  Warrior hero("ready");
+  prepareEventHero(hero, 10000, 400, 80, 80);
+  const int elite = Campaign::eliteFloor(7);
+  const auto ahead = Campaign::readiness(hero, 71);
+  require(ahead.majorFloor == elite && ahead.warning.empty() &&
+              ahead.summary.find("还有 " + std::to_string(elite - 71) + " 层") != std::string::npos,
+          "Readiness must name the next uncleared elite and how far it is");
+  const auto ready = Campaign::readiness(hero, elite);
+  require(ready.majorFloor == elite && ready.warning.empty() &&
+              ready.summary.find("技能全部就绪") != std::string::npos,
+          "A rested hero at the elite needs no warning");
+  hero.setmp(20);
+  require(Campaign::readiness(hero, elite).warning.find("MP 不到一半") != std::string::npos,
+          "Entering an elite under half MP must warn");
+  hero.setmp(80);
+  hero.getSkill(3)->resetcooldown();
+  const auto cooling = Campaign::readiness(hero, elite);
+  require(cooling.warning.find("1 个技能仍在冷却") != std::string::npos &&
+              cooling.summary.find("盾反 4") != std::string::npos,
+          "A skill still cooling before an elite must be named and warned about");
+  hero.runState().cleared[elite] = 1;
+  const auto boss = Campaign::readiness(hero, elite);
+  require(boss.majorFloor == 80 && boss.warning.empty(),
+          "A cleared elite gives way to the boss, which is not yet this floor's fight");
+  hero.runState().cleared[80] = 1;
+  require(Campaign::readiness(hero, elite).majorFloor == 0,
+          "A chapter with every hard fight cleared has no next major floor");
+}
+
 void testRotatingObjectives() {
   for (int route = 1; route <= 3; ++route) {
     Warrior hero("goals");
@@ -305,6 +338,7 @@ int main() {
   testEventsPersistWithoutNewFields();
   testLivingTimeoutIsNotADeath();
   testEliteEncounters();
+  testReadiness();
   Warrior hero("campaign");
   Campaign::initialize(hero, 777, 0);
   bool rejected = false;

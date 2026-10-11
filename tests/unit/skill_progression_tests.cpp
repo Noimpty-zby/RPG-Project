@@ -206,6 +206,39 @@ void testHealingAndTemporaryWeakening() {
           "lifesteal healed after a dodged attack");
 }
 
+// The upgrade preview predicts exactly what an upgrade does, names what blocks
+// it, and leaves the skill untouched.
+void testUpgradePreview() {
+  Warrior warrior("warrior");
+  prepare(warrior, 30);
+  skill *strike = warrior.getSkill(1);
+  const int damage = strike->getScaledDamage(warrior), cost = strike->getActualCost(warrior);
+  const std::string preview = strike->getUpgradePreview(warrior);
+  require(strike->getskilllevel() == 1 && strike->getScaledDamage(warrior) == damage &&
+              strike->getActualCost(warrior) == cost,
+          "an upgrade preview changed the skill");
+  require(warrior.levelUpSkill(1) && strike->getScaledDamage(warrior) == damage + 15 &&
+              strike->getActualCost(warrior) == cost + 3 &&
+              preview.find("升至2阶") != std::string::npos &&
+              preview.find("伤害 " + std::to_string(damage) + "→" + std::to_string(damage + 15)) != std::string::npos &&
+              preview.find("MP " + std::to_string(cost) + "→" + std::to_string(cost + 3)) != std::string::npos,
+          "upgrade preview does not match the actual upgrade: " + preview);
+  require(strike->getUpgradePreview(warrior).find("到达第40层后可升") != std::string::npos,
+          "a rank-capped skill must name the floor that lifts the cap");
+  strike->restoreProgress(5, 0);
+  require(strike->getUpgradePreview(warrior).find("已满阶") != std::string::npos,
+          "a rank-5 skill must say it is maxed");
+
+  Assassin assassin("assassin");
+  prepare(assassin);
+  skill *drain = assassin.getSkill(4);
+  require(drain->getUpgradePreview(assassin).find("升阶不增加实际治疗") == std::string::npos,
+          "an uncapped lifesteal upgrade does add healing");
+  assassin.loadStats(100, 0, 100000, 100, 1000, 2000, 1000, 1000, 0, 3);
+  require(drain->getUpgradePreview(assassin).find("升阶不增加实际治疗") != std::string::npos,
+          "a lifesteal already at its cap must say the upgrade adds no healing");
+}
+
 void testDamageAndBossIdentity() {
   Warrior warrior("warrior");
   prepare(warrior);
@@ -261,6 +294,7 @@ int main() {
     testClassDamageMultipliers();
     testHealingAndTemporaryWeakening();
     testDamageAndBossIdentity();
+    testUpgradePreview();
   } catch (const std::exception &error) {
     std::cout.rdbuf(previous);
     std::cerr << "skill progression tests failed: " << error.what() << '\n';

@@ -318,6 +318,10 @@ ul.lines li { margin: 2px 0; }
 .row-item.locked-item { box-shadow: inset 3px 0 0 var(--gold); }
 .row-item .title { color: var(--text); }
 .row-item .meta { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 2px; }
+.row-item .meta.upgrade { color: var(--cyan); }
+.readiness { margin: 0 0 10px; padding: 6px 10px; font-size: 13px; background: rgba(14, 11, 22, .35); border-left: 3px solid var(--cyan); }
+.readiness.risky { border-left-color: var(--red); }
+.readiness p { margin: 2px 0; }
 .row-item .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .icon {
   width: 40px;

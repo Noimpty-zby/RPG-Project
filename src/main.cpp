@@ -167,6 +167,9 @@ void repairEquipment(player &hero) {
 void camp(player &hero, int floor) {
   for (;;) {
     Campaign::printJournal(hero, floor);
+    const auto ready = Campaign::readiness(hero, floor);
+    std::cout << ready.summary << '\n';
+    if (!ready.warning.empty()) std::cout << ready.warning << '\n';
     std::cout << "营地：[1] 休息（本章剩余 " << Campaign::restsRemaining(hero, floor) << " 次，本次 "
       << Campaign::restPrice(hero, floor) << "金币，恢复基础HP的" << (hero.runState().challenge == 1 ? 25 : 40)
       << "%与最大MP的50%） [2] 领取订单 [3] 定向装备目标 [4] 装备改造\n"
@@ -406,8 +409,10 @@ int main() {
     std::cout << "\n楼层 " << floor << " · " << Campaign::chapter(floor).name << " | HP " << hero->gethp()
       << '/' << hero->getmaxhp() << " | 金币 " << hero->getcoin() << " | "
       << (hero->runState().cleared[floor] ? "已首通" : "待完成")
-      << (Campaign::isEliteFloor(floor) ? " | 精英层" : "") << '\n'
-      << "[1] 挑战本层 [2] 背包 [3] 装备 [4] 退出 [5] 存档 [6] 状态 [7] 技能 [8] 营地 [9] 下一层\n"
+      << (Campaign::isEliteFloor(floor) ? " | 精英层" : "") << '\n';
+    const auto ready = Campaign::readiness(*hero, floor);
+    if (!ready.warning.empty()) std::cout << ready.warning << '\n';
+    std::cout << "[1] 挑战本层 [2] 背包 [3] 装备 [4] 退出 [5] 存档 [6] 状态 [7] 技能 [8] 营地 [9] 下一层\n"
       << "[10] 前往楼层 [11] 远征档案 [12] 帮助\n";
     const int action = readInt();
     if (action == 4) { exitGame(*hero, floor); return 0; }

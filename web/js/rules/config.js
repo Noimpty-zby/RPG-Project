@@ -37,6 +37,10 @@ export function skillRankCap(highestFloor) {
   if (highestFloor >= 20) return 2;
   return 1;
 }
+// The highest floor that raises the cap to this rank (1 for rank 1).
+export function skillRankFloor(rank) {
+  return [1, 20, 40, 65, 85][clamp(rank, 1, 5) - 1];
+}
 export function skillUnlockFloor(slot) {
   return [1, 3, 6, 10, 15][clamp(slot, 1, 5) - 1];
 }
