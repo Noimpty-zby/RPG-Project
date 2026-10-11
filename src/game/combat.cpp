@@ -133,6 +133,9 @@ bool BattleSession::act(BattleAction action) {
     hero.guard(intent.piercesGuard);
     actionId = -1;
     ++battleReport.guards;
+    if (intent.kind == EnemyIntentKind::Attack || intent.kind == EnemyIntentKind::Charge ||
+        intent.kind == EnemyIntentKind::Recover)
+      ++battleReport.waitingGuards;
     break;
   case ActionType::Potion:
     if (!hero.useItem(action.index)) return false;
@@ -151,7 +154,10 @@ bool BattleSession::act(BattleAction action) {
       monster.gethp() < enemyHpBefore && monster.interruptCharge()) {
     interrupted = true;
     ++battleReport.interrupts;
-    std::cout << "【打断成功】普通攻击打断蓄力，下回合敌人休整。" << std::endl;
+    std::cout << (monster.interruptGrantsRecovery()
+                      ? "【打断成功】普通攻击打断蓄力，下回合敌人休整。"
+                      : "【打断成功】普通攻击打断蓄力，重击取消；该敌人不休整，下回合仍会行动。")
+              << std::endl;
   }
 
   if (!monster.isalive()) {

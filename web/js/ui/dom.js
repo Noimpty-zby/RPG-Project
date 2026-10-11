@@ -55,6 +55,10 @@ const stack = [];
 let inputRef = null;
 export function bindInput(input) { inputRef = input; }
 export const modalOpen = () => stack.length > 0;
+// Runs after any modal re-renders or closes. Menu actions re-render their
+// modal, so the HUD subscribes here and shows each change at once.
+let afterModalChange = null;
+export function onModalChange(fn) { afterModalChange = fn; }
 
 export function openModal(o) {
   const root = document.getElementById('modals');
@@ -93,6 +97,7 @@ export function openModal(o) {
       for (const b of buttons) footer.append(button(b.label, () => b.onClick(api), b));
       footer.classList.toggle('hidden', buttons.length === 0);
       body.scrollTop = scroll;
+      afterModalChange?.();
     },
     close(result) {
       if (api.closed) return;
@@ -101,6 +106,7 @@ export function openModal(o) {
       stack.splice(stack.indexOf(api), 1);
       if (!stack.length && inputRef) { inputRef.enabled = true; inputRef.clear(); }
       sfx('close');
+      afterModalChange?.();
       o.onClose?.(result);
     },
   };

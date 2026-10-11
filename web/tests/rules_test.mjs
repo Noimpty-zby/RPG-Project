@@ -1,7 +1,10 @@
-// Browser-only rules: JSON saves, profile parsing and achievements.
+// Browser-only rules: JSON saves, profile parsing, achievements and the
+// texts that must agree with the rules.
 //   node web/tests/rules_test.mjs
 import * as Campaign from '../js/rules/campaign.js';
-import { BattleSession } from '../js/rules/combat.js';
+import { ActionType, BattleSession, Objective } from '../js/rules/combat.js';
+import { Affix, Enemy, Intent } from '../js/rules/enemy.js';
+import { collect } from '../js/rules/log.js';
 import { Job } from '../js/rules/jobs.js';
 import { Player } from '../js/rules/player.js';
 import { Profile, Achievements } from '../js/rules/profile.js';
@@ -122,10 +125,73 @@ for (const bad of [{}, { version: 1, bestiary: [{ id: 0, seen: 1, won: 2, firstF
   }
 }
 check(Achievements.length === 17, '17 achievements');
+
+// Interrupt texts must match what the enemy then does: ordinary fights and
+// bosses rest, scarce-supply and elite fights do not.
+for (const c of [{ floor: 4, boss: false, difficulty: 0, elite: false }, { floor: 4, boss: false, difficulty: 1, elite: true },
+  { floor: 4, boss: false, difficulty: 1, elite: false }, { floor: 4, boss: false, difficulty: 2, elite: true },
+  { floor: 10, boss: true, difficulty: 0, elite: false }, { floor: 10, boss: true, difficulty: 1, elite: false }]) {
+  const label = `floor ${c.floor} difficulty ${c.difficulty}${c.elite ? ' elite' : ''}`;
+  const fighter = new Player('打断测试', Job.Warrior);
+  const monster = new Enemy('fixture', 100000, 0, 0, 500, 500, c.floor);
+  monster.configureEncounter(c.floor, c.boss);
+  monster.setdodgeRate(0);
+  const battle = new BattleSession(fighter, monster, { objective: Objective.Defeat, targetTurns: 4, difficulty: c.difficulty,
+    bossSabotaged: false, elite: c.elite });
+  for (let i = 0; i < 30 && !monster.getIntent().interruptible; i++) {
+    battle.beginTurn();
+    battle.act({ type: ActionType.Guard });
+  }
+  check(monster.getIntent().interruptible, `${label}: fixture reaches a charge`);
+  const hint = monster.getTacticalHint();
+  const intentText = monster.describeIntent();
+  battle.beginTurn();
+  const { events } = collect(() => battle.act({ type: ActionType.Attack }));
+  battle.close();
+  const rests = monster.getIntent().kind === Intent.Recover;
+  const log = events.find((e) => e.type === 'interrupt')?.text ?? '';
+  check(battle.report.interrupts === 1 && rests === (c.difficulty === 0), `${label}: only unpressured enemies rest`);
+  check(rests === intentText.includes('敌人随后休整一回合') && rests !== intentText.includes('不休整'),
+    `${label}: charge intent promises rest exactly when it follows`);
+  check(rests === log.includes('下回合敌人休整') && rests !== log.includes('不休整'),
+    `${label}: interrupt log promises rest exactly when it follows`);
+  check(c.boss || rests !== hint.includes('不休整'), `${label}: tactical hint matches the interrupt rule`);
+}
+
+// Poison alone is no sign of stalling: the advice needs a Defeat fight where
+// the player guarded while nothing called for it.
+function poisonFight(floor, boss, rules, pick) {
+  const fighter = new Player('剧毒测试', Job.Warrior);
+  const monster = new Enemy('fixture', 100000, 0, 0, 500, 500, floor);
+  monster.configureEncounter(floor, boss);
+  for (let i = 0; i < 1000 && !monster.hasAffix(Affix.POISONOUS); i++) monster.setAffix(100);
+  monster.setdodgeRate(0);
+  const battle = new BattleSession(fighter, monster, { objective: Objective.Defeat, targetTurns: 4, difficulty: 0,
+    bossSabotaged: false, elite: false, ...rules });
+  for (let turn = 0; turn < 30 && battle.beginTurn(); turn++) {
+    const action = pick(battle, monster, turn);
+    if (!action) break;
+    battle.act({ type: action });
+  }
+  battle.close();
+  return { battle, advised: Campaign.battleReview(battle).some((line) => line.includes('格挡等待')) };
+}
+const waiting = (kind) => kind === Intent.Attack || kind === Intent.Charge || kind === Intent.Recover;
+const survived = poisonFight(1, false, { objective: Objective.Survive, targetTurns: 5 }, () => ActionType.Guard);
+check(survived.battle.won() && survived.battle.report.poisonDamage > 0 && !survived.advised,
+  'waiting out a survival objective is not called stalling');
+const assault = poisonFight(10, true, {}, (b, m, turn) => (turn < 6 ? ActionType.Attack : null));
+check(assault.battle.report.poisonDamage > 0 && assault.battle.report.waitingGuards === 0 && !assault.advised,
+  'attacking every turn is not called stalling');
+const stall = poisonFight(1, false, {}, (b, m) => (b.report.waitingGuards >= 2 ? null
+  : waiting(m.getIntent().kind) ? ActionType.Guard : ActionType.Attack));
+check(stall.battle.report.waitingGuards === 2 && stall.advised, 'guarding while nothing threatens in a poisoned Defeat fight is stalling');
+const warrior = new Player('预览测试', Job.Warrior);
+check(warrior.getSkill(3).getPreview(warrior).includes('无视护盾'), 'Shield Counter preview states it ignores shields');
 check(HelpTopics.every((topic) => topic.lines().length > 0), 'help pages render');
 
 if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help.');
+console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, interrupt and review texts.');

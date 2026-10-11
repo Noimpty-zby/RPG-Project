@@ -235,6 +235,9 @@ const char *const tacticHints[4] = {
     "在你治疗后压制治疗效果；先攻击或格挡，等离开该意图再回血。蓄力时普攻可打断。",
     "在你格挡后发动无视格挡的破防攻击，此时主动出手更划算。蓄力时普攻可打断。",
     "记录你的出招习惯并预判重复行动，改变行动可让预判落空。蓄力时普攻可打断。"};
+// The Charge hint for pressured enemies, which do not rest after an interrupt.
+const char *const pressuredChargeHint =
+    "会蓄力并在下回合重击；普攻实际命中可以打断，但它被打断后不休整，下回合仍会行动。";
 } // namespace
 
 int bossAttackPercent(int floor) { return bossProfiles[chapterIndex(floor)].attackPercent; }
@@ -272,7 +275,11 @@ string enemy::getEncounterTitle() const {
 
 string enemy::getTacticalHint() const {
   if (bossEncounter) return bossProfiles[chapterIndex(encounterFloor)].hint;
-  if (encounterFloor > 0) return tacticHints[encounterFloor % 4];
+  if (encounterFloor > 0) {
+    const int slot = encounterFloor % 4;
+    if (slot == 0 && !interruptGrantsRecovery()) return pressuredChargeHint;
+    return tacticHints[slot];
+  }
   return "观察早期意图：普攻命中可打断蓄力；格挡能抗重击，换招能避开预判。";
 }
 
@@ -400,8 +407,10 @@ void enemy::displayIntent() const {
     cout << "普通攻击：造成 100% 攻击伤害，可格挡减半。";
     break;
   case EnemyIntentKind::Charge:
-    cout << "蓄力：本回合不攻击；普通攻击实际命中即可打断，敌人随后休整一回合。"
-            "未打断则下回合重击（"
+    cout << (interruptGrantsRecovery()
+                 ? "蓄力：本回合不攻击；普通攻击实际命中即可打断，敌人随后休整一回合。"
+                 : "蓄力：本回合不攻击；普通攻击实际命中即可打断，但该敌人被打断后不休整。")
+         << "未打断则下回合重击（"
          << makeIntent(EnemyIntentKind::HeavyStrike).damagePercent << "%），可格挡减半。";
     if (hasAffix(Affix::HEALING))
       cout << "【治疗】蓄力完成会回复 " << IntentTuning::HealingAffixPercent << "% 最大生命。";
@@ -437,12 +446,14 @@ void enemy::displayIntent() const {
 bool enemy::interruptCharge() {
   if (getIntent().kind != EnemyIntentKind::Charge) return false;
   chargePending = false;
-  // Pressured enemies (challenges, elites) shake off an interrupt at once.
-  recoveryTurns = tacticalPressure == 0 ? 1 : 0;
+  recoveryTurns = interruptGrantsRecovery() ? 1 : 0;
   interruptedThisTurn = true;
   specialCooldown = max(1, 3 - tacticalPressure) + (sabotaged ? 1 : 0);
   return true;
 }
+
+// Pressured enemies (challenges, elites) shake off an interrupt at once.
+bool enemy::interruptGrantsRecovery() const { return tacticalPressure == 0; }
 
 void enemy::setObjectivePressure(bool enabled) { objectivePressure = enabled; }
 void enemy::setTacticalPressure(int difficulty) {
