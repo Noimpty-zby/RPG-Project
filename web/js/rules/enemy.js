@@ -58,7 +58,7 @@ export const BossProfiles = [
   { title: '星蚀观测站·蚀星观测者', primary: Intent.Shatter, secondary: Intent.ReadPattern,
     hint: '目标：星蚀破防时主动出招，观测者预判时切换行动种类。', attackPercent: 90 },
   { title: '王庭废墟·王座祭司', primary: Intent.Wound, secondary: Intent.ReadPattern,
-    hint: '目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。', attackPercent: 90 },
+    hint: '目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。', attackPercent: 80 },
   { title: '天顶之门·远征裁决者', primary: Intent.ReadPattern, secondary: Intent.Shatter,
     hint: '目标：应对裁决者的读招、破防与低血蓄力，改变行动争取突围窗口。', attackPercent: 100 },
 ];
