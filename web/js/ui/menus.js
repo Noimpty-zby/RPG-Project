@@ -581,7 +581,7 @@ export class Menus {
     const goalText = {
       [Objective.Defeat]: '击败敌人（限80回合）。',
       [Objective.Survive]: `存活 ${rules.targetTurns} 回合，或击败敌人。`,
-      [Objective.Disrupt]: '普攻命中蓄力中的敌人，完成两次打断，或击败敌人（限20回合）。',
+      [Objective.Disrupt]: '普攻蓄力中的敌人完成两次打断（被闪避也算），或击败敌人（限20回合）。',
       [Objective.Escape]: '撑过 3 回合后格挡撤离，或击败敌人（限15回合）。',
     }[rules.objective];
     const ok = await choose(first ? '楼层守卫' : '再次挑战', h('div', {},

@@ -203,7 +203,7 @@ void showObjective(const EncounterRules &rules) {
   if (rules.objective == EncounterObjective::Survive)
     std::cout << "目标：存活 " << rules.targetTurns << " 回合，或击败敌人。\n";
   else if (rules.objective == EncounterObjective::Disrupt)
-    std::cout << "目标：普攻命中蓄力敌人完成两次打断，或击败敌人。\n";
+    std::cout << "目标：普攻蓄力中的敌人完成两次打断（被闪避也算），或击败敌人。\n";
   else if (rules.objective == EncounterObjective::Escape)
     std::cout << "目标：撑过准备时间后格挡撤离，或击败敌人。\n";
   else std::cout << "目标：击败敌人。\n";
@@ -247,7 +247,7 @@ bool fight(player &hero, int floor, Profile &profile) {
     std::cout << battle.objectiveDescription() << '\n';
     std::cout << "HP " << hero.gethp() << '/' << hero.getmaxhp() << " MP " << hero.getmp()
       << '/' << hero.getmaxmp() << " 敌HP " << monster.gethp() << " 药水 " << potionCount(hero) << '\n'
-      << "[1] 普攻（命中可打断蓄力） [2] 技能 [3] 格挡 [4] 药水 [5] 查看敌我详情\n";
+      << "[1] 普攻（可打断蓄力） [2] 技能 [3] 格挡 [4] 药水 [5] 查看敌我详情\n";
     const int action = readInt();
     BattleAction chosen{ActionType::Attack};
     if (action == 2) {

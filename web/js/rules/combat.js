@@ -61,7 +61,7 @@ export class BattleSession {
       case Objective.Survive:
         return `生存 ${this.rules.targetTurns} 个有效回合，或击败敌人（${this.turns()}/${this.rules.targetTurns}）`;
       case Objective.Disrupt:
-        return `普攻命中蓄力，累计打断 2 次，或击败敌人（${this.report.interrupts}/2；限20回合）`;
+        return `普攻蓄力中的敌人，累计打断 2 次，或击败敌人（${this.report.interrupts}/2；限20回合）`;
       case Objective.Escape:
         return `撑过至少 3 个有效回合，并以格挡撤离，或击败敌人（当前${this.turns()}回合；限15回合）`;
       default:
@@ -163,13 +163,13 @@ export class BattleSession {
     const healed = hero.gethp() > hpBeforeAction;
     this.report.suppressedHealing += Math.max(0, hero.getSuppressedHealingTotal() - suppressedBefore);
     let interrupted = false;
-    if (action.type === ActionType.Attack && intent.interruptible && monster.gethp() < enemyHpBefore &&
-      monster.interruptCharge()) {
+    // A plain attack answers a charge even when dodged: the dodge costs the
+    // hit's damage and MP, never the correct read.
+    if (action.type === ActionType.Attack && intent.interruptible && monster.interruptCharge()) {
       interrupted = true;
       ++this.report.interrupts;
-      emit('interrupt', monster.interruptGrantsRecovery()
-        ? '【打断成功】普通攻击打断蓄力，下回合敌人休整。'
-        : '【打断成功】普通攻击打断蓄力，重击取消；该敌人不休整，下回合仍会行动。', { side: 'enemy' });
+      emit('interrupt', (monster.gethp() < enemyHpBefore ? '【打断成功】普通攻击打断蓄力' : '【打断成功】普攻虽被闪避，仍打断了蓄力') +
+        (monster.interruptGrantsRecovery() ? '，下回合敌人休整。' : '，重击取消；该敌人不休整，下回合仍会行动。'), { side: 'enemy' });
     }
 
     if (!monster.isalive()) {

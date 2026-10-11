@@ -173,7 +173,7 @@ export class BattleUI {
     );
     let hint = this.hintText || '';
     if (!hint && !locked && intent) {
-      if (interrupt) hint = '敌人正在蓄力：普攻命中即可打断！';
+      if (interrupt) hint = '敌人正在蓄力：普攻即可打断！';
       else if (intent.kind === Intent.HeavyStrike) hint = '重击来袭：格挡可减半伤害。';
       else if (intent.kind === Intent.Wound) hint = '压制治疗：这回合先别回血。';
       else if (intent.kind === Intent.Shatter) hint = '破防攻击无视格挡：主动进攻更划算。';
