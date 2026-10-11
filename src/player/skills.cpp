@@ -94,8 +94,11 @@ int skill::getcooldown() const { return cooldown; }
 int skill::getcurrentcooldown() const { return currentcooldown; }
 int skill::getdamage() const { return damage; }
 int skill::getEffectiveRank() const { return clamp(level, 1, 5); }
+// Ranks scale the whole attack-scaled damage; only the execute's flat bonus
+// (getdamage) still grows by 15 per rank.
 int skill::getScaledDamage(const player &hero) const {
-  const long long value = static_cast<long long>(damage) + static_cast<long long>(hero.getattack()) * 3 / 4;
+  const long long base = static_cast<long long>(basedamage) + static_cast<long long>(hero.getattack()) * 3 / 4;
+  const long long value = base * (100 + Progression::RankDamagePercent * (getEffectiveRank() - 1)) / 100;
   return static_cast<int>(clamp(value, 0LL, static_cast<long long>(GameConfig::MaxCounter)));
 }
 int skill::getActualCost(const player &hero) const {

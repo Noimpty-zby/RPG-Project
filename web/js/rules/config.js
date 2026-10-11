@@ -37,6 +37,9 @@ export function skillRankCap(highestFloor) {
   if (highestFloor >= 20) return 2;
   return 1;
 }
+// Each skill rank above the first adds this share of the attack-scaled damage,
+// so ranks keep their value as attack grows.
+export const RankDamagePercent = 8;
 // The highest floor that raises the cap to this rank (1 for rank 1).
 export function skillRankFloor(rank) {
   return [1, 20, 40, 65, 85][clamp(rank, 1, 5) - 1];

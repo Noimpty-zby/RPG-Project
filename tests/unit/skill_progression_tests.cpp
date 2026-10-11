@@ -217,10 +217,11 @@ void testUpgradePreview() {
   require(strike->getskilllevel() == 1 && strike->getScaledDamage(warrior) == damage &&
               strike->getActualCost(warrior) == cost,
           "an upgrade preview changed the skill");
-  require(warrior.levelUpSkill(1) && strike->getScaledDamage(warrior) == damage + 15 &&
+  const int ranked = damage * (100 + Progression::RankDamagePercent) / 100;
+  require(warrior.levelUpSkill(1) && strike->getScaledDamage(warrior) == ranked &&
               strike->getActualCost(warrior) == cost + 3 &&
               preview.find("升至2阶") != std::string::npos &&
-              preview.find("伤害 " + std::to_string(damage) + "→" + std::to_string(damage + 15)) != std::string::npos &&
+              preview.find("伤害 " + std::to_string(damage) + "→" + std::to_string(ranked)) != std::string::npos &&
               preview.find("MP " + std::to_string(cost) + "→" + std::to_string(cost + 3)) != std::string::npos,
           "upgrade preview does not match the actual upgrade: " + preview);
   require(strike->getUpgradePreview(warrior).find("到达第40层后可升") != std::string::npos,

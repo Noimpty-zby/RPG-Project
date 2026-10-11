@@ -239,8 +239,9 @@ check(warrior.getSkill(3).getPreview(warrior).includes('无视护盾'), 'Shield 
   const cost = strike.getActualCost(hero);
   const preview = strike.getUpgradePreview(hero);
   check(strike.getskilllevel() === 1 && strike.getScaledDamage(hero) === damage, 'upgrade preview leaves the skill untouched');
-  check(hero.levelUpSkill(1) && strike.getScaledDamage(hero) === damage + 15 && strike.getActualCost(hero) === cost + 3 &&
-    preview.includes(`伤害 ${damage}→${damage + 15}`) && preview.includes(`MP ${cost}→${cost + 3}`), `upgrade preview matches the upgrade: ${preview}`);
+  const ranked = Math.trunc(damage * 108 / 100);
+  check(hero.levelUpSkill(1) && strike.getScaledDamage(hero) === ranked && strike.getActualCost(hero) === cost + 3 &&
+    preview.includes(`伤害 ${damage}→${ranked}`) && preview.includes(`MP ${cost}→${cost + 3}`), `upgrade preview matches the upgrade: ${preview}`);
   check(strike.getUpgradePreview(hero).includes('到达第40层后可升'), 'rank-capped preview names the floor that lifts the cap');
   strike.restoreProgress(5, 0);
   check(strike.getUpgradePreview(hero).includes('已满阶'), 'rank-5 preview says it is maxed');

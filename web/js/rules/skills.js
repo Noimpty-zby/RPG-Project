@@ -1,6 +1,6 @@
 // Port of src/player/skills.{h,cpp}: 15 skills, linear rank growth and the
 // mutually exclusive specializations of the first two skills.
-import { clamp, idiv, MaxCounter, skillRankCap, skillRankFloor, skillUnlockFloor, IntMax } from './config.js';
+import { clamp, idiv, MaxCounter, RankDamagePercent, skillRankCap, skillRankFloor, skillUnlockFloor, IntMax } from './config.js';
 import { Affix } from './enemy.js';
 import { ItemEffect } from './item.js';
 import { Job } from './jobs.js';
@@ -114,7 +114,12 @@ export class Skill {
   getcurrentcooldown() { return this.currentcooldown; }
   getdamage() { return this.damage; }
   getEffectiveRank() { return clamp(this.level, 1, 5); }
-  getScaledDamage(hero) { return clamp(this.damage + idiv(hero.getattack() * 3, 4), 0, MaxCounter); }
+  // Ranks scale the whole attack-scaled damage; only the execute's flat bonus
+  // (getdamage) still grows by 15 per rank.
+  getScaledDamage(hero) {
+    const base = this.basedamage + idiv(hero.getattack() * 3, 4);
+    return clamp(idiv(base * (100 + RankDamagePercent * (this.getEffectiveRank() - 1)), 100), 0, MaxCounter);
+  }
   getActualCost(hero) {
     if (hero.job() === Job.Mage && this.skillid === 4) return Math.max(10, idiv(hero.getmp(), 2));
     let cost = this.costmp;
