@@ -8,7 +8,9 @@ import { Job } from '../js/rules/jobs.js';
 import { Player } from '../js/rules/player.js';
 import { restCost } from '../js/rules/config.js';
 
-function equipUpgrades(hero) {
+// Wear the best item; carry an enhancement over when the inherited item beats
+// it and the fee leaves three quarters of the purse, as for enhancing.
+function equipUpgrades(hero, spend) {
   for (const type of [ItemType.Weapon, ItemType.Armor]) {
     let best = -1;
     let value = 0;
@@ -23,13 +25,26 @@ function equipUpgrades(hero) {
         value = item.getValue();
       }
     }
-    if (best > 0) hero.equipItem(best);
+    let heir = -1;
+    for (let i = 0; i < items.length; ++i) {
+      const cost = hero.inheritCost(i + 1);
+      if (items[i].getType() === type && cost > 0 && cost * 4 <= hero.getcoin() && hero.inheritValue(i + 1) > value) {
+        heir = i + 1;
+        value = hero.inheritValue(i + 1);
+      }
+    }
+    if (heir > 0) {
+      spend.enhance += hero.inheritCost(heir);
+      hero.inheritEnhancement(heir);
+    } else if (best > 0) {
+      hero.equipItem(best);
+    }
   }
 }
 
 function prepare(hero, floor, build, spend) {
   Campaign.claimOrder(hero, floor);
-  equipUpgrades(hero);
+  equipUpgrades(hero, spend);
   for (let slot = 1; slot <= hero.getSkillCount(); ++slot) {
     const ability = hero.getSkill(slot);
     if (ability.canUpgrade(hero.getlevel(), hero.getHighestFloor()) &&
@@ -44,7 +59,7 @@ function prepare(hero, floor, build, spend) {
     if (stock[slot - 1].getLevelRequirement() <= hero.getlevel() && stock[slot - 1].getValue() > value)
       Campaign.purchase(hero, floor, slot);
   }
-  equipUpgrades(hero);
+  equipUpgrades(hero, spend);
   if (hero.gethp() * 100 < hero.getmaxhp() * 65) {
     if (!hero.potionIndex()) {
       Campaign.purchase(hero, floor, 3);

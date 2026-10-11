@@ -5,7 +5,7 @@ import { Skill, SpecializationBranches } from '../rules/skills.js';
 import { Item, ItemType } from '../rules/item.js';
 import { affixDescription, affixName, AffixCount, Bestiary } from '../rules/enemy.js';
 import { Objective } from '../rules/combat.js';
-import { chapterOf, challengeName, EnhancePercent, MaxEnhanceLevel, refreshCost, skillRankCap } from '../rules/config.js';
+import { chapterOf, challengeName, EnhancePercent, InheritPercent, MaxEnhanceLevel, refreshCost, skillRankCap } from '../rules/config.js';
 import { Achievements, Profile } from '../rules/profile.js';
 import { HelpTopics } from '../rules/help.js';
 import { h, button, openModal, choose, alertBox, toast } from './dom.js';
@@ -479,7 +479,8 @@ export class Menus {
                   m.refresh();
                 }, { cls: 'small primary', disabled: hero.getcoin() < cost })
                 : h('span', { class: 'muted' }, '已满级')] });
-            })) : h('p', {}, '没有装备任何物品！'));
+            })) : h('p', {}, '没有装备任何物品！'),
+            this.inheritView(m));
         }
         if (m.tab() === 2) {
           const equipped = hero.getSaveEquipments();
@@ -514,6 +515,34 @@ export class Menus {
         return this.skillsView(m);
       },
     });
+  }
+
+  // Backpack items that can take over the worn item's enhancement.
+  inheritView(m) {
+    const hero = this.hero;
+    const rows = hero.getSaveBackpack().map((item, i) => ({ item, index: i + 1, cost: hero.inheritCost(i + 1) }))
+      .filter(({ cost }) => cost > 0).map(({ item, index, cost }) => {
+        const worn = hero.equippedOfType(item.getType());
+        const stat = item.getType() === ItemType.Weapon ? '攻击' : '生命';
+        const value = hero.inheritValue(index);
+        return h('div', {}, itemRow(item, { hero, actions: [button(`继承（${cost}金）`, async () => {
+          const ok = await choose('继承强化', h('div', {},
+            h('p', {}, `${item.getDisplayName()} 直接强化到 +${worn.getEnhanceLevel()}（${stat} ${item.getValue()} → ${value}）并换上，花费 ${cost} 金币。`),
+            h('p', { class: 'bad' }, `当前的 ${worn.getDisplayName()} 会被消耗，不回到背包。`),
+            worn.getEffect() && worn.getEffect() !== item.getEffect() ? h('p', { class: 'muted' }, `改造效果不随强化转移：会失去「${Item.effectName(worn.getEffect())}」。`) : null),
+          [{ label: '继承', value: true, cls: 'primary' }, { label: '取消', value: false }]);
+          if (!ok) return;
+          const { ok: done } = this.game.act(() => hero.inheritEnhancement(index));
+          if (!done) { sfx('error'); toast('金币不足。'); } else { sfx('levelup'); toast(`${item.getName()} 已继承 +${worn.getEnhanceLevel()} 并换上。`); }
+          m.refresh();
+        }, { cls: 'small primary', disabled: hero.getcoin() < cost })] }),
+        h('p', { class: 'muted', style: { fontSize: '12px', margin: '2px 0 0 52px' } },
+          `继承 ${worn.getDisplayName()}：${stat} ${value}（当前 ${worn.getValue()}），费用为重新强化的 ${InheritPercent}%。`));
+      });
+    return h('div', {},
+      h('h3', { style: { marginTop: '14px' } }, '继承强化'),
+      rows.length ? h('div', { class: 'grid-list' }, rows)
+        : h('p', { class: 'muted' }, `背包里没有可继承的同部位装备。把已强化装备的等级转给新装备，费用为重新强化的 ${InheritPercent}%，旧装备会被消耗。`));
   }
 
   // ---- Shop ------------------------------------------------------------------------------

@@ -42,7 +42,9 @@ export function compareTable(hero, candidate) {
   const lines = [];
   if (worn && worn.getEnhanceLevel() > candidate.getEnhanceLevel()) {
     const { value, cost } = enhanceProjection(candidate, worn.getEnhanceLevel());
-    lines.push(`把这件也强化到 +${worn.getEnhanceLevel()}：${stat} ${value}（${value >= worn.getValue() ? '不低于' : '仍低于'}当前的 ${worn.getValue()}），共需 ${cost} 金币。强化留在原装备上，不会转移。`);
+    lines.push(`把这件也强化到 +${worn.getEnhanceLevel()}：${stat} ${value}（${value >= worn.getValue() ? '不低于' : '仍低于'}当前的 ${worn.getValue()}），共需 ${cost} 金币。`);
+    const inherit = hero.inheritCost(hero.getSaveBackpack().indexOf(candidate) + 1);
+    if (inherit) lines.push(`也可以在营火「强化」页继承：消耗当前装备，只需 ${inherit} 金币就能把这件升到同等级。`);
   }
   if (worn?.getEffect() && worn.getEffect() !== candidate.getEffect())
     lines.push(`换上后会失去当前的改造效果：${effect(worn)}。数值提升只比较${stat}，不包括改造。`);

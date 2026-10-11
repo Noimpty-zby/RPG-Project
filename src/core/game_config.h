@@ -21,6 +21,8 @@ inline int restCost(int value) { return 60 + chapter(value) * 40; }
 inline int repairCostPerPoint(int price, int tier) {
   return std::max(1, static_cast<int>(static_cast<long long>(std::max(0, price)) * (std::clamp(tier, 0, 3) + 2) / 80));
 }
+// Inheriting a worn item's enhancement costs this share of enhancing anew.
+constexpr int InheritPercent = 30;
 // Enhancing to level n costs the item's price times n: 1x, 2x, ... 5x.
 inline int enhanceCost(int price, int nextLevel) {
   return static_cast<int>(std::min(static_cast<long long>(std::max(0, price)) * std::clamp(nextLevel, 1, MaxEnhanceLevel),

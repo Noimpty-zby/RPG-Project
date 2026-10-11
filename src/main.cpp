@@ -184,6 +184,27 @@ void repairEquipment(player &hero) {
     if (!hero.repairEquipment(index)) std::cout << "未修理：耐久已满、序号无效或金币不足。\n";
   }
 }
+void inheritEnhancement(player &hero) {
+  const auto &items = hero.getSaveBackpack();
+  bool any = false;
+  for (int i = 1; i <= static_cast<int>(items.size()); ++i) {
+    if (!hero.inheritCost(i)) continue;
+    any = true;
+    std::cout << i << ". " << items[i - 1].getDisplayName() << " | " << items[i - 1].getValue() << " → "
+      << hero.inheritValue(i) << " | 费用 " << hero.inheritCost(i) << " 金币\n";
+  }
+  if (!any) {
+    std::cout << "背包里没有可继承的同部位装备（需要能穿、强化等级低于当前装备）。\n";
+    return;
+  }
+  std::cout << "继承会把当前装备的强化等级转给新装备并换上，费用为重新强化的 " << GameConfig::InheritPercent
+    << "%；当前装备会被消耗。物品序号（0返回）：";
+  const int index = readInt();
+  if (index == 0 || !hero.inheritCost(index)) return;
+  const std::string name = items[index - 1].getName();
+  if (!hero.inheritEnhancement(index)) std::cout << "未继承：金币不足。\n";
+  else std::cout << "继承完成：" << name << " 已换上。\n";
+}
 void camp(player &hero, int floor) {
   for (;;) {
     Campaign::printJournal(hero, floor);
@@ -193,7 +214,7 @@ void camp(player &hero, int floor) {
     std::cout << "营地：[1] 休息（本章剩余 " << Campaign::restsRemaining(hero, floor) << " 次，本次 "
       << Campaign::restPrice(hero, floor) << "金币，恢复基础HP的" << (hero.runState().challenge == 1 ? 25 : 40)
       << "%与最大MP的50%） [2] 领取订单 [3] 定向装备目标 [4] 装备改造\n"
-      << "[5] 商店 [6] 技能与专精 [7] 迁移传统存档 [8] 强化装备 [9] 修理装备 [0] 返回\n";
+      << "[5] 商店 [6] 技能与专精 [7] 迁移传统存档 [8] 强化装备 [9] 修理装备 [10] 继承强化 [0] 返回\n";
     const int action = readInt();
     if (action == 0) return;
     if (action == 1 && !Campaign::rest(hero, floor)) {
@@ -215,6 +236,7 @@ void camp(player &hero, int floor) {
     if (action == 6) skills(hero);
     if (action == 8) enhanceEquipment(hero);
     if (action == 9) repairEquipment(hero);
+    if (action == 10) inheritEnhancement(hero);
     if (action == 7) {
       if (!hero.runState().legacyRules) { std::cout << "已经使用章节规则。\n"; continue; }
       std::cout << "迁移将把超额技能阶数转换为有限材料，并按当前进度规范角色成长。建议保留原存档备份。\n[1] 执行迁移 [0] 保留传统存档\n";

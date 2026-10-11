@@ -22,6 +22,8 @@ export const refreshCost = (floor, refreshes) =>
 export const restCost = (floor) => 60 + chapterOf(floor) * 40;
 export const repairCostPerPoint = (price, tier) =>
   Math.max(1, idiv(Math.max(0, price) * (clamp(tier, 0, 3) + 2), 80));
+// Inheriting a worn item's enhancement costs this share of enhancing anew.
+export const InheritPercent = 30;
 export const enhanceCost = (price, nextLevel) =>
   Math.min(Math.max(0, price) * clamp(nextLevel, 1, MaxEnhanceLevel), MaxCoins);
 export const repeatRewardPercent = (attempts) => (attempts <= 1 ? 30 : attempts <= 3 ? 10 : 0);

@@ -2,7 +2,7 @@
 // equipment, durability and skills. The three jobs share one class.
 import { Character } from './character.js';
 import {
-  addCounter, clamp, EnhancePercent, enhanceCost, idiv, IntMax, MaxCoins, MaxCounter,
+  addCounter, clamp, EnhancePercent, enhanceCost, idiv, InheritPercent, IntMax, MaxCoins, MaxCounter,
   MaxEnhanceLevel, MaxLevel, MaxMaterials, floorOf, repairCostPerPoint,
 } from './config.js';
 import { Item, ItemEffect, ItemType, JobReq } from './item.js';
@@ -420,6 +420,59 @@ export class Player extends Character {
     item.setEnhanceLevel(item.getEnhanceLevel() + 1);
     if (item.getType() === ItemType.Weapon) this.attack = addCounter(this.attack, gain);
     else this.max_hp = addCounter(this.max_hp, gain);
+    return true;
+  }
+  // The worn item of the backpack item's slot, if the item could inherit from it.
+  inheritSource(index) {
+    if (index < 1 || index > this.backpack.length) return null;
+    const item = this.backpack[index - 1];
+    if (item.getType() === ItemType.Potion || item.getLevelRequirement() > this.level || item.getDurability() <= 0 ||
+      !this.canWear(item)) return null;
+    return this.equipments.find((worn) => worn.getType() === item.getType() && worn.getEnhanceLevel() > item.getEnhanceLevel()) ?? null;
+  }
+  // Inheriting carries the worn item's enhancement onto a backpack item of the
+  // same slot that the hero can wear: the new item is enhanced to the same
+  // level at InheritPercent of the usual cost and replaces the worn one, which
+  // is consumed. inheritCost is 0 when it is not possible; inheritValue is the
+  // new item's stat afterwards.
+  inheritCost(index) {
+    const worn = this.inheritSource(index);
+    if (!worn) return 0;
+    const item = this.backpack[index - 1];
+    let full = 0;
+    for (let next = item.getEnhanceLevel() + 1; next <= worn.getEnhanceLevel(); ++next) full += enhanceCost(item.getPrice(), next);
+    return clamp(idiv(full * InheritPercent + 99, 100), 1, MaxCoins);
+  }
+  inheritValue(index) {
+    const worn = this.inheritSource(index);
+    if (!worn) return 0;
+    let value = this.backpack[index - 1].getValue();
+    for (let next = this.backpack[index - 1].getEnhanceLevel() + 1; next <= worn.getEnhanceLevel(); ++next)
+      value += Math.max(1, idiv(value * EnhancePercent, 100));
+    return Math.min(value, MaxCounter);
+  }
+  inheritEnhancement(index) {
+    const cost = this.inheritCost(index);
+    const value = this.inheritValue(index);
+    if (cost <= 0 || this.coin < cost || value > 1000000) return false;
+    const levels = this.inheritSource(index).getEnhanceLevel();
+    const selected = this.backpack[index - 1].clone();
+    this.costcoin(cost);
+    if (selected.getQuantity() === 1) this.backpack.splice(index - 1, 1);
+    else this.backpack[index - 1].setQuantity(selected.getQuantity() - 1);
+    selected.setQuantity(1);
+    selected.setValue(value);
+    selected.setEnhanceLevel(levels);
+    const slot = this.equipments.findIndex((worn) => worn.getType() === selected.getType());
+    const worn = this.equipments[slot];
+    // Swap the stat in place; current HP never drops because of the swap.
+    if (selected.getType() === ItemType.Weapon) {
+      this.attack = addCounter(Math.max(0, this.attack - worn.getValue()), value);
+    } else {
+      this.max_hp = addCounter(Math.max(1, this.max_hp - worn.getValue()), value);
+      this.hp = Math.min(this.hp, this.max_hp);
+    }
+    this.equipments[slot] = selected;
     return true;
   }
   repairCost(index) {

@@ -273,6 +273,22 @@ check(warrior.getSkill(3).getPreview(warrior).includes('无视护盾'), 'Shield 
   check(spill.restored === 20 && spill.overflow === 30, 'when every potion overflows, the smallest is used');
 }
 
+// Inheriting enhances the new item to the worn level for 30% of the usual cost
+// and consumes the old item.
+{
+  const hero = new Player('继承测试', Job.Warrior);
+  hero.loadStats(50, 0, 10000, 400, 1000, 100, 1000, 1000, 0, 3);
+  hero.equipItem_T(new Item('旧剑', 1, ItemType.Weapon, 100, 50, 200, 1));
+  for (let i = 0; i < 3; i++) hero.enhanceEquipment(1);
+  const wornValue = hero.getSaveEquipments()[0].getValue();
+  const attack = hero.getattack();
+  hero.addItem(new Item('新剑', 1, ItemType.Weapon, 105, 50, 200, 1));
+  check(hero.inheritCost(1) === 360 && hero.inheritValue(1) === 120, 'inherit cost and value');
+  check(hero.inheritEnhancement(1) && hero.getSaveEquipments()[0].getName() === '新剑' &&
+    hero.getSaveEquipments()[0].getEnhanceLevel() === 3 && hero.getattack() === attack - wornValue + 120 &&
+    hero.getSaveBackpack().length === 0, 'inheritance replaces the worn item and consumes the old one');
+}
+
 // The camp summary names the next hard fight and warns only when that fight
 // is on this floor and the hero lacks half MP or a ready skill.
 {
@@ -300,4 +316,4 @@ if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans, dodged-skill refunds.');
+console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans, dodged-skill refunds, inheritance.');

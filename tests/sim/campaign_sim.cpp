@@ -28,7 +28,11 @@ int potionIndex(const player &hero) {
     if (items[i].getType() == Potion) return static_cast<int>(i + 1);
   return 0;
 }
-void equipUpgrades(player &hero) {
+// Coins a run spends on camp services, for the pacing report.
+struct Spend { long long enhance = 0, repair = 0, rest = 0; };
+// Wear the best item; carry an enhancement over when the inherited item beats
+// it and the fee leaves three quarters of the purse, as for enhancing.
+void equipUpgrades(player &hero, Spend &spend) {
   for (ItemType type : {Weapon, Armor}) {
     int best = -1, value = 0;
     for (const auto &eq : hero.getSaveEquipments()) if (eq.getType() == type) value = eq.getValue();
@@ -41,14 +45,25 @@ void equipUpgrades(player &hero) {
         best = static_cast<int>(i + 1); value = item.getValue();
       }
     }
-    if (best > 0) hero.equipItem(best);
+    int heir = -1;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+      const int index = static_cast<int>(i + 1), cost = hero.inheritCost(index);
+      if (items[i].getType() == type && cost > 0 && static_cast<long long>(cost) * 4 <= hero.getcoin() &&
+          hero.inheritValue(index) > value) {
+        heir = index; value = hero.inheritValue(index);
+      }
+    }
+    if (heir > 0) {
+      spend.enhance += hero.inheritCost(heir);
+      hero.inheritEnhancement(heir);
+    } else if (best > 0) {
+      hero.equipItem(best);
+    }
   }
 }
-// Coins a run spends on camp services, for the pacing report.
-struct Spend { long long enhance = 0, repair = 0, rest = 0; };
 void prepare(player &hero, int floor, int build, Spend &spend) {
   Campaign::claimOrder(hero, floor);
-  equipUpgrades(hero);
+  equipUpgrades(hero, spend);
   for (int slot = 1; slot <= hero.getSkillCount(); ++slot) {
     auto *ability = hero.getSkill(slot);
     if (ability->canUpgrade(hero.getlevel(), hero.getHighestFloor()) &&
@@ -63,7 +78,7 @@ void prepare(player &hero, int floor, int build, Spend &spend) {
     if (stock[slot - 1].getLevelRequirement() <= hero.getlevel() && stock[slot - 1].getValue() > value)
       Campaign::purchase(hero, floor, slot);
   }
-  equipUpgrades(hero);
+  equipUpgrades(hero, spend);
   if (hero.gethp() * 100 < hero.getmaxhp() * 65) {
     if (!potionIndex(hero)) {
       Campaign::purchase(hero, floor, 3); Campaign::purchase(hero, floor, 4);

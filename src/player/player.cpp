@@ -424,6 +424,60 @@ bool player::enhanceEquipment(int index) {
   else max_hp = GameConfig::addCounter(max_hp, gain);
   return true;
 }
+const Item *player::inheritSource(int index) const {
+  if (index < 1 || index > static_cast<int>(backpack.size())) return nullptr;
+  const Item &item = backpack[index - 1];
+  if (item.getType() == Potion || item.getLevelRequirement() > level || item.getDurability() <= 0 ||
+      !canWear(item))
+    return nullptr;
+  for (const Item &worn : equipments)
+    if (worn.getType() == item.getType() && worn.getEnhanceLevel() > item.getEnhanceLevel()) return &worn;
+  return nullptr;
+}
+int player::inheritCost(int index) const {
+  const Item *worn = inheritSource(index);
+  if (!worn) return 0;
+  const Item &item = backpack[index - 1];
+  long long full = 0;
+  for (int next = item.getEnhanceLevel() + 1; next <= worn->getEnhanceLevel(); ++next)
+    full += GameConfig::enhanceCost(item.getPrice(), next);
+  return static_cast<int>(std::clamp((full * GameConfig::InheritPercent + 99) / 100, 1LL,
+                                     static_cast<long long>(GameConfig::MaxCoins)));
+}
+int player::inheritValue(int index) const {
+  const Item *worn = inheritSource(index);
+  if (!worn) return 0;
+  long long value = backpack[index - 1].getValue();
+  for (int next = backpack[index - 1].getEnhanceLevel() + 1; next <= worn->getEnhanceLevel(); ++next)
+    value += max(1LL, value * GameConfig::EnhancePercent / 100);
+  return static_cast<int>(min(value, static_cast<long long>(GameConfig::MaxCounter)));
+}
+bool player::inheritEnhancement(int index) {
+  const int cost = inheritCost(index);
+  const int value = inheritValue(index);
+  if (cost <= 0 || coin < cost || value > 1000000) return false;
+  const int levels = inheritSource(index)->getEnhanceLevel();
+  Item selected = backpack[index - 1];
+  costcoin(cost);
+  if (selected.getQuantity() == 1) backpack.erase(backpack.begin() + index - 1);
+  else backpack[index - 1].setQuantity(selected.getQuantity() - 1);
+  selected.setQuantity(1);
+  selected.setValue(value);
+  selected.setEnhanceLevel(levels);
+  for (Item &worn : equipments) {
+    if (worn.getType() != selected.getType()) continue;
+    // Swap the stat in place; current HP never drops because of the swap.
+    if (selected.getType() == Weapon) {
+      attack = GameConfig::addCounter(max(0, attack - worn.getValue()), value);
+    } else {
+      max_hp = GameConfig::addCounter(max(1, max_hp - worn.getValue()), value);
+      hp = min(hp, max_hp);
+    }
+    worn = selected;
+    break;
+  }
+  return true;
+}
 int player::repairCost(int index) const {
   if (index < 1 || index > static_cast<int>(equipments.size())) return 0;
   const Item &item = equipments[index - 1];
