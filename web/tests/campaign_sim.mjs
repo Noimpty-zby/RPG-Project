@@ -6,6 +6,7 @@ import { Intent } from '../js/rules/enemy.js';
 import { ItemEffect, ItemType, JobReq } from '../js/rules/item.js';
 import { Job } from '../js/rules/jobs.js';
 import { Player } from '../js/rules/player.js';
+import * as Exploration from '../js/rules/exploration.js';
 import { restCost } from '../js/rules/config.js';
 
 function equipUpgrades(hero) {
@@ -27,8 +28,71 @@ function equipUpgrades(hero) {
   }
 }
 
+export const options = { exploring: true };
+// Both policies explore every floor on arrival like a careful player: take
+// everything free, solve the puzzle, open vaults when keys allow, pay for a
+// curio's sure result only when it is cheap, and skip gambles at low health.
+function explore(hero, floor, spend) {
+  const { SpotKind } = Exploration;
+  if (!options.exploring) return;
+  const run = hero.runState();
+  for (const view of Exploration.survey(hero, floor)) {
+    const index = view.index;
+    const healthy = hero.gethp() * 100 >= hero.getmaxhp() * 60;
+    switch (view.spot.kind) {
+      case SpotKind.Puzzle:
+        if (!view.done) Exploration.solvePuzzle(hero, floor, Exploration.puzzleSolution(run.seed, floor));
+        break;
+      case SpotKind.Merchant: {
+        const goods = Exploration.merchantGoods(hero, floor);
+        for (let i = 0; i < goods.length; ++i) {
+          const good = goods[i];
+          const coins = hero.getcoin();
+          const wanted = good.kind === 1 ? run.keys < 2 && coins >= good.price * 4 : coins >= good.price * 8;
+          if (!good.sold && wanted && Exploration.interact(hero, floor, index, i + 1).ok)
+            spend.merchant += coins - hero.getcoin();
+        }
+        break;
+      }
+      case SpotKind.Curio: {
+        if (view.done) break;
+        const list = Exploration.options(hero, floor, index);
+        const variant = view.spot.variant;
+        let choice = 1;
+        if (list.length === 2 && list[1].available &&
+          ((variant === 0 && run.materials >= 6) ||
+            (variant === 1 && hero.getcoin() >= restCost(floor) * 5) ||
+            (variant === 2 && hero.getmp() * 100 >= hero.getmaxmp() * 80)))
+          choice = 2;
+        if (choice === 2 || healthy) Exploration.interact(hero, floor, index, choice);
+        break;
+      }
+      case SpotKind.AffixSource:
+        if (!view.done) Exploration.interact(hero, floor, index, run.materials >= 4 ? 2 : healthy ? 1 : 0);
+        break;
+      case SpotKind.Vault:
+        if (!view.done && run.keys >= view.spot.variant) Exploration.interact(hero, floor, index, 1);
+        break;
+      default:
+        if (!view.done) Exploration.interact(hero, floor, index, 1);
+        break;
+    }
+  }
+}
+// Cook a blessing before an elite or boss, or when ingredients pile up.
+function cook(hero, floor) {
+  if (!options.exploring) return;
+  const run = hero.runState();
+  const total = run.ingredients.reduce((sum, count) => sum + count, 0);
+  const major = floor % 10 === 0 || Campaign.isEliteFloor(floor);
+  if (run.boon === 0 && (major || total >= 8))
+    for (const recipe of [5, 1, 3, 2, 4, 6])
+      if (Exploration.cook(hero, recipe).ok) break;
+}
+
 function prepare(hero, floor, build, spend) {
   Campaign.claimOrder(hero, floor);
+  cook(hero, floor);
   equipUpgrades(hero);
   for (let slot = 1; slot <= hero.getSkillCount(); ++slot) {
     const ability = hero.getSkill(slot);
@@ -114,12 +178,13 @@ export function run(job, seed, route, challenge, aware) {
   let floor = 1;
   let timeouts = 0;
   let objectiveWins = 0;
-  const spend = { enhance: 0, repair: 0, rest: 0 };
+  const spend = { enhance: 0, repair: 0, rest: 0, merchant: 0 };
   for (; floor <= 100; ++floor) {
     hero.setHighestFloor(floor);
     Campaign.chooseRoute(hero, floor, route);
     if (Campaign.eventPending(hero, floor))
       Campaign.resolveEvent(hero, floor, hero.getcoin() >= restCost(floor) ? 1 : 2);
+    explore(hero, floor, spend);
     let won = false;
     for (let retry = 0; retry < 3 && !won; ++retry) {
       prepare(hero, floor, (seed % 2) + 1, spend);
@@ -145,12 +210,13 @@ export function run(job, seed, route, challenge, aware) {
   }
   const r = hero.runState();
   return { floor, level: hero.getlevel(), coins: hero.getcoin(), turns: r.turns, potions: r.potionsUsed,
-    deaths: r.deaths, upgrades: r.usefulDrops, drought: r.longestGearDrought, timeouts, objectiveWins };
+    deaths: r.deaths, upgrades: r.usefulDrops, drought: r.longestGearDrought, timeouts, objectiveWins,
+    explored: r.spotsExplored };
 }
 
 export function campaignCsv(seeds = 24) {
   const names = ['Warrior', 'Mage', 'Assassin'];
-  let csv = 'job,seed,route,challenge,policy,ending_floor,level,coins,turns,potions,deaths,gear_upgrades,longest_drought,timeouts,objective_wins\n';
+  let csv = 'job,seed,route,challenge,policy,ending_floor,level,coins,turns,potions,deaths,gear_upgrades,longest_drought,timeouts,objective_wins,explored\n';
   for (let job = 0; job < 3; ++job)
     for (let seed = 1; seed <= seeds; ++seed)
       for (let route = 1; route <= 3; ++route)
@@ -158,12 +224,13 @@ export function campaignCsv(seeds = 24) {
           for (let aware = 0; aware < 2; ++aware) {
             const r = run(job, seed, route, challenge, aware !== 0);
             csv += [names[job], seed, route, challenge, aware ? 'aware' : 'fixed', r.floor, r.level, r.coins, r.turns,
-              r.potions, r.deaths, r.upgrades, r.drought, r.timeouts, r.objectiveWins].join(',') + '\n';
+              r.potions, r.deaths, r.upgrades, r.drought, r.timeouts, r.objectiveWins, r.explored].join(',') + '\n';
           }
   return csv;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const index = process.argv.indexOf('--seeds');
+  if (process.argv.includes('--no-explore')) options.exploring = false;
   process.stdout.write(campaignCsv(index > 0 ? Number(process.argv[index + 1]) : 24));
 }

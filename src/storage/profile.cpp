@@ -1,5 +1,6 @@
 #include "storage/profile.h"
 #include "core/game_config.h"
+#include "game/exploration.h"
 #include "player/player.h"
 #include "player/skills.h"
 #include "storage/save.h"
@@ -92,6 +93,12 @@ const vector<AchievementInfo> &Profile::achievements() {
       {"affix_scholar", "词缀学者", "遭遇全部7种敌人词缀"},
       {"collector", "博物学家", "在图鉴中发现全部50种敌人"},
       {"all_jobs", "三职业远征", "用战士、法师、刺客分别击败第10层Boss"},
+      {"explorer", "足迹遍布", "单次远征探索300处地点"},
+      {"vault_hunter", "宝库猎人", "单次远征打开10座宝库"},
+      {"puzzle_master", "解谜大师", "单次远征解开全部10个章节谜题"},
+      {"gourmet", "远征厨师", "单次远征做20次料理"},
+      {"lore_keeper", "见闻初录", "收集10页见闻录"},
+      {"lore_complete", "百层见闻", "收集全部100页见闻录"},
   };
   return list;
 }
@@ -182,6 +189,10 @@ Profile Profile::parse(const string &text) {
       if (value.empty() || value.size() > 64 || value.find_first_of(" |") != string::npos)
         throw runtime_error("成就键无效");
       profile.unlockedKeys.insert(value); // Unknown keys survive for newer builds.
+    } else if (key == "LORE") {
+      if (value.size() != profile.lorePages.size() || value.find_first_not_of("01") != string::npos)
+        throw runtime_error("见闻录记录无效");
+      for (size_t i = 0; i < value.size(); ++i) profile.lorePages[i] = value[i] == '1';
     } else if (key == "RECORD") {
       const auto fields = splitFields(value, '|', 12);
       if (fields.size() != 12) throw runtime_error("记录字段数量错误");
@@ -223,6 +234,11 @@ string Profile::serialize() const {
   for (int id = 0; id < AffixCount; ++id)
     if (affixes[id] > 0) output << "AFFIX " << id << ' ' << affixes[id] << '\n';
   for (const auto &key : unlockedKeys) output << "ACHIEVEMENT " << key << '\n';
+  if (loreCount()) {
+    output << "LORE ";
+    for (bool found : lorePages) output << (found ? '1' : '0');
+    output << '\n';
+  }
   for (const auto &record : runRecords)
     output << "RECORD " << record.date << '|' << record.job << '|' << record.challenge << '|'
            << (record.cleared ? 1 : 0) << '|' << record.floor << '|' << record.level << '|'
@@ -301,6 +317,12 @@ vector<const AchievementInfo *> Profile::checkAchievements(const player &hero,
     if (key == "affix_scholar") return affixesDiscovered() == AffixCount;
     if (key == "collector") return discovered() == Bestiary::EntryCount;
     if (key == "all_jobs") return chapterOneJobs == 7;
+    if (key == "explorer") return run.spotsExplored >= 300;
+    if (key == "vault_hunter") return run.vaultsOpened >= 10;
+    if (key == "puzzle_master") return run.puzzlesSolved >= 10;
+    if (key == "gourmet") return run.mealsCooked >= 20;
+    if (key == "lore_keeper") return loreCount() >= 10;
+    if (key == "lore_complete") return loreCount() == static_cast<int>(lorePages.size());
     return false;
   };
   vector<const AchievementInfo *> unlockedNow;
@@ -310,6 +332,18 @@ vector<const AchievementInfo *> Profile::checkAchievements(const player &hero,
       unlockedNow.push_back(&achievement);
     }
   return unlockedNow;
+}
+
+bool Profile::recordLore(int page) {
+  if (page < 1 || page > static_cast<int>(lorePages.size()) || lorePages[page - 1]) return false;
+  lorePages[page - 1] = true;
+  return true;
+}
+bool Profile::loreFound(int page) const {
+  return page >= 1 && page <= static_cast<int>(lorePages.size()) && lorePages[page - 1];
+}
+int Profile::loreCount() const {
+  return static_cast<int>(count(lorePages.begin(), lorePages.end(), true));
 }
 
 const Profile::BestiaryEntry &Profile::entry(int id) const {
@@ -368,6 +402,27 @@ void Profile::printAchievements() const {
   for (const auto &achievement : achievements())
     cout << (unlocked(achievement.key) ? "【已解锁】" : "【未解锁】") << achievement.title
          << "：" << achievement.description << '\n';
+}
+void Profile::printLoreOverview() const {
+  cout << "见闻录：已收集 " << loreCount() << "/" << lorePages.size()
+       << "（每层一页，藏在地图的隐秘处）\n";
+  for (int chapter = 0; chapter < 10; ++chapter) {
+    int found = 0;
+    for (int page = chapter * 10 + 1; page <= chapter * 10 + 10; ++page) found += loreFound(page);
+    cout << "  [" << chapter + 1 << "] 第" << chapter + 1 << "章 " << found << "/10\n";
+  }
+}
+void Profile::printLoreChapter(int chapter) const {
+  chapter = clamp(chapter, 0, 9);
+  cout << "—— 第" << chapter + 1 << "章见闻 ——\n";
+  for (int page = chapter * 10 + 1; page <= chapter * 10 + 10; ++page) {
+    if (!loreFound(page)) {
+      cout << "· 第" << page << "页：？？？（第" << page << "层）\n";
+      continue;
+    }
+    cout << "· 第" << page << "页 " << Exploration::loreTitle(page) << "\n    "
+         << Exploration::loreText(page) << '\n';
+  }
 }
 void Profile::printRecords() const {
   if (runRecords.empty()) {

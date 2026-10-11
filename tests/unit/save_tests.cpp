@@ -135,7 +135,7 @@ void roundTrip(player &hero, Fixture &fixture) {
   }
   require(SaveSystem::saveGame(hero, 40, fixture.name()), "save succeeds");
   const auto original = fixture.read();
-  require(original.find("VERSION 4\n") != std::string::npos, "save version");
+  require(original.find("VERSION 5\n") != std::string::npos, "save version");
   fixture.write(reorderSkills(original));
   int floor = -99;
   auto restored = SaveSystem::loadGame(floor, fixture.name());
@@ -266,9 +266,25 @@ void legacyRetreat(Fixture &fixture) {
           restored->runState().attempts[100] == 1, "completed v2 tower retains final clear");
 }
 
-// V3 item lines lack the durability cap; loading uses current durability as the cap.
-std::string version3(const std::string &modern) {
+const std::vector<std::string> explorationKeys{
+    "EXPLORED ", "KEYS ", "INGREDIENTS ", "BOON ", "BANE ", "QUEST_ITEMS ", "SPOTS_EXPLORED ",
+    "VAULTS_OPENED ", "PUZZLES_SOLVED ", "MEALS_COOKED "};
+// V4 has no exploration lines.
+std::string version4(const std::string &modern) {
   std::istringstream input(modern);
+  std::string line, output;
+  while (std::getline(input, line)) {
+    if (line == "VERSION 5") line = "VERSION 4";
+    if (std::any_of(explorationKeys.begin(), explorationKeys.end(),
+                    [&](const std::string &key) { return line.rfind(key, 0) == 0; }))
+      continue;
+    output += line + "\n";
+  }
+  return output;
+}
+// V3 item lines also lack the durability cap; loading uses current durability as the cap.
+std::string version3(const std::string &modern) {
+  std::istringstream input(version4(modern));
   std::string line, output;
   while (std::getline(input, line)) {
     if (line == "VERSION 4") line = "VERSION 3";
@@ -295,7 +311,20 @@ void version3Saves(Fixture &fixture) {
   require(weapon.getDurability() == 12 && weapon.getMaxDurability() == 12 && weapon.getEnhanceLevel() == 0,
           "v3 items take their current durability as the cap and no enhancement");
   require(SaveSystem::saveGame(*restored, floor, fixture.name()) &&
-          fixture.read().find("VERSION 4\n") != std::string::npos, "v3 saves upgrade to v4 when saved");
+          fixture.read().find("VERSION 5\n") != std::string::npos, "v3 saves upgrade to v5 when saved");
+  const auto current = fixture.read();
+  fixture.write(version4(current));
+  restored = SaveSystem::loadGame(floor, fixture.name());
+  require(restored && restored->runState().spotsExplored == 0 && restored->runState().keys == 0,
+          "v4 saves load without exploration progress");
+  require(SaveSystem::saveGame(*restored, floor, fixture.name()) && fixture.read() == current,
+          "v4 saves upgrade to the same v5 save");
+  for (const auto &key : explorationKeys) {
+    fixture.write(replaceLine(current, key, ""));
+    require(!SaveSystem::loadGame(floor, fixture.name()), "v5 requires " + key);
+  }
+  fixture.write(replaceLine(version4(current), "VERSION ", "VERSION 4\nKEYS 0"));
+  require(!SaveSystem::loadGame(floor, fixture.name()), "v4 cannot carry exploration fields");
 }
 
 void corruptSaves(Fixture &fixture) {
@@ -472,6 +501,6 @@ int main() {
     std::cerr << "Save tests FAILED: " << failure << "\n" << gameLog.str();
     return 1;
   }
-  std::cout << "Save tests passed: all classes, V3 upgrade, legacy migration, skill order, HP, malformed saves.\n";
+  std::cout << "Save tests passed: all classes, V3/V4 upgrade, legacy migration, skill order, HP, malformed saves.\n";
   return 0;
 }

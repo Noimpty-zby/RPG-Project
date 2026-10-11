@@ -11,6 +11,7 @@ import { Profile, Achievements } from '../js/rules/profile.js';
 import { deserializeGame, serializeGame } from '../js/rules/save.js';
 import { Item, ItemType } from '../js/rules/item.js';
 import { HelpTopics } from '../js/rules/help.js';
+import * as Exploration from '../js/rules/exploration.js';
 import { choose } from './campaign_sim.mjs';
 
 let failures = 0;
@@ -111,7 +112,7 @@ check(parsed.discovered() === profile.discovered() && parsed.discovered() > 0, '
 for (let i = 0; i < 25; i++) parsed.addRecord({ ...parsed.records()[0], floor: 30 + i });
 check(parsed.records().length === 20, 'records keep the newest 20');
 try {
-  Profile.parse({ version: 2 });
+  Profile.parse({ version: 3 });
   check(false, 'newer profile must be refused');
 } catch (error) {
   check(error.newer === true, 'newer profile is flagged, not treated as corrupt');
@@ -125,7 +126,7 @@ for (const bad of [{}, { version: 1, bestiary: [{ id: 0, seen: 1, won: 2, firstF
     // Expected.
   }
 }
-check(Achievements.length === 17, '17 achievements');
+check(Achievements.length === 23, '23 achievements');
 
 // Interrupt texts must match what the enemy then does: ordinary fights and
 // bosses rest, scarce-supply and elite fights do not.
@@ -277,8 +278,79 @@ check(warrior.getSkill(3).getPreview(warrior).includes('无视护盾'), 'Shield 
 }
 check(HelpTopics.every((topic) => topic.lines().length > 0), 'help pages render');
 
+// Exploration in saves: version 2 keeps every record; version 1 saves load
+// without exploration; contradictory records are rejected whole.
+{
+  const hero = new Player('探索存档', Job.Mage);
+  Campaign.initialize(hero, 4321, 0);
+  hero.setHighestFloor(20);
+  collect(() => {
+    for (let floor = 1; floor <= 20; floor++)
+      for (const view of Exploration.survey(hero, floor))
+        if (!view.done && view.spot.kind !== Exploration.SpotKind.Puzzle) Exploration.interact(hero, floor, view.index, 1);
+  });
+  hero.runState().boon = 3;
+  const data = serializeGame(hero, 20);
+  check(data.version === 2, 'saves are version 2');
+  const { hero: loaded } = deserializeGame(clone(data));
+  const fields = ['explored', 'keys', 'ingredients', 'boon', 'bane', 'questItems', 'spotsExplored', 'vaultsOpened',
+    'puzzlesSolved', 'mealsCooked'];
+  check(fields.every((f) => JSON.stringify(loaded.runState()[f]) === JSON.stringify(hero.runState()[f])),
+    'exploration round trips');
+  check(hero.runState().spotsExplored > 50, 'twenty floors hold many spots');
+  const v1 = clone(data);
+  v1.version = 1;
+  for (const f of fields) delete v1.run[f];
+  const old = deserializeGame(v1).hero.runState();
+  check(old.spotsExplored === 0 && old.keys === 0 && old.explored.every((m) => m === 0), 'version 1 saves load without exploration');
+  const v1extra = clone(v1);
+  v1extra.run.keys = 1;
+  rejects(v1extra, 'version 1 with exploration fields');
+  for (const f of fields) {
+    const missing = clone(data);
+    delete missing.run[f];
+    rejects(missing, `version 2 without ${f}`);
+  }
+  const mutate = (fn, message) => { const bad = clone(data); fn(bad.run); rejects(bad, message); };
+  mutate((r) => { r.explored[1] |= 1 << 15; }, 'spot bits beyond the floor');
+  mutate((r) => { r.explored[21] = 1; }, 'records above the highest floor');
+  mutate((r) => { r.spotsExplored += 1; }, 'explored counter mismatch');
+  mutate((r) => { r.vaultsOpened += 1; }, 'vault counter mismatch');
+  mutate((r) => { r.questItems = new Array(10).fill(0); r.questItems[0] = 3; }, 'quest mismatch');
+  mutate((r) => { r.keys = 100; }, 'too many keys');
+  mutate((r) => { r.boon = 5; }, 'unknown boon');
+  mutate((r) => { r.ingredients = [0, 0, 0]; }, 'short ingredient list');
+  const plain = Array.from({ length: 20 }, (_, i) => i + 1)
+    .find((f) => !Exploration.generate(4321, f).some((s) => s.kind === Exploration.SpotKind.Merchant));
+  mutate((r) => { r.explored[plain] |= 1 << Exploration.MerchantBit; }, 'goods without a merchant');
+}
+
+// Journal pages live in the profile: recorded once, round trip, malformed data refused.
+{
+  const profile = Profile.parse({ version: 1 });
+  check(profile.loreCount() === 0 && profile.recordLore(37) && !profile.recordLore(37) && !profile.recordLore(101),
+    'pages are recorded once');
+  const copy = Profile.parse(JSON.parse(JSON.stringify(profile.serialize())));
+  check(copy.loreFound(37) && copy.loreCount() === 1, 'pages round trip');
+  for (const lore of ['01', '2'.repeat(100), 7]) {
+    try {
+      Profile.parse({ version: 2, lore });
+      check(false, 'malformed journal accepted');
+    } catch {
+      // Expected.
+    }
+  }
+  const hero = new Player('成就', Job.Warrior);
+  Campaign.initialize(hero, 1, 0);
+  Object.assign(hero.runState(), { spotsExplored: 300, vaultsOpened: 10, puzzlesSolved: 10, mealsCooked: 20 });
+  for (let page = 1; page <= 10; page++) profile.recordLore(page);
+  profile.checkAchievements(hero);
+  check(['explorer', 'vault_hunter', 'puzzle_master', 'gourmet', 'lore_keeper'].every((k) => profile.unlocked(k)) &&
+    !profile.unlocked('lore_complete'), 'exploration achievements');
+}
+
 if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans.');
+console.log('Rules tests passed: save round trips and validation, exploration saves, journal pages, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans.');

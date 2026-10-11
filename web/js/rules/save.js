@@ -1,12 +1,17 @@
-// Browser save format (JSON). Mirrors the content of the C++ VERSION 4 save
+// Browser save format (JSON). Mirrors the content of the C++ VERSION 5 save
 // and its validation: malformed or contradictory data is rejected whole.
-import { MaxCoins, MaxCounter, MaxMaterials, MaxRestsPerChapter, skillRankCap } from './config.js';
+// Version 2 adds exploration; version 1 saves load with none.
+import { chapterOf, MaxCoins, MaxCounter, MaxMaterials, MaxRestsPerChapter, skillRankCap } from './config.js';
+import * as Exploration from './exploration.js';
 import { Item, ItemType } from './item.js';
 import { JobProfiles, jobFromKey } from './jobs.js';
 import { Player, validItem } from './player.js';
 import { newRunState } from './run_state.js';
 
-export const SaveVersion = 1;
+export const SaveVersion = 2;
+const ExplorationFields = ['explored', 'keys', 'ingredients', 'boon', 'bane', 'questItems', 'spotsExplored',
+  'vaultsOpened', 'puzzlesSolved', 'mealsCooked'];
+const MaxExploredMask = (1 << (Exploration.MerchantBit + Exploration.MerchantGoods)) - 1;
 
 function itemData(item) {
   return {
@@ -56,6 +61,47 @@ function validateRun(run, highestFloor) {
     require(!(floor > highestFloor && (run.cleared[floor] || run.attempts[floor])), '楼层记录超出最高楼层');
   }
   require(run.longestGearDrought >= run.gearDrought, '装备空窗统计矛盾');
+  validateExploration(run, highestFloor);
+}
+// Exploration records must match the spots each floor actually holds, and the
+// counters must agree with them.
+function validateExploration(run, highestFloor) {
+  require(isInt(run.keys, 0, Exploration.MaxKeys), '钥匙');
+  require(isInt(run.boon, 0, Exploration.BoonCount), '祝福');
+  require(isInt(run.bane, 0, Exploration.BaneCount), '诅咒');
+  for (const [field, length, maximum] of [['ingredients', 5, Exploration.MaxIngredients],
+    ['questItems', 10, Exploration.QuestItemsPerChapter], ['explored', 101, MaxExploredMask]]) {
+    require(Array.isArray(run[field]) && run[field].length === length, `${field} 长度无效`);
+    require(run[field].every((value) => isInt(value, 0, maximum)), `${field} 数值无效`);
+  }
+  for (const field of ['spotsExplored', 'vaultsOpened', 'puzzlesSolved', 'mealsCooked'])
+    require(isInt(run[field], 0, MaxCounter), '探索统计');
+  require(run.explored[0] === 0, '楼层数组第0项必须为空');
+  let found = 0;
+  let vaults = 0;
+  let puzzles = 0;
+  const quests = new Array(10).fill(0);
+  for (let floor = 1; floor <= 100; ++floor) {
+    const mask = run.explored[floor];
+    if (!mask) continue;
+    require(floor <= highestFloor, '探索记录超出最高楼层');
+    const spots = Exploration.generate(run.seed, floor);
+    const spotBits = mask & ((1 << Exploration.MerchantBit) - 1);
+    const goodsBits = mask >> Exploration.MerchantBit;
+    require((spotBits >> spots.length) === 0, '探索记录与楼层内容不符');
+    const merchant = spots.map((s) => s.kind).lastIndexOf(Exploration.SpotKind.Merchant);
+    require(!(goodsBits && merchant < 0), '该楼层没有商人');
+    require(merchant < 0 || (((spotBits >> merchant) & 1) !== 0) === (goodsBits !== 0), '商人记录矛盾');
+    spots.forEach((spot, i) => {
+      if (!((spotBits >> i) & 1)) return;
+      ++found;
+      if (spot.kind === Exploration.SpotKind.Vault) ++vaults;
+      if (spot.kind === Exploration.SpotKind.Puzzle) ++puzzles;
+      if (spot.kind === Exploration.SpotKind.QuestItem) ++quests[chapterOf(floor)];
+    });
+  }
+  require(found === run.spotsExplored && vaults === run.vaultsOpened && puzzles === run.puzzlesSolved, '探索统计与记录矛盾');
+  require(quests.every((count, c) => count === run.questItems[c]), '同伴遗物记录矛盾');
 }
 
 export function serializeGame(hero, floor, extra = {}) {
@@ -89,6 +135,9 @@ export function deserializeGame(data) {
   require(isInt(h.attack, 0, MaxCounter) && isInt(h.maxMp, 0, MaxCounter) && isInt(h.mp, 0, h.maxMp), '攻击或魔力无效');
   require(isInt(h.critRate, 0, 100) && isInt(h.freeRevives, 0, 3), '暴击或复苏次数无效');
   require(isInt(h.highestFloor, 1, 100) && isInt(data.floor, 1, 100) && data.floor <= h.highestFloor, '楼层无效');
+  require(data.run && typeof data.run === 'object', '缺少章节数据');
+  for (const field of ExplorationFields)
+    require((field in data.run) === (data.version >= 2), data.version >= 2 ? `缺少探索字段: ${field}` : `旧版本包含探索字段: ${field}`);
   const run = { ...newRunState(), ...data.run };
   validateRun(run, h.highestFloor);
   const hero = new Player(h.name, job);

@@ -1,5 +1,6 @@
 #include "game/campaign.h"
 #include "core/game_config.h"
+#include "game/exploration.h"
 #include "core/random.h"
 #include "player/skills.h"
 #include <algorithm>
@@ -149,7 +150,7 @@ EncounterRules rulesFor(const player &hero, int floor) {
   rules.targetTurns = 3 + c / 4;
   return rules;
 }
-enemy makeEnemy(const player &hero, int floor) {
+enemy makeEnemy(const player &hero, int floor, std::vector<std::string> *notes) {
   if (!validFloor(floor)) throw std::out_of_range("floor must be 1..100");
   seedStream(hero, floor, 10 + static_cast<unsigned>(hero.runState().attempts[floor]));
   const auto rules = rulesFor(hero, floor);
@@ -172,6 +173,7 @@ enemy makeEnemy(const player &hero, int floor) {
     if (event == 1 && type == 0) monster.resetattack(std::max(1, monster.getattack() * 90 / 100));
     if (event == 2 && type == 2) monster.resetattack(std::max(1, monster.getattack() * 110 / 100));
   }
+  Exploration::applyToEncounter(hero, floor, monster, notes);
   return monster;
 }
 bool eventPending(const player &hero, int floor) {
@@ -347,6 +349,7 @@ bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int fl
   run.damageTaken = GameConfig::addCounter(run.damageTaken, report.damageTaken);
   run.attempts[floor] = GameConfig::addCounter(run.attempts[floor], 1);
   hero.finishEncounterWear();
+  Exploration::finishEncounter(hero);
   if (!battle.won()) {
     if (!hero.isalive()) run.deaths = GameConfig::addCounter(run.deaths, 1);
     return false;
@@ -381,6 +384,7 @@ bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int fl
   run.longestGearDrought = std::max(run.longestGearDrought, run.gearDrought);
   return true;
 }
+void grantItem(player &hero, const Item &item) { giveItem(hero, item); }
 bool revive(player &hero, bool useFree) {
   auto &run = hero.runState();
   if (run.challenge == 2 || hero.isalive()) return false;
@@ -432,6 +436,7 @@ void printJournal(const player &hero, int floor) {
   }
   std::cout << "；第" << (c + 1) * 10 << "层击败Boss。\n"
     << eventOutcome(eventType(floor), run.events[c]) << "。\n";
+  std::cout << Exploration::chapterSummary(hero, floor) << '\n';
   if (c > 0 && run.events[c - 1] == 1)
     std::cout << "来自" << chapter(floor - 10).ally << "的信：上一章的合作已经记入远征日志，效果限于当地。\n";
 }

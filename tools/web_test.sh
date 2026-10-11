@@ -7,7 +7,8 @@ output=build-web
 mkdir -p "$output"
 compiler="${CXX:-g++}"
 sources=(src/core/random.cpp src/character/character.cpp src/player/player.cpp src/player/jobs.cpp src/player/skills.cpp
-         src/enemy/enemy.cpp src/item/item.cpp src/game/campaign.cpp src/game/combat.cpp src/game/world.cpp
+         src/enemy/enemy.cpp src/item/item.cpp src/game/campaign.cpp src/game/combat.cpp src/game/world.cpp src/game/exploration.cpp
+         src/game/exploration_text.cpp
          src/storage/save.cpp src/storage/profile.cpp src/ui/help.cpp)
 "$compiler" -std=c++17 -O2 -Isrc "${sources[@]}" tests/sim/campaign_sim.cpp -o "$output/campaign_sim"
 "$output/campaign_sim" > "$output/campaign-reference.csv"

@@ -1,5 +1,6 @@
 #include "core/game_config.h"
 #include "game/campaign.h"
+#include "game/exploration.h"
 #include "player/jobs.h"
 #include "player/skills.h"
 #include <algorithm>
@@ -45,9 +46,73 @@ void equipUpgrades(player &hero) {
   }
 }
 // Coins a run spends on camp services, for the pacing report.
-struct Spend { long long enhance = 0, repair = 0, rest = 0; };
+struct Spend { long long enhance = 0, repair = 0, rest = 0, merchant = 0; };
+bool exploring = true;
+// Both policies explore every floor on arrival like a careful player: take
+// everything free, solve the puzzle, open vaults when keys allow, pay for a
+// curio's sure result only when it is cheap, and skip gambles at low health.
+void explore(player &hero, int floor, Spend &spend) {
+  using Exploration::SpotKind;
+  if (!exploring) return;
+  auto &run = hero.runState();
+  for (const auto &view : Exploration::survey(hero, floor)) {
+    const int index = view.index;
+    const bool healthy = hero.gethp() * 100 >= hero.getmaxhp() * 60;
+    switch (view.spot.kind) {
+    case SpotKind::Puzzle:
+      if (!view.done) Exploration::solvePuzzle(hero, floor, Exploration::puzzleSolution(run.seed, floor));
+      break;
+    case SpotKind::Merchant: {
+      const auto goods = Exploration::merchantGoods(hero, floor);
+      for (std::size_t i = 0; i < goods.size(); ++i) {
+        const auto &good = goods[i];
+        const int coins = hero.getcoin();
+        const bool wanted = good.kind == 1 ? run.keys < 2 && coins >= good.price * 4
+                                           : coins >= good.price * 8;
+        if (!good.sold && wanted && Exploration::interact(hero, floor, index, static_cast<int>(i) + 1).ok)
+          spend.merchant += coins - hero.getcoin();
+      }
+      break;
+    }
+    case SpotKind::Curio: {
+      if (view.done) break;
+      const auto list = Exploration::options(hero, floor, index);
+      const int variant = view.spot.variant;
+      int choice = 1;
+      if (list.size() == 2 && list[1].available &&
+          ((variant == 0 && run.materials >= 6) ||
+           (variant == 1 && hero.getcoin() >= GameConfig::restCost(floor) * 5) ||
+           (variant == 2 && hero.getmp() * 100 >= hero.getmaxmp() * 80)))
+        choice = 2;
+      if (choice == 2 || healthy) Exploration::interact(hero, floor, index, choice);
+      break;
+    }
+    case SpotKind::AffixSource:
+      if (!view.done) Exploration::interact(hero, floor, index, run.materials >= 4 ? 2 : (healthy ? 1 : 0));
+      break;
+    case SpotKind::Vault:
+      if (!view.done && run.keys >= view.spot.variant) Exploration::interact(hero, floor, index, 1);
+      break;
+    default:
+      if (!view.done) Exploration::interact(hero, floor, index, 1);
+      break;
+    }
+  }
+}
+// Cook a blessing before an elite or boss, or when ingredients pile up.
+void cook(player &hero, int floor) {
+  if (!exploring) return;
+  auto &run = hero.runState();
+  int total = 0;
+  for (int count : run.ingredients) total += count;
+  const bool major = floor % 10 == 0 || Campaign::isEliteFloor(floor);
+  if (run.boon == 0 && (major || total >= 8))
+    for (int recipe : {5, 1, 3, 2, 4, 6})
+      if (Exploration::cook(hero, recipe).ok) break;
+}
 void prepare(player &hero, int floor, int build, Spend &spend) {
   Campaign::claimOrder(hero, floor);
+  cook(hero, floor);
   equipUpgrades(hero);
   for (int slot = 1; slot <= hero.getSkillCount(); ++slot) {
     auto *ability = hero.getSkill(slot);
@@ -131,12 +196,13 @@ BattleAction choose(player &hero, enemy &monster, BattleSession &battle, bool aw
   }
   return {ActionType::Attack};
 }
-struct Result { int floor, level, coins, turns, potions, deaths, upgrades, drought, timeouts, objectiveWins; };
+struct Result { int floor, level, coins, turns, potions, deaths, upgrades, drought, timeouts, objectiveWins, explored; };
 // Standard-mode pacing per class, for --report.
 struct Pacing {
   long long ordinaryFights = 0, ordinaryTurns = 0, ordinaryDamagePercent = 0;
   long long eliteAttempts = 0, eliteWins = 0, eliteTurns = 0;
   long long enhanceCoins = 0, repairCoins = 0, restCoins = 0, endCoins = 0, runs = 0;
+  long long explored = 0, vaults = 0, puzzles = 0, meals = 0, merchantCoins = 0, keysLeft = 0;
   std::array<std::array<int, 2>, 10> bossFirstAttempts{}; // {wins, attempts} per chapter
 };
 std::array<Pacing, 3> pacing{};
@@ -154,6 +220,7 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
     Campaign::chooseRoute(*hero, floor, route);
     if (Campaign::eventPending(*hero, floor))
       Campaign::resolveEvent(*hero, floor, hero->getcoin() >= GameConfig::restCost(floor) ? 1 : 2);
+    explore(*hero, floor, spend);
     bool won = false;
     for (int retry = 0; retry < 3 && !won; ++retry) {
       prepare(*hero, floor, seed % 2 + 1, spend);
@@ -197,16 +264,24 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
     stats.restCoins += spend.rest;
     stats.endCoins += hero->getcoin();
     ++stats.runs;
+    const auto &r = hero->runState();
+    stats.explored += r.spotsExplored;
+    stats.vaults += r.vaultsOpened;
+    stats.puzzles += r.puzzlesSolved;
+    stats.meals += r.mealsCooked;
+    stats.merchantCoins += spend.merchant;
+    stats.keysLeft += r.keys;
   }
   const auto &r = hero->runState();
-  return {floor,hero->getlevel(),hero->getcoin(),r.turns,r.potionsUsed,r.deaths,r.usefulDrops,r.longestGearDrought,timeouts,objectiveWins};
+  return {floor,hero->getlevel(),hero->getcoin(),r.turns,r.potionsUsed,r.deaths,r.usefulDrops,r.longestGearDrought,timeouts,objectiveWins,r.spotsExplored};
 }
 }
-// Usage: campaign_sim [--check] [--seeds N] [--report]
+// Usage: campaign_sim [--check] [--seeds N] [--report] [--no-explore]
 //   --check   enforce the regression gates below (exit 1 on failure)
 //   --seeds N run seeds 1..N (default 24)
 //   --report  print standard-mode pacing (ordinary/elite fights, camp spending,
 //             first-attempt boss win rates) instead of CSV
+//   --no-explore  skip floor exploration and cooking (for comparisons)
 int main(int argc, char **argv) {
   bool check = false, report = false;
   unsigned seeds = 24;
@@ -215,7 +290,8 @@ int main(int argc, char **argv) {
     if (arg == "--check") check = true;
     else if (arg == "--report") report = true;
     else if (arg == "--seeds" && i + 1 < argc) seeds = static_cast<unsigned>(std::max(1, std::atoi(argv[++i])));
-    else { std::cerr << "usage: campaign_sim [--check] [--seeds N] [--report]\n"; return 2; }
+    else if (arg == "--no-explore") exploring = false;
+    else { std::cerr << "usage: campaign_sim [--check] [--seeds N] [--report] [--no-explore]\n"; return 2; }
   }
   NullBuffer quiet;
   auto *output = std::cout.rdbuf(&quiet);
@@ -224,7 +300,7 @@ int main(int argc, char **argv) {
   std::array<int, 3> standardObjectiveWins{};
   std::array<int, 3> standardClears{};
   int timeouts = 0, awareTimeouts = 0, invalid = 0, objectiveWins = 0;
-  std::string csv = "job,seed,route,challenge,policy,ending_floor,level,coins,turns,potions,deaths,gear_upgrades,longest_drought,timeouts,objective_wins\n";
+  std::string csv = "job,seed,route,challenge,policy,ending_floor,level,coins,turns,potions,deaths,gear_upgrades,longest_drought,timeouts,objective_wins,explored\n";
   for (int job = 0; job < 3; ++job) for (unsigned seed = 1; seed <= seeds; ++seed)
     for (int route = 1; route <= 3; ++route) for (int challenge = 0; challenge < 3; ++challenge)
       for (int aware = 0; aware < 2; ++aware) {
@@ -242,7 +318,8 @@ int main(int argc, char **argv) {
           std::to_string(challenge) + ',' + (aware ? "aware" : "fixed") + ',' + std::to_string(r.floor) + ',' +
           std::to_string(r.level) + ',' + std::to_string(r.coins) + ',' + std::to_string(r.turns) + ',' +
           std::to_string(r.potions) + ',' + std::to_string(r.deaths) + ',' + std::to_string(r.upgrades) + ',' +
-          std::to_string(r.drought) + ',' + std::to_string(r.timeouts) + ',' + std::to_string(r.objectiveWins) + '\n';
+          std::to_string(r.drought) + ',' + std::to_string(r.timeouts) + ',' + std::to_string(r.objectiveWins) + ',' +
+          std::to_string(r.explored) + '\n';
       }
   std::cout.rdbuf(output);
   if (report) {
@@ -263,6 +340,16 @@ int main(int argc, char **argv) {
                 << std::setw(13) << average(p.repairCoins, p.runs)
                 << std::setw(11) << average(p.restCoins, p.runs)
                 << std::setw(10) << average(p.endCoins, p.runs) << std::setprecision(1) << '\n';
+    }
+    std::cout << "\nStandard mode exploration per run\n"
+              << "job      spots  vaults puzzles  meals merchant-coins keys-left\n";
+    for (int job = 0; job < 3; ++job) {
+      const Pacing &p = pacing[job];
+      std::cout << std::left << std::setw(8) << names[job] << std::right
+                << std::setw(6) << average(p.explored, p.runs) << std::setw(8) << average(p.vaults, p.runs)
+                << std::setw(8) << average(p.puzzles, p.runs) << std::setw(7) << average(p.meals, p.runs)
+                << std::setw(15) << std::setprecision(0) << average(p.merchantCoins, p.runs)
+                << std::setprecision(1) << std::setw(10) << average(p.keysLeft, p.runs) << '\n';
     }
     std::cout << "\nFirst attempt at each boss, win %\njob     ";
     for (int chapter = 1; chapter <= 10; ++chapter) std::cout << std::setw(5) << chapter * 10;
