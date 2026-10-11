@@ -7,7 +7,7 @@ import { below } from './random.js';
 
 export const EnemyTuning = {
   OrdinaryHpPercent: 160,
-  OrdinaryAttackPercent: 85,
+  OrdinaryAttackPercent: 90,
   EliteHpPercent: 170,
   EliteAttackPercent: 115,
   SurviveHpPercent: 300,
@@ -161,7 +161,7 @@ export function enemyStatsForFloor(value) {
   const exp = 30 + floor * 25;
   const coins = 8 + floor * 10;
   if (floor % 10 === 0)
-    return { hp: idiv(baseHp * 5, 2), attack: idiv(baseAttack * 17, 10), expReward: exp * 4,
+    return { hp: idiv(baseHp * 5, 2), attack: idiv(baseAttack * (170 + idiv(floor, 10)), 100), expReward: exp * 4,
       coinReward: coins * 5, level: floor + 3, boss: true };
   return { hp: idiv(baseHp * EnemyTuning.OrdinaryHpPercent, 100),
     attack: Math.max(1, idiv(baseAttack * EnemyTuning.OrdinaryAttackPercent, 100)),

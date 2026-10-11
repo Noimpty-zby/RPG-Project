@@ -77,7 +77,7 @@ function campaignFingerprint() {
   return print.hash;
 }
 const fingerprint = campaignFingerprint();
-check(fingerprint === 0x9ef56128f03d9da5n, `campaign fingerprint is 0x${fingerprint.toString(16)}`);
+check(fingerprint === 0x0de99c93466e8abcn, `campaign fingerprint is 0x${fingerprint.toString(16)}`);
 check(campaignFingerprint() === fingerprint, 'generation must not depend on earlier calls');
 
 const reference = process.argv[2];

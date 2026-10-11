@@ -18,7 +18,7 @@ struct EnemyStats {
 namespace EnemyTuning {
 // Ordinary enemies relative to the base curve that bosses also scale from.
 constexpr int OrdinaryHpPercent = 160;
-constexpr int OrdinaryAttackPercent = 85;
+constexpr int OrdinaryAttackPercent = 90;
 // Elites relative to ordinary enemies of the same floor.
 constexpr int EliteHpPercent = 170;
 constexpr int EliteAttackPercent = 115;

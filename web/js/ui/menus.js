@@ -539,9 +539,9 @@ export class Menus {
           const { ok: done } = this.game.act(() => hero.inheritEnhancement(index));
           if (!done) { sfx('error'); toast('金币不足。'); } else { sfx('levelup'); toast(`${item.getName()} 已继承 +${worn.getEnhanceLevel()} 并换上。`); }
           m.refresh();
-        }, { cls: 'small primary', disabled: hero.getcoin() < cost })] }),
-        h('p', { class: 'muted', style: { fontSize: '12px', margin: '2px 0 0 52px' } },
-          `继承 ${worn.getDisplayName()}：${stat} ${value}（当前 ${worn.getValue()}），费用为重新强化的 ${InheritPercent}%。`));
+        }, { cls: `small ${value > worn.getValue() ? 'primary' : ''}`, disabled: hero.getcoin() < cost })] }),
+        h('p', { class: value > worn.getValue() ? 'muted' : 'bad', style: { fontSize: '12px', margin: '2px 0 0 52px' } },
+          `继承 ${worn.getDisplayName()}：${stat} ${value}（当前 ${worn.getValue()}${value > worn.getValue() ? '' : '，不比现在强'}），费用为重新强化的 ${InheritPercent}%。`));
       });
     return h('div', {},
       h('h3', { style: { marginTop: '14px' } }, '继承强化'),
