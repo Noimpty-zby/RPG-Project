@@ -179,6 +179,24 @@ for (const c of [{ floor: 4, boss: false, difficulty: 0, elite: false }, { floor
   'a dodged interrupt deals no damage, earns no MP and says why it still worked');
 }
 
+// A skill the enemy dodges entirely refunds half its MP; the cooldown still runs.
+{
+  const fighter = new Player('落空测试', Job.Warrior);
+  fighter.loadStats(80, 0, 100, 800, 1000, 50, 200, 200, 0, 3);
+  fighter.setHighestFloor(100);
+  const monster = new Enemy('fixture', 100000, 0, 0, 500, 500, 1);
+  monster.configureEncounter(1, false);
+  monster.setdodgeRate(100);
+  const battle = new BattleSession(fighter, monster);
+  battle.beginTurn();
+  const cost = fighter.getSkill(1).getActualCost(fighter);
+  const mp = fighter.getmp();
+  const { events } = collect(() => battle.act({ type: ActionType.Skill, index: 1 }));
+  battle.close();
+  check(fighter.getmp() === mp - cost + Math.trunc(cost / 2) && fighter.getSkill(1).getcurrentcooldown() > 0 &&
+    events.some((e) => e.type === 'mana' && e.text.includes('【落空返还】')), 'a fully dodged skill refunds half its MP and still cools down');
+}
+
 // Poison alone is no sign of stalling: the advice needs a Defeat fight where
 // the player guarded while nothing called for it.
 function poisonFight(floor, boss, rules, pick) {
@@ -281,4 +299,4 @@ if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans.');
+console.log('Rules tests passed: save round trips and validation, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans, dodged-skill refunds.');

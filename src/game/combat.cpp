@@ -1,4 +1,5 @@
 #include "game/combat.h"
+#include "player/skills.h"
 #include <algorithm>
 #include <iostream>
 
@@ -125,10 +126,19 @@ bool BattleSession::act(BattleAction action) {
       hero.attacktarget(monster);
     }
     break;
-  case ActionType::Skill:
+  case ActionType::Skill: {
+    const skill *ability = hero.getSkill(action.index);
+    const int cost = ability ? ability->getActualCost(hero) : 0;
     if (!hero.useSkill(action.index, monster)) return false;
+    // A skill the enemy dodged entirely refunds half its MP; the cooldown still runs.
+    if (cost >= 2 && monster.gethp() == enemyHpBefore) {
+      const int mpBefore = hero.getmp();
+      hero.setmp(hero.getmp() + cost / 2);
+      std::cout << "【落空返还】技能被完全闪避，返还 " << hero.getmp() - mpBefore << " MP。" << std::endl;
+    }
     actionId = action.index;
     break;
+  }
   case ActionType::Guard:
     hero.guard(intent.piercesGuard);
     actionId = -1;

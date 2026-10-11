@@ -359,6 +359,32 @@ void testHealingAffixAndInterrupts() {
           "Interrupting the charge must deny the heal");
 }
 
+// A skill the enemy dodges entirely refunds half its MP; a landed one does not,
+// and the cooldown runs either way.
+void testDodgedSkillRefund() {
+  auto dodger = hero(); auto evasive = foe(1, false, 0);
+  evasive.setdodgeRate(100);
+  dodger->getSkill(1)->resetcurrentcooltime();
+  BattleSession dodged(*dodger, evasive);
+  require(dodged.beginTurn(), "Expected a live action window");
+  const int cost = dodger->getSkill(1)->getActualCost(*dodger), mp = dodger->getmp();
+  std::ostringstream shown;
+  auto *previous = std::cout.rdbuf(shown.rdbuf());
+  require(dodged.act({ActionType::Skill, 1}), "Expected the skill to be cast");
+  std::cout.rdbuf(previous);
+  require(dodger->getmp() == mp - cost + cost / 2 && dodger->getSkill(1)->getcurrentcooldown() > 0 &&
+              shown.str().find("【落空返还】") != std::string::npos,
+          "A fully dodged skill refunds half its MP and still cools down");
+  auto striker = hero(); auto target = foe(1, false, 0);
+  striker->getSkill(1)->resetcurrentcooltime();
+  BattleSession landed(*striker, target);
+  require(landed.beginTurn(), "Expected a live action window");
+  const int landedMp = striker->getmp();
+  require(landed.act({ActionType::Skill, 1}) &&
+              striker->getmp() == landedMp - striker->getSkill(1)->getActualCost(*striker),
+          "A landed skill refunds nothing");
+}
+
 // Poison alone is no sign of stalling: the advice needs a Defeat fight where
 // the player guarded while nothing called for it.
 void testPoisonAdviceFollowsBehavior() {
@@ -443,6 +469,7 @@ int main() {
     testAssassinCannotDodgeUnavoidableDamage();
     testHealingAffixAndInterrupts();
     testPoisonAdviceFollowsBehavior();
+    testDodgedSkillRefund();
     std::cout.rdbuf(previous);
     std::cout << "combat objective tests passed\n";
   } catch (const std::exception &error) {

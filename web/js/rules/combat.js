@@ -139,10 +139,20 @@ export class BattleSession {
           hero.attacktarget(monster);
         }
         break;
-      case ActionType.Skill:
+      case ActionType.Skill: {
+        const ability = hero.getSkill(action.index);
+        const cost = ability ? ability.getActualCost(hero) : 0;
         if (!hero.useSkill(action.index, monster)) return false;
+        // A skill the enemy dodged entirely refunds half its MP; the cooldown still runs.
+        if (cost >= 2 && monster.gethp() === enemyHpBefore) {
+          const mpBefore = hero.getmp();
+          hero.setmp(hero.getmp() + idiv(cost, 2));
+          const amount = hero.getmp() - mpBefore;
+          emit('mana', `【落空返还】技能被完全闪避，返还 ${amount} MP。`, { side: 'hero', amount });
+        }
         actionId = action.index;
         break;
+      }
       case ActionType.Guard:
         hero.guard(intent.piercesGuard);
         actionId = -1;
