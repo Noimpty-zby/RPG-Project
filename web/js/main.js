@@ -65,12 +65,12 @@ const app = {
     sfx('encounter');
     scene.fx.flash('#ffffff', 0.25);
     scene.fx.shake(3, 0.2);
-    const { monster, rules, battle } = this.game.startBattle();
+    const { monster, rules, battle, notes } = this.game.startBattle();
     const keep = { tx: scene.player.tx, ty: scene.player.ty, dir: scene.player.dir };
     await fade(() => {
       this.busy = false;
       loop.setScene(new BattleScene(this, {
-        monster, rules, battle, floor: this.game.floor,
+        monster, rules, battle, notes, floor: this.game.floor,
         onFinish: (result) => this.endBattle(scene, result, keep),
       }));
     });

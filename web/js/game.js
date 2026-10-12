@@ -3,6 +3,7 @@
 import * as Campaign from './rules/campaign.js';
 import { BattleSession } from './rules/combat.js';
 import { chapterOf, MaxFloor } from './rules/config.js';
+import * as Exploration from './rules/exploration.js';
 import { ItemType } from './rules/item.js';
 import { collect } from './rules/log.js';
 import { Player } from './rules/player.js';
@@ -150,13 +151,14 @@ export class Game {
   // ---- Battles -------------------------------------------------------------------
   startBattle() {
     const hero = this.hero;
-    const monster = Campaign.makeEnemy(hero, this.floor);
+    const notes = [];
+    const monster = Campaign.makeEnemy(hero, this.floor, notes);
     const rules = Campaign.rulesFor(hero, this.floor);
     this.profile.recordEncounter(this.floor, monster);
     Campaign.seedStream(hero, this.floor, 1200 + hero.runState().attempts[this.floor]);
     const battle = new BattleSession(hero, monster, rules);
     this.firstFinalClear = this.floor === MaxFloor && !this.cleared(MaxFloor);
-    return { monster, rules, battle };
+    return { monster, rules, battle, notes };
   }
   // Settle a finished battle; returns what happened for the result screen.
   finishBattle(monster, battle) {
@@ -241,6 +243,29 @@ export class Game {
   purchase(slot) { return this.act(() => Campaign.purchase(this.hero, this.floor, slot)); }
   refreshShop() { return this.act(() => Campaign.refreshShop(this.hero, this.floor)); }
   journal() { return Campaign.journal(this.hero, this.floor); }
+
+  // ---- Exploration -------------------------------------------------------------
+  // Each returns { ok, text, lorePage, newPage, events }. Progress is saved at
+  // once: spot results come from the seed, so reloading would not change them.
+  explore(index, option) {
+    return this.exploreResult(() => Exploration.interact(this.hero, this.floor, index, option));
+  }
+  solvePuzzle(order) {
+    return this.exploreResult(() => Exploration.solvePuzzle(this.hero, this.floor, order));
+  }
+  cook(recipe) {
+    return this.exploreResult(() => Exploration.cook(this.hero, recipe));
+  }
+  exploreResult(fn) {
+    const { result, events } = collect(fn);
+    const newPage = result.ok && result.lorePage > 0 && this.profile.recordLore(result.lorePage);
+    if (newPage) this.saveProfile();
+    if (result.ok) {
+      this.checkAchievements();
+      this.autosave();
+    }
+    return { ...result, newPage, events };
+  }
   potionCount() {
     return this.hero.getSaveBackpack().filter((i) => i.getType() === ItemType.Potion).reduce((n, i) => n + i.getQuantity(), 0);
   }

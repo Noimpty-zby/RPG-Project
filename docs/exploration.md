@@ -2,7 +2,7 @@
 
 规则层（C++ `src/game/exploration.*` 与 JS `web/js/rules/exploration*.js`）已经完成，两边逐字节一致，由 `tools/web_test.sh` 保证。终端版已经接好（主菜单 `[13]`、营地 `[11] 料理`、远征档案 `[5] 见闻录`），可以当作交互流程的参考实现，见 `src/main.cpp` 的 `explore()`、`puzzleMenu()`、`cooking()`。
 
-网页版还需要做的只有**画面和交互**：把探索点放到地图上，点开时显示选项，调用规则函数，再把结果展示出来。规则层不知道任何坐标，地点放在哪里完全由地图决定。
+网页版的画面和交互也已接入（README 第九轮）：`web/js/engine/mapgen.js` 的 `placeSpots()` 按 zone 放置地点、凿出壁龛和宝库侧室，`web/js/scenes/explore.js` 绘制和交互，`web/js/ui/menus.js` 的 `openSpot()`、`openPuzzle()`、`cookingView()`、`loreView()` 是各个界面，`web/js/game.js` 的 `explore()`、`solvePuzzle()`、`cook()` 负责写入见闻录、检查成就和自动存档。下面是规则层的接口说明，改界面时可以对照。规则层不知道任何坐标，地点放在哪里完全由地图决定。
 
 ## 一层有什么
 
@@ -17,7 +17,7 @@ const views = Exploration.survey(hero, floor);
 - `spot.kind`：`Exploration.SpotKind` 中的一种（见下表）。
 - `spot.zone`：建议的位置，见下一节。
 - `done`：已经探索过。商人在第一次购买后为 `true`，但仍然可以继续购买剩下的货品。
-- 结果只由种子和楼层决定。生成地图时可以放心调用多次，不会影响战斗的随机序列。
+- 结果只由种子和楼层决定。生成地图时可以放心调用多次，不会影响之后战斗的随机序列（每场战斗开始时会重新设定种子）。但这些函数本身会重设规则随机数的种子，所以**不要在战斗进行中调用**（例如战斗里弹窗时刷新的 HUD），网页版的 HUD 只读取场景缓存的剩余数量。
 
 | kind | 名称示例（第 1 章） | 交互 |
 |---|---|---|
@@ -114,7 +114,7 @@ Exploration.ingredientName(i);    // 鲜鱼、草药、矿砂、霜晶、星尘
   // notes: ['警戒烽火：移除【护盾】', '祝福：敌人攻击 -8%', '斥候的偷袭：生命 -8%', ...]
   ```
 
-  建议在 Boss/精英的战前弹窗里列出这些变化，开战时也显示一下。`game.startBattle()` 现在没有传 `notes`，规则照样生效，只是玩家看不到原因。
+  网页版在每场战斗的战前弹窗里列出这些变化（诅咒标红），`game.startBattle()` 也把 `notes` 传给战斗场景，开战日志里显示为【探索】。
 - 祝福和诅咒在 `Campaign.settleEncounter` 里清除，不需要额外处理。
 - HUD 建议显示：钥匙数（`run.keys`），以及当前的祝福/诅咒（`Exploration.boonDescription(run.boon)`、`baneDescription(run.bane)`，值为 0 时不显示）。
 

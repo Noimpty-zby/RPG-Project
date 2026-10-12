@@ -37,10 +37,11 @@ const IntentNames = {
 };
 
 export class BattleScene {
-  constructor(app, { monster, rules, battle, floor, onFinish }) {
+  constructor(app, { monster, rules, battle, floor, notes = [], onFinish }) {
     this.app = app;
     this.monster = monster;
     this.rules = rules;
+    this.notes = notes;
     this.battle = battle;
     this.floor = floor;
     this.onFinish = onFinish;

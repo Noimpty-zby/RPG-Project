@@ -66,6 +66,7 @@ export class BattleUI {
     const lines = [];
     if (rules.elite) lines.push('【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁且被打断后不休整。');
     if (rules.bossSabotaged) lines.push('供能设施已破坏，Boss护盾失效。');
+    for (const note of this.scene.notes) lines.push(`【探索】${note}`);
     for (const line of lines) this.log({ text: line, type: 'notice' });
     this.log({ text: `${this.monster.getEncounterTitle()}：${this.monster.getTacticalHint()}`, type: 'notice' });
   }

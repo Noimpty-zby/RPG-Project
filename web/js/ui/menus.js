@@ -1,19 +1,24 @@
 // Every menu outside battle: character, camp, shop, waystone, events,
-// encounters, archive, help, revive and route choice.
+// encounters, exploration spots, archive, help, revive and route choice.
 import * as Campaign from '../rules/campaign.js';
+import * as Exploration from '../rules/exploration.js';
 import { Skill, SpecializationBranches } from '../rules/skills.js';
 import { Item, ItemType } from '../rules/item.js';
 import { affixDescription, affixName, AffixCount, Bestiary } from '../rules/enemy.js';
 import { Objective } from '../rules/combat.js';
 import { chapterOf, challengeName, EnhancePercent, InheritPercent, MaxEnhanceLevel, refreshCost, skillRankCap } from '../rules/config.js';
-import { Achievements, Profile } from '../rules/profile.js';
+import { Achievements, LorePages, Profile } from '../rules/profile.js';
 import { HelpTopics } from '../rules/help.js';
 import { h, button, openModal, choose, alertBox, toast } from './dom.js';
 import { compareTable, isUpgrade, itemRow, statsBlock } from './widgets.js';
 import * as Sprites from '../engine/sprites.js';
+import { P } from '../engine/palette.js';
+import { TILE } from '../engine/tiles.js';
 import { sfx, audioSettings, setAudio } from '../engine/audio.js';
 
 const RouteIcons = ['', '⚒', '✚', '⚗'];
+const { SpotKind } = Exploration;
+const ZoneNames = ['房间', '守卫房间', '隐秘处', '上锁的侧室'];
 
 export class Menus {
   constructor(app) {
@@ -307,8 +312,29 @@ export class Menus {
       h('ul', { class: 'lines' }, j.bounties.map((b) => h('li', { class: b.progress >= b.target ? 'good' : '' },
         `${b.name}：${b.goal}（${b.progress >= b.target ? '已完成' : `${b.progress}/${b.target}`}）`))),
       j.letter ? h('p', { class: 'cyan' }, j.letter) : null,
+      this.explorationJournal(j),
       h('h3', {}, '远征统计'),
       h('p', { class: 'muted' }, `种子 ${j.seed} · 挑战 ${j.challenge} · 战斗 ${j.battles} · 回合 ${j.turns} · 阵亡 ${j.deaths} · 药水 ${j.potions} · 装备提升 ${j.usefulDrops} · 最长装备空窗 ${j.longestGearDrought} 层`));
+  }
+  // The chapter's exploration plan and what is left on the floors reached.
+  explorationJournal(j) {
+    const hero = this.hero;
+    const plan = j.explorePlan;
+    const first = j.chapter * 10 + 1;
+    const last = Math.min(hero.getHighestFloor(), j.chapter * 10 + 10);
+    const floors = [];
+    for (let f = first; f <= last; f++) {
+      const left = Exploration.remaining(hero, f);
+      floors.push(h('span', { class: `tag ${left ? 'goal' : 'done'}`, title: left ? `还有 ${left} 处未探索` : '已探索完' }, `${f}层 ${left || '✓'}`));
+    }
+    return h('div', {},
+      h('h3', {}, '本章探索'),
+      h('p', {}, `钥匙 ${j.keys} · ${Campaign.chapter(this.game.floor).ally}的遗物 ${j.questItems}/3（集齐后本章 Boss 生命 -8%）`),
+      h('p', {}, `宝库 第${plan.vaultFloors[0]}层（1 把钥匙）、第${plan.vaultFloors[1]}层（2 把） · 谜题 第${plan.puzzleFloor}层 · ` +
+        `流浪商人 第${plan.merchantFloors[0]}、${plan.merchantFloors[1]}层`),
+      h('p', {}, '剩余地点：', floors),
+      h('p', {}, '食材：', Exploration.IngredientNames.map((name, i) => `${name} ${j.ingredients[i]}`).join(' · ')),
+      h('p', { class: j.bane ? 'bad' : 'muted' }, `下一场战斗：祝福 ${Exploration.boonDescription(j.boon)}；诅咒 ${Exploration.baneDescription(j.bane)}`));
   }
   openJournal() {
     openModal({ title: `第 ${this.game.floor} 层告示`, render: () => this.journalView() });
@@ -318,7 +344,7 @@ export class Menus {
     const profile = this.game.profile;
     const section = this.archiveTab ?? 0;
     const tabs = h('div', { class: 'choice-row', style: { marginBottom: '10px' } },
-      ['敌人图鉴', '词缀图鉴', '成就', '远征记录'].map((label, i) => button(label, () => { this.archiveTab = i; m.refresh(); },
+      ['敌人图鉴', '词缀图鉴', '成就', '远征记录', `见闻录 ${profile.loreCount()}/${LorePages}`].map((label, i) => button(label, () => { this.archiveTab = i; m.refresh(); },
         { cls: `small ${section === i ? 'primary' : ''}` })));
     let content;
     if (section === 0) {
@@ -350,6 +376,8 @@ export class Menus {
       content = h('div', {}, h('p', { class: 'muted' }, `成就 ${profile.unlockedCount()}/${Achievements.length}`),
         h('div', { class: 'cards' }, Achievements.map((a) => h('div', { class: `card ${profile.unlocked(a.key) ? 'active' : ''}`, style: { cursor: 'default' } },
           h('h4', {}, `${profile.unlocked(a.key) ? '★' : '☆'} ${a.title}`), h('p', {}, a.description)))));
+    } else if (section === 4) {
+      content = this.loreView(m);
     } else {
       const records = [...profile.records()].reverse();
       content = h('div', {},
@@ -358,6 +386,23 @@ export class Menus {
         h('p', { class: 'muted' }, '各职业最佳：', profile.bestByJob().map((b) => `${b.job} ${b.text}`).join('　')));
     }
     return h('div', {}, this.game.profileWarning ? h('p', { class: 'bad' }, this.game.profileWarning) : null, tabs, content);
+  }
+  // Expedition journal pages, one chapter at a time; kept across runs.
+  loreView(m) {
+    const profile = this.game.profile;
+    const chapter = this.loreChapter ?? 0;
+    const found = (c) => Array.from({ length: 10 }, (_, i) => profile.loreFound(c * 10 + i + 1)).filter(Boolean).length;
+    const pages = [];
+    for (let page = chapter * 10 + 1; page <= chapter * 10 + 10; page++) {
+      pages.push(profile.loreFound(page)
+        ? h('li', {}, h('span', { class: 'gold' }, `第${page}页 · ${Exploration.loreTitle(page)}`), h('div', {}, Exploration.loreText(page)))
+        : h('li', { class: 'muted' }, `第${page}页：？？？（藏在第${page}层的隐秘处）`));
+    }
+    return h('div', {},
+      h('p', { class: 'muted' }, `已收集 ${profile.loreCount()}/${LorePages}。每层一页，藏在墙缝后的隐秘处；收集跨远征保留。`),
+      h('div', { class: 'choice-row', style: { marginBottom: '10px' } }, Campaign.Chapters.map((c, i) =>
+        button(`${i + 1} ${c.name} ${found(i)}/10`, () => { this.loreChapter = i; m.refresh(); }, { cls: `small ${chapter === i ? 'primary' : ''}` }))),
+      h('ul', { class: 'lines lore' }, pages));
   }
   openArchive() {
     openModal({ title: '远征档案', size: 'wide', render: (m) => this.archiveView(m) });
@@ -431,7 +476,7 @@ export class Menus {
     const game = this.game;
     const hero = this.hero;
     openModal({
-      title: '营火', size: 'wide', tabs: ['休整', '强化', '修理', '改造', '技能与专精'],
+      title: '营火', size: 'wide', tabs: ['休整', '强化', '修理', '改造', '料理', '技能与专精'],
       render: (m) => {
         const floor = game.floor;
         if (m.tab() === 0) {
@@ -516,9 +561,31 @@ export class Menus {
             }))) : h('p', {}, '没有装备任何物品！'),
             h('ul', { class: 'lines muted', style: { fontSize: '13px', marginTop: '10px' } }, [1, 2, 3, 4].map((effect) => h('li', {}, Item.effectDescription(effect)))));
         }
+        if (m.tab() === 4) return this.cookingView(m);
         return this.skillsView(m);
       },
     });
+  }
+
+  // Camp cooking: ingredients from gathering spots become a blessing for the next fight.
+  cookingView(m) {
+    const run = this.game.run;
+    return h('div', {},
+      h('p', {}, '食材：', Exploration.IngredientNames.map((name, i) =>
+        h('span', { class: run.ingredients[i] ? '' : 'muted', style: { marginRight: '12px' } }, `${name} ${run.ingredients[i]}`))),
+      h('p', { class: 'muted' }, `当前祝福：${Exploration.boonDescription(run.boon)}${run.bane ? `；诅咒：${Exploration.baneDescription(run.bane)}` : ''}。` +
+        '料理的祝福只作用于下一场战斗，新祝福会替换旧的；食材来自地图上的采集点和流浪商人。'),
+      h('div', { class: 'grid-list' }, Exploration.recipes().map((recipe) => {
+        const needs = recipe.needs.map((n, i) => (n ? `${Exploration.ingredientName(i)}×${n}` : '')).filter(Boolean).join('、');
+        return h('div', { class: 'row-item option-row' },
+          h('div', {}, h('div', { class: 'title' }, recipe.name, needs ? h('span', { class: 'muted' }, `（${needs}）`) : null),
+            h('div', { class: 'meta' }, recipe.description)),
+          h('div', { class: 'actions' }, button('烹饪', () => {
+            const result = this.game.cook(recipe.id);
+            if (!result.ok) { sfx('error'); toast('食材不足。'); } else { sfx('heal'); toast(result.text); }
+            m.refresh();
+          }, { cls: 'small primary', disabled: !Exploration.canCook(this.hero, recipe.id) })));
+      })));
   }
 
   // Backpack items that can take over the worn item's enhancement.
@@ -667,6 +734,151 @@ export class Menus {
       : '破坏线目标：首通本层后装置会被摧毁。完成本章第2、7层后，Boss 失去护盾、重击减弱。');
   }
 
+  // ---- Exploration ---------------------------------------------------------------------------
+  // A spot's choices with their odds and costs. Merchants stay open for more
+  // purchases; other spots close and show what they gave.
+  openSpot(scene, e) {
+    if (e.kind === SpotKind.Puzzle && !e.done) {
+      this.openPuzzle(scene, e);
+      return;
+    }
+    const game = this.game;
+    const hero = this.hero;
+    let outcome = '';
+    openModal({
+      title: e.name,
+      render: (m) => {
+        const view = Exploration.survey(hero, game.floor)[e.index];
+        const options = Exploration.options(hero, game.floor, e.index);
+        return h('div', {},
+          h('div', { class: 'spot-head' }, this.spotIcon(scene, e),
+            h('div', {}, h('p', {}, view.description), h('p', { class: 'muted' }, ZoneNames[view.spot.zone]))),
+          outcome ? h('p', { class: 'outcome' }, outcome) : null,
+          options.length ? h('div', { class: 'grid-list' }, options.map((o) => h('div', { class: 'row-item option-row' },
+            h('div', {},
+              h('div', { class: 'title' }, o.label),
+              h('div', { class: 'meta' }, o.detail),
+              o.available ? null : h('div', { class: 'meta bad' }, o.reason)),
+            h('div', { class: 'actions' }, button('选择', () => {
+              if (e.kind === SpotKind.Merchant) {
+                outcome = this.resolveSpot(scene, e, o.id) ?? outcome;
+                m.refresh();
+              } else {
+                m.close();
+                this.resolveSpot(scene, e, o.id);
+              }
+            }, { cls: 'small primary', disabled: !o.available, key: String(o.id) })))))
+            : h('p', { class: 'muted' }, view.done ? '这里已经探索过了。' : '现在无法探索。'),
+          this.resourceLine());
+      },
+    });
+  }
+  // Applies a choice; returns its text, or null when nothing happened.
+  resolveSpot(scene, e, option) {
+    const hero = this.hero;
+    const before = { hp: hero.gethp(), mp: hero.getmp(), bane: this.game.run.bane };
+    const result = this.game.explore(e.index, option);
+    if (!result.ok) {
+      sfx('error');
+      toast('没有执行：条件不足。');
+      return null;
+    }
+    const hurt = hero.gethp() < before.hp || this.game.run.bane > before.bane ||
+      (hero.getmp() < before.mp && e.kind === SpotKind.Curio && option === 1);
+    this.celebrate(scene, e, hurt);
+    this.report(result.events);
+    scene.refreshEntities();
+    if (result.lorePage) this.showLore(result.lorePage, result.newPage);
+    else if (e.kind !== SpotKind.Merchant)
+      alertBox(e.name, h('div', {}, h('p', { class: hurt ? 'bad' : 'good' }, result.text), this.resourceLine()), '好的');
+    return result.text;
+  }
+  celebrate(scene, e, hurt) {
+    const x = e.x * TILE + 8;
+    const y = e.y * TILE + 6;
+    if (hurt) {
+      sfx('hit');
+      scene.fx.shake(2, 0.15);
+      scene.fx.burst(x, y, { color: [P.red, P.plum], count: 14, speed: 40 });
+      return;
+    }
+    const sound = {
+      [SpotKind.Curio]: 'magic', [SpotKind.Gather]: 'heal', [SpotKind.AffixSource]: 'shatter', [SpotKind.Merchant]: 'coin',
+      [SpotKind.Lore]: 'read', [SpotKind.Puzzle]: 'levelup',
+    }[e.kind] ?? 'chest';
+    sfx(sound);
+    if (e.kind === SpotKind.AffixSource) scene.fx.shake(3, 0.2);
+    scene.fx.burst(x, y, { color: [P.yellow, P.gold, P.white], count: 22, speed: 55, gravity: 60, glow: true });
+  }
+  spotIcon(scene, e) {
+    const canvas = scene.spotSprite(e);
+    if (!canvas) return null;
+    const key = `spot-${scene.theme}-${e.kind}-${e.variant}-${e.done ? 1 : 0}-${e.door ? 1 : 0}`;
+    return h('img', { class: 'px spot-icon', src: Sprites.spriteUrl(key, canvas), width: canvas.width * 3, height: canvas.height * 3, alt: '' });
+  }
+  resourceLine() {
+    const hero = this.hero;
+    const run = this.game.run;
+    return h('p', { class: 'muted', style: { fontSize: '12px' } },
+      `HP ${hero.gethp()}/${hero.getmaxhp()} · MP ${hero.getmp()}/${hero.getmaxmp()} · 金币 ${hero.getcoin()} · 材料 ${run.materials} · 钥匙 ${run.keys}`);
+  }
+  showLore(page, isNew) {
+    sfx('read');
+    alertBox(`见闻录 · 第${page}页`, h('div', { class: 'lore-page' },
+      h('h3', {}, Exploration.loreTitle(page)),
+      h('p', {}, Exploration.loreText(page)),
+      h('p', { class: isNew ? 'good' : 'muted' }, isNew
+        ? `新的一页收入见闻录（${this.game.profile.loreCount()}/${LorePages}），可以在远征档案里重读。`
+        : '这一页之前的远征已经收集过了。')), '收好');
+  }
+
+  // The chapter puzzle: pick the elements in order; a wrong answer costs 5% HP.
+  openPuzzle(scene, e) {
+    const game = this.game;
+    const hero = this.hero;
+    const puzzle = Exploration.puzzle(hero, game.floor);
+    let order = [];
+    let feedback = '';
+    openModal({
+      title: puzzle.title, size: 'wide',
+      render: (m) => h('div', {},
+        h('div', { class: 'spot-head' }, this.spotIcon(scene, e), h('p', {}, puzzle.prompt)),
+        h('ul', { class: 'lines clues' }, puzzle.clues.map((clue) => h('li', {}, clue))),
+        h('div', { class: 'puzzle-order' }, puzzle.elements.map((_, i) => h('span', { class: `slot ${i < order.length ? 'filled' : ''}` },
+          h('small', {}, `第${i + 1}个`), i < order.length ? puzzle.elements[order[i]] : '？'))),
+        h('div', { class: 'choice-row' }, puzzle.elements.map((name, i) => button(name, () => {
+          order.push(i);
+          feedback = '';
+          m.refresh();
+        }, { cls: 'small', disabled: order.includes(i), key: String(i + 1) }))),
+        feedback ? h('p', { class: 'bad' }, feedback) : null,
+        h('p', { class: 'muted', style: { fontSize: '12px' } },
+          `按线索从第一个到最后一个依次点选。只有一种顺序符合全部线索；答错损失当前生命 5%（不会致死），可以重试。HP ${hero.gethp()}/${hero.getmaxhp()}`)),
+      buttons: (m) => [
+        { label: '撤销', disabled: !order.length, onClick: () => { order.pop(); m.refresh(); } },
+        { label: '清空', disabled: !order.length, onClick: () => { order = []; m.refresh(); } },
+        { label: '确认顺序', cls: 'primary', disabled: order.length < puzzle.elements.length, key: 'Enter', keyLabel: '⏎', onClick: () => {
+          const result = game.solvePuzzle(order);
+          if (!result.ok) { sfx('error'); return; }
+          const solved = Exploration.survey(hero, game.floor)[e.index].done;
+          if (!solved) {
+            sfx('hit');
+            scene.fx.shake(2, 0.15);
+            feedback = result.text;
+            order = [];
+            m.refresh();
+            return;
+          }
+          m.close();
+          this.celebrate(scene, e, false);
+          this.report(result.events);
+          scene.refreshEntities();
+          alertBox(puzzle.title, h('div', {}, h('p', { class: 'good' }, result.text), this.resourceLine()), '好的');
+        } },
+      ],
+    });
+  }
+
   // ---- Encounter ---------------------------------------------------------------------------
   async challenge(scene) {
     const game = this.game;
@@ -675,7 +887,8 @@ export class Menus {
       const resolved = await this.eventDialog(scene);
       if (!resolved) return;
     }
-    const preview = Campaign.makeEnemy(game.hero, game.floor);
+    const notes = [];
+    const preview = Campaign.makeEnemy(game.hero, game.floor, notes);
     const rules = Campaign.rulesFor(game.hero, game.floor);
     preview.setTacticalPressure(rules.difficulty);
     const first = !game.cleared();
@@ -696,6 +909,8 @@ export class Menus {
       h('p', {}, h('span', { class: 'gold' }, `目标·${Campaign.objectiveName(rules.objective)}：`), goalText),
       rules.elite ? h('p', { class: 'bad' }, '【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁且被打断后不休整；首通必得本层最高品质档的目标装备。') : null,
       rules.bossSabotaged ? h('p', { class: 'good' }, '供能设施已破坏，Boss 护盾失效、重击减弱。') : null,
+      notes.length ? h('ul', { class: 'lines', style: { fontSize: '13px' } }, notes.map((note) =>
+        h('li', { class: note.startsWith('诅咒') ? 'bad' : 'good' }, `【探索】${note}`))) : null,
       rules.elite || game.floor % 10 === 0 ? this.readinessView() : null,
       h('p', { class: 'muted', style: { fontSize: '13px' } }, '本章悬赏：', game.journal().bounties.map((b) =>
         `${b.goal}（${b.progress >= b.target ? '已完成' : `${b.progress}/${b.target}`}）`).join('；')),

@@ -4,6 +4,7 @@ import { h, bar, modalOpen, onModalChange } from './dom.js';
 import * as Campaign from '../rules/campaign.js';
 import { Objective } from '../rules/combat.js';
 import { chapterOf } from '../rules/config.js';
+import { baneDescription, boonDescription } from '../rules/exploration.js';
 import * as Sprites from '../engine/sprites.js';
 import { audioSettings, setAudio, unlockAudio } from '../engine/audio.js';
 
@@ -94,11 +95,21 @@ export class Hud {
       const { name, target } = Campaign.bounty(kind);
       return h('span', { class: progress >= target ? 'good' : 'muted' }, `${name} ${progress >= target ? '✓' : `${progress}/${target}`}`);
     });
+    // The scene counts unexplored spots when it builds the floor; asking the
+    // rules here would reseed the game stream (this also runs during battles).
+    const scene = this.app.explore;
+    const remaining = scene && scene.floorNumber === floor ? scene.status.remaining : null;
+    const run = game.run;
     this.floorEl.replaceChildren(
       h('div', { class: 'title' }, `第 ${floor} 层`),
       h('div', { class: 'line' }, `第${c + 1}章 · ${Campaign.chapter(floor).name}`),
       h('div', { class: 'line' }, tags.length ? tags : h('span', { class: 'muted' }, '待完成')),
       h('div', { class: 'line', title: '本章悬赏（告示牌查看详情）' }, '悬赏 ', bounties[0], ' · ', bounties[1]),
+      h('div', { class: 'line', title: '可探索的地点（F 键可快速前往）' }, '探索 ',
+        remaining === null ? '—' : h('span', { class: remaining ? '' : 'good' }, remaining ? `剩余 ${remaining} 处` : '已探索完'),
+        ` · 钥匙 ${run.keys}`,
+        run.boon ? h('span', { class: 'good', title: `下一场战斗：${boonDescription(run.boon)}` }, ' · 祝福') : null,
+        run.bane ? h('span', { class: 'bad', title: `下一场战斗：${baneDescription(run.bane)}` }, ' · 诅咒') : null),
     );
   }
 

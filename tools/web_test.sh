@@ -14,3 +14,4 @@ sources=(src/core/random.cpp src/character/character.cpp src/player/player.cpp s
 "$output/campaign_sim" > "$output/campaign-reference.csv"
 node web/tests/parity_test.mjs "$output/campaign-reference.csv"
 node web/tests/rules_test.mjs
+node web/tests/layout_test.mjs

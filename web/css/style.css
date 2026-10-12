@@ -525,3 +525,20 @@ label.field { display: block; margin: 10px 0 4px; color: var(--muted); font-size
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 .noscript { position: fixed; inset: 40% 0 auto; text-align: center; }
+
+/* Exploration spots, puzzles and the journal */
+.row-item.option-row { grid-template-columns: 1fr auto; }
+.spot-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.spot-head p { margin: 2px 0; }
+.spot-icon { flex: none; image-rendering: pixelated; background: #0e0b16; border: 2px solid #000; padding: 4px; }
+.outcome { padding: 6px 10px; background: rgba(99, 199, 77, .12); border-left: 3px solid var(--green); }
+ul.clues li { margin: 4px 0; }
+.puzzle-order { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.puzzle-order .slot {
+  min-width: 84px; padding: 4px 8px; text-align: center;
+  background: rgba(14, 11, 22, .35); border: 2px dashed rgba(255, 255, 255, .15); border-radius: 2px;
+}
+.puzzle-order .slot.filled { border-style: solid; border-color: var(--gold); color: var(--gold); }
+.puzzle-order .slot small { display: block; color: var(--muted); font-size: 11px; }
+ul.lore li { margin: 6px 0; }
+.lore-page p { line-height: 1.8; }
