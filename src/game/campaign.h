@@ -21,7 +21,10 @@ int objectivesCompleted(const player &hero, int floor);
 int eliteFloor(int chapter);
 bool isEliteFloor(int floor);
 EncounterRules rulesFor(const player &hero, int floor);
-enemy makeEnemy(const player &hero, int floor);
+// The floor's guardian, including exploration effects (affix sources, the
+// next encounter's boon and bane, the ally's ambush). notes, when given,
+// receives one line per exploration effect for previews.
+enemy makeEnemy(const player &hero, int floor, std::vector<std::string> *notes = nullptr);
 bool eventPending(const player &hero, int floor);
 std::string eventDescription(int floor);
 bool resolveEvent(player &hero, int floor, int choice);
@@ -60,6 +63,8 @@ const Bounty &bounty(int kind);
 std::string bountyGoal(int kind);
 std::array<int, 2> chapterBounties(const player &hero, int chapter);
 bool revive(player &hero, bool useFree);
+// Adds an item to the backpack, counting gear upgrades like any other reward.
+void grantItem(player &hero, const Item &item);
 void printJournal(const player &hero, int floor);
 void printBattleReport(const BattleSession &battle);
 }

@@ -1,5 +1,6 @@
 #include "core/game_config.h"
 #include "game/campaign.h"
+#include "game/exploration.h"
 #include "player/jobs.h"
 #include "player/skills.h"
 #include "storage/profile.h"
@@ -205,6 +206,26 @@ void inheritEnhancement(player &hero) {
   if (!hero.inheritEnhancement(index)) std::cout << "未继承：金币不足。\n";
   else std::cout << "继承完成：" << name << " 已换上。\n";
 }
+void cooking(player &hero) {
+  for (;;) {
+    const auto &run = hero.runState();
+    std::cout << "料理（食材：";
+    for (int i = 0; i < Exploration::IngredientCount; ++i)
+      std::cout << (i ? " " : "") << Exploration::ingredientName(i) << run.ingredients[i];
+    std::cout << "；当前祝福：" << Exploration::boonDescription(run.boon) << "，新祝福会替换旧的）\n";
+    for (const auto &recipe : Exploration::recipes()) {
+      std::string needs;
+      for (int i = 0; i < Exploration::IngredientCount; ++i)
+        if (recipe.needs[i]) needs += std::string(needs.empty() ? "" : "、") + Exploration::ingredientName(i) + "×" + std::to_string(recipe.needs[i]);
+      std::cout << '[' << recipe.id << "] " << recipe.name << (needs.empty() ? "" : "（" + needs + "）") << "："
+        << recipe.description << (Exploration::canCook(hero, recipe.id) ? "" : "（食材不足）") << '\n';
+    }
+    std::cout << "[0] 返回\n";
+    const int choice = readInt();
+    if (choice == 0) return;
+    if (!Exploration::cook(hero, choice).ok) std::cout << "食材不足或选择无效。\n";
+  }
+}
 void camp(player &hero, int floor) {
   for (;;) {
     Campaign::printJournal(hero, floor);
@@ -214,7 +235,7 @@ void camp(player &hero, int floor) {
     std::cout << "营地：[1] 休息（本章剩余 " << Campaign::restsRemaining(hero, floor) << " 次，本次 "
       << Campaign::restPrice(hero, floor) << "金币，恢复基础HP的" << (hero.runState().challenge == 1 ? 25 : 40)
       << "%与最大MP的50%） [2] 领取订单 [3] 定向装备目标 [4] 装备改造\n"
-      << "[5] 商店 [6] 技能与专精 [7] 迁移传统存档 [8] 强化装备 [9] 修理装备 [10] 继承强化 [0] 返回\n";
+      << "[5] 商店 [6] 技能与专精 [7] 迁移传统存档 [8] 强化装备 [9] 修理装备 [10] 继承强化 [11] 料理 [0] 返回\n";
     const int action = readInt();
     if (action == 0) return;
     if (action == 1 && !Campaign::rest(hero, floor)) {
@@ -237,6 +258,7 @@ void camp(player &hero, int floor) {
     if (action == 8) enhanceEquipment(hero);
     if (action == 9) repairEquipment(hero);
     if (action == 10) inheritEnhancement(hero);
+    if (action == 11) cooking(hero);
     if (action == 7) {
       if (!hero.runState().legacyRules) { std::cout << "已经使用章节规则。\n"; continue; }
       std::cout << "迁移将把超额技能阶数转换为有限材料，并按当前进度规范角色成长。建议保留原存档备份。\n[1] 执行迁移 [0] 保留传统存档\n";
@@ -274,11 +296,85 @@ int potionCount(const player &hero) {
     if (item.getType() == Potion) count += item.getQuantity();
   return count;
 }
+const char *zoneName(Exploration::Zone zone) {
+  switch (zone) {
+  case Exploration::Zone::Guardian: return "守卫房间";
+  case Exploration::Zone::Hidden: return "隐秘处";
+  case Exploration::Zone::Vault: return "上锁的侧室";
+  default: return "房间";
+  }
+}
+void puzzleMenu(player &hero, int floor) {
+  const auto puzzle = Exploration::puzzle(hero, floor);
+  const int size = static_cast<int>(puzzle.elements.size());
+  std::cout << puzzle.prompt << '\n';
+  for (const auto &clue : puzzle.clues) std::cout << "· " << clue << '\n';
+  for (int i = 0; i < size; ++i) std::cout << '[' << i + 1 << "] " << puzzle.elements[i] << ' ';
+  std::cout << "\n从第一个到最后一个依次输入编号（0取消；答错损失当前生命5%，不会致死）：\n";
+  std::vector<int> order;
+  while (static_cast<int>(order.size()) < size) {
+    std::cout << "第" << order.size() + 1 << "个：";
+    const int choice = readInt();
+    if (choice == 0) return;
+    if (choice < 1 || choice > size || std::find(order.begin(), order.end(), choice - 1) != order.end()) {
+      std::cout << "编号无效或重复。\n";
+      continue;
+    }
+    order.push_back(choice - 1);
+  }
+  if (!Exploration::solvePuzzle(hero, floor, order).ok) std::cout << "无法作答。\n";
+}
+void explore(player &hero, int floor, Profile &profile) {
+  for (;;) {
+    const auto spots = Exploration::survey(hero, floor);
+    const auto &run = hero.runState();
+    std::cout << "—— 探索第" << floor << "层（剩余 " << Exploration::remaining(hero, floor) << " 处） ——\n"
+      << "HP " << hero.gethp() << '/' << hero.getmaxhp() << " MP " << hero.getmp() << '/' << hero.getmaxmp()
+      << " 金币 " << hero.getcoin() << " 材料 " << run.materials << " 钥匙 " << run.keys << '\n';
+    for (const auto &view : spots)
+      std::cout << '[' << view.index + 1 << "] " << view.name << "（" << zoneName(view.spot.zone) << "）"
+        << (view.done ? (view.spot.kind == Exploration::SpotKind::Merchant ? " —— 已光顾" : " —— 已探索") : "") << '\n';
+    std::cout << "[0] 返回\n";
+    const int choice = readInt();
+    if (choice == 0) return;
+    if (choice < 1 || choice > static_cast<int>(spots.size())) continue;
+    const auto &view = spots[choice - 1];
+    std::cout << view.name << "：" << view.description << '\n';
+    if (view.spot.kind == Exploration::SpotKind::Puzzle && !view.done) {
+      puzzleMenu(hero, floor);
+      checkAchievements(profile, hero);
+      continue;
+    }
+    const auto options = Exploration::options(hero, floor, view.index);
+    if (options.empty()) {
+      std::cout << (view.done ? "已经探索过了。\n" : "现在无法探索。\n");
+      continue;
+    }
+    for (const auto &option : options)
+      std::cout << '[' << option.id << "] " << option.label << "：" << option.detail
+        << (option.available ? "" : "（" + option.reason + "）") << '\n';
+    std::cout << "[0] 离开\n";
+    const int pick = readInt();
+    if (pick == 0) continue;
+    const auto result = Exploration::interact(hero, floor, view.index, pick);
+    if (!result.ok) {
+      std::cout << "没有执行：选项无效或条件不足。\n";
+      continue;
+    }
+    if (result.lorePage && profile.recordLore(result.lorePage)) {
+      std::cout << "新的一页收入见闻录（" << profile.loreCount() << "/100）。\n";
+      profile.save();
+    }
+    checkAchievements(profile, hero);
+  }
+}
 bool fight(player &hero, int floor, Profile &profile) {
-  auto monster = Campaign::makeEnemy(hero, floor);
+  std::vector<std::string> notes;
+  auto monster = Campaign::makeEnemy(hero, floor, &notes);
   const auto rules = Campaign::rulesFor(hero, floor);
   std::cout << "遭遇：" << monster.getname() << "（第" << floor << "层） HP " << monster.gethp()
     << " 攻击 " << monster.getattack() << '\n';
+  for (const auto &note : notes) std::cout << "【探索】" << note << '\n';
   profile.recordEncounter(floor, monster);
   if (rules.elite)
     std::cout << "【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁且被打断后不休整；首通必得本层最高品质档的目标装备。\n";
@@ -333,7 +429,7 @@ void archive(const Profile &profile) {
   for (;;) {
     std::cout << "远征档案：[1] 敌人图鉴（" << profile.discovered() << "/" << Bestiary::EntryCount
       << "） [2] 词缀图鉴 [3] 成就（" << profile.unlockedCount() << "/" << Profile::achievements().size()
-      << "） [4] 远征记录 [0] 返回\n";
+      << "） [4] 远征记录 [5] 见闻录（" << profile.loreCount() << "/100） [0] 返回\n";
     const int action = readInt();
     if (action == 0) return;
     if (action == 1) {
@@ -348,6 +444,15 @@ void archive(const Profile &profile) {
     if (action == 2) profile.printAffixes();
     if (action == 3) profile.printAchievements();
     if (action == 4) profile.printRecords();
+    if (action == 5) {
+      for (;;) {
+        profile.printLoreOverview();
+        std::cout << "阅读章节（1-10，0返回）：";
+        const int chapter = readInt();
+        if (chapter == 0) break;
+        if (chapter >= 1 && chapter <= 10) profile.printLoreChapter(chapter - 1);
+      }
+    }
   }
 }
 void help() {
@@ -430,7 +535,7 @@ int main() {
     std::cout << "挑战 [0] 标准 [1] 补给匮乏（资源紧张，敌人更难缠） [2] 无复苏（敌人同标准，只有一条命）：";
     int challenge; do { challenge = readInt(); } while (challenge < 0 || challenge > 2);
     Campaign::initialize(*hero, seed == 0 ? static_cast<unsigned>(std::time(nullptr)) : static_cast<unsigned>(seed), challenge);
-    std::cout << "提示：主菜单 [12] 帮助 介绍意图、目标、路线与装备。\n";
+    std::cout << "提示：主菜单 [12] 帮助 介绍意图、目标、路线与装备；[13] 探索本层可以寻找补给、钥匙、谜题与见闻录。\n";
   }
   // Only a death or a final clear that happens in this session ends the run
   // in the records; reloading an old save never logs the same run twice.
@@ -455,7 +560,7 @@ int main() {
     const auto ready = Campaign::readiness(*hero, floor);
     if (!ready.warning.empty()) std::cout << ready.warning << '\n';
     std::cout << "[1] 挑战本层 [2] 背包 [3] 装备 [4] 退出 [5] 存档 [6] 状态 [7] 技能 [8] 营地 [9] 下一层\n"
-      << "[10] 前往楼层 [11] 远征档案 [12] 帮助\n";
+      << "[10] 前往楼层 [11] 远征档案 [12] 帮助 [13] 探索本层（剩余 " << Exploration::remaining(*hero, floor) << " 处）\n";
     const int action = readInt();
     if (action == 4) { exitGame(*hero, floor); return 0; }
     if (action == 5) { SaveSystem::saveGame(*hero, floor); continue; }
@@ -474,6 +579,7 @@ int main() {
     if (action == 10) { travel(*hero, floor); continue; }
     if (action == 11) { archive(profile); continue; }
     if (action == 12) { help(); continue; }
+    if (action == 13) { explore(*hero, floor, profile); continue; }
     if (action != 1) { std::cout << "无效选择。\n"; continue; }
     if (Campaign::eventPending(*hero, floor)) {
       std::cout << Campaign::eventDescription(floor) << '\n';

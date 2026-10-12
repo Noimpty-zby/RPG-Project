@@ -18,7 +18,7 @@ for job in (1, 2, 3):
         assert "最高层 1" in first
         save = pathlib.Path(workspace, "save.dat")
         saved = save.read_text(encoding="utf-8")
-        assert "VERSION 5\n" in saved and "BOUNTIES " in saved and "HIGHEST_FLOOR 1\n" in saved
+        assert "VERSION 6\n" in saved and "BOUNTIES " in saved and "HIGHEST_FLOOR 1\n" in saved
         loaded = run("1\n6\n8\n0\n2\n0\n9\n4\n2\n")
         assert f"Smoke{job}" in loaded and "先完成本层目标" in loaded
         assert save.read_text(encoding="utf-8") == saved
@@ -54,6 +54,14 @@ for job in (1, 2, 3):
         assert "卖出数量（1-4" in menus and "×2，获得" in menus
         assert save.read_text(encoding="utf-8") == saved
 
+        # Exploring the first spot (always a supply cache) is saved; the journal
+        # and camp cooking open from their menus.
+        explored = run("1\n13\n1\n1\n0\n5\n11\n5\n0\n0\n8\n11\n0\n0\n4\n2\n")
+        assert "探索第1层" in explored and "可能有金币" in explored and "已探索" in explored
+        assert "见闻录：已收集" in explored and "烤鱼串" in explored
+        assert "SPOTS_EXPLORED 1\n" in save.read_text(encoding="utf-8")
+        save.write_text(saved, encoding="utf-8")
+
         # Batch potions show their plan before drinking toward the chosen HP.
         save.write_text(re.sub(r"^HP \d+$", "HP 20", saved, flags=re.MULTILINE), encoding="utf-8")
         potions = run("1\n2\n6\n100\n1\n0\n4\n2\n")
@@ -77,5 +85,5 @@ for job in (1, 2, 3):
         run("1\n")
         assert profile.read_text(encoding="utf-8").count("RECORD ") == 1
 
-print("CLI smoke passed: three jobs, V5 round-trip, camp, inventory, input bounds, battle cancellation, EOF, "
+print("CLI smoke passed: three jobs, V6 round-trip, exploration, journal, cooking, camp, inventory, input bounds, battle cancellation, EOF, "
       "old save preservation, help, archive, travel, inspect, stack sales, batch potions, enhance/repair, run records.")

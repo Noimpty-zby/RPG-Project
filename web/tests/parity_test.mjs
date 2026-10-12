@@ -8,6 +8,8 @@ import * as Campaign from '../js/rules/campaign.js';
 import { generateLoot } from '../js/rules/world.js';
 import { fnv1a, utf8 } from '../js/rules/item.js';
 import { Player } from '../js/rules/player.js';
+import * as Exploration from '../js/rules/exploration.js';
+import { collect } from '../js/rules/log.js';
 import { campaignCsv } from './campaign_sim.mjs';
 
 let failures = 0;
@@ -77,8 +79,85 @@ function campaignFingerprint() {
   return print.hash;
 }
 const fingerprint = campaignFingerprint();
-check(fingerprint === 0x0de99c93466e8abcn, `campaign fingerprint is 0x${fingerprint.toString(16)}`);
+check(fingerprint === 0x60a12f556174ccd9n, `campaign fingerprint is 0x${fingerprint.toString(16)}`);
 check(campaignFingerprint() === fingerprint, 'generation must not depend on earlier calls');
+
+// Every exploration text, option, puzzle, merchant good and result for two
+// seeds, identical to random_tests.cpp.
+function explorationFingerprint() {
+  const print = new Fingerprint();
+  for (const seed of [1, 777]) {
+    const hero = new Player('golden', 0);
+    Campaign.initialize(hero, seed, 0);
+    hero.setHighestFloor(100);
+    hero.gaincoin(500);
+    hero.runState().materials = 3;
+    hero.runState().keys = 1;
+    for (let floor = 1; floor <= 100; floor++) {
+      for (const view of Exploration.survey(hero, floor)) {
+        print.add(view.spot.kind);
+        print.add(view.spot.variant);
+        print.add(view.spot.zone);
+        print.add(view.name);
+        print.add(view.description);
+        for (const option of Exploration.options(hero, floor, view.index)) {
+          print.add(option.id);
+          print.add(option.label);
+          print.add(option.detail);
+          print.add(option.available ? 1 : 0);
+          print.add(option.reason);
+        }
+      }
+      for (const good of Exploration.merchantGoods(hero, floor)) {
+        print.add(good.name);
+        print.add(good.description);
+        print.add(good.price);
+        print.add(good.sold ? 1 : 0);
+      }
+      if (Exploration.hasPuzzle(hero, floor)) {
+        const puzzle = Exploration.puzzle(hero, floor);
+        print.add(puzzle.title);
+        print.add(puzzle.prompt);
+        for (const element of puzzle.elements) print.add(element);
+        for (const clue of puzzle.clues) print.add(clue);
+        for (const value of Exploration.puzzleSolution(seed, floor)) print.add(value);
+      }
+      print.add(Exploration.chapterSummary(hero, floor));
+      print.add(Exploration.loreTitle(floor));
+      print.add(Exploration.loreText(floor));
+    }
+    for (let floor = 1; floor <= 20; floor++) {
+      for (const view of Exploration.survey(hero, floor)) {
+        if (view.done || view.spot.kind === Exploration.SpotKind.Puzzle) continue;
+        const result = Exploration.interact(hero, floor, view.index, 1);
+        print.add(result.ok ? 1 : 0);
+        print.add(result.text);
+        print.add(result.lorePage);
+      }
+      if (Exploration.hasPuzzle(hero, floor))
+        print.add(Exploration.solvePuzzle(hero, floor, Exploration.puzzleSolution(seed, floor)).text);
+      const notes = [];
+      Campaign.makeEnemy(hero, floor, notes);
+      for (const note of notes) print.add(note);
+    }
+    for (const recipe of Exploration.recipes()) {
+      print.add(recipe.name);
+      print.add(recipe.description);
+      const result = Exploration.cook(hero, recipe.id);
+      print.add(result.ok ? 1 : 0);
+      print.add(result.text);
+    }
+    const run = hero.runState();
+    for (const value of [hero.getcoin(), hero.gethp(), hero.getmp(), hero.getlevel(), run.keys, run.materials,
+      run.boon, run.bane, run.spotsExplored, run.vaultsOpened, run.puzzlesSolved, run.mealsCooked]) print.add(value);
+    for (const value of run.ingredients) print.add(value);
+    for (const value of run.questItems) print.add(value);
+  }
+  return print.hash;
+}
+const explorationPrint = collect(() => explorationFingerprint()).result;
+check(explorationPrint === 0x5f1125db8e2b21aen, `exploration fingerprint is 0x${explorationPrint.toString(16)}`);
+check(collect(() => explorationFingerprint()).result === explorationPrint, 'exploration must not depend on earlier calls');
 
 const reference = process.argv[2];
 if (reference) {
@@ -100,5 +179,5 @@ if (failures) {
   console.error(`${failures} parity check(s) failed`);
   process.exit(1);
 }
-console.log('Parity tests passed: PCG32 golden sequence, unbiased bounds, campaign fingerprint' +
+console.log('Parity tests passed: PCG32 golden sequence, unbiased bounds, campaign and exploration fingerprints' +
   (reference ? ', full campaign simulation.' : '.'));

@@ -1,6 +1,7 @@
 #include "storage/save.h"
 #include "core/game_config.h"
 #include "core/progression.h"
+#include "game/exploration.h"
 #include "player/jobs.h"
 #include "player/skills.h"
 #include <algorithm>
@@ -30,6 +31,11 @@ const vector<string> runKeys{
     "ROUTES", "EVENTS", "CAMP_RESTED", "ORDERS_CLAIMED", "SHOP_REFRESHES",
     "SHOP_PURCHASED", "CLEARED", "ATTEMPTS", "BATTLES", "TURNS", "POTIONS_USED",
     "DEATHS", "DAMAGE_TAKEN", "USEFUL_DROPS", "GEAR_DROUGHT", "LONGEST_GEAR_DROUGHT"};
+// VERSION 6 adds exploration.
+const vector<string> exploreKeys{
+    "EXPLORED", "KEYS", "INGREDIENTS", "BOON", "BANE", "QUEST_ITEMS", "SPOTS_EXPLORED",
+    "VAULTS_OPENED", "PUZZLES_SOLVED", "MEALS_COOKED"};
+constexpr int kMaxExploredMask = (1 << (Exploration::MerchantBit + Exploration::MerchantGoods)) - 1;
 
 vector<string> split(const string &s, char delim) {
   vector<string> tokens;
@@ -77,6 +83,47 @@ template<size_t N>
 void validateArray(const array<int, N> &values, int maximum, const string &field) {
   for (int value : values) requireRange(value, 0, maximum, field);
 }
+// Exploration records must match the spots each floor actually holds, and the
+// counters must agree with them.
+void validateExploration(const RunState &run, int highestFloor) {
+  requireRange(run.keys, 0, Exploration::MaxKeys, "钥匙");
+  validateArray(run.ingredients, Exploration::MaxIngredients, "食材");
+  requireRange(run.boon, 0, Exploration::BoonCount, "祝福");
+  requireRange(run.bane, 0, Exploration::BaneCount, "诅咒");
+  validateArray(run.questItems, Exploration::QuestItemsPerChapter, "同伴遗物");
+  validateArray(run.explored, kMaxExploredMask, "探索记录");
+  for (int value : {run.spotsExplored, run.vaultsOpened, run.puzzlesSolved, run.mealsCooked})
+    requireRange(value, 0, GameConfig::MaxCounter, "探索统计");
+  if (run.explored[0] != 0) throw runtime_error("楼层数组第0项必须为空");
+  int found = 0, vaults = 0, puzzles = 0;
+  array<int, 10> quests{};
+  for (int floor = 1; floor <= 100; ++floor) {
+    const int mask = run.explored[floor];
+    if (!mask) continue;
+    if (floor > highestFloor) throw runtime_error("探索记录超出最高楼层");
+    const auto spots = Exploration::generate(run.seed, floor);
+    const int spotBits = mask & ((1 << Exploration::MerchantBit) - 1);
+    const int goodsBits = mask >> Exploration::MerchantBit;
+    if (spotBits >> spots.size()) throw runtime_error("探索记录与楼层内容不符");
+    int merchant = -1;
+    for (size_t i = 0; i < spots.size(); ++i)
+      if (spots[i].kind == Exploration::SpotKind::Merchant) merchant = static_cast<int>(i);
+    if (goodsBits && merchant < 0) throw runtime_error("该楼层没有商人");
+    if (merchant >= 0 && (((spotBits >> merchant) & 1) != 0) != (goodsBits != 0))
+      throw runtime_error("商人记录矛盾");
+    for (size_t i = 0; i < spots.size(); ++i) {
+      if (!((spotBits >> i) & 1)) continue;
+      ++found;
+      vaults += spots[i].kind == Exploration::SpotKind::Vault;
+      puzzles += spots[i].kind == Exploration::SpotKind::Puzzle;
+      quests[GameConfig::chapter(floor)] += spots[i].kind == Exploration::SpotKind::QuestItem;
+    }
+  }
+  if (found != run.spotsExplored || vaults != run.vaultsOpened || puzzles != run.puzzlesSolved)
+    throw runtime_error("探索统计与记录矛盾");
+  if (quests != run.questItems) throw runtime_error("同伴遗物记录矛盾");
+}
+
 void validateRun(const RunState &run, int highestFloor) {
   requireRange(run.challenge, 0, 2, "挑战");
   requireRange(run.lootTarget, Weapon, Armor, "掉落目标");
@@ -103,6 +150,7 @@ void validateRun(const RunState &run, int highestFloor) {
   }
   if (run.longestGearDrought < run.gearDrought)
     throw runtime_error("装备空窗统计矛盾");
+  validateExploration(run, highestFloor);
 }
 
 void validateItem(const Item &item) {
@@ -155,6 +203,13 @@ void writeRun(ostream &output, const RunState &run) {
          << "\nDAMAGE_TAKEN " << run.damageTaken << "\nUSEFUL_DROPS " << run.usefulDrops
          << "\nGEAR_DROUGHT " << run.gearDrought
          << "\nLONGEST_GEAR_DROUGHT " << run.longestGearDrought << '\n';
+  writeArray(output, "EXPLORED", run.explored);
+  output << "KEYS " << run.keys << '\n';
+  writeArray(output, "INGREDIENTS", run.ingredients);
+  output << "BOON " << run.boon << "\nBANE " << run.bane << '\n';
+  writeArray(output, "QUEST_ITEMS", run.questItems);
+  output << "SPOTS_EXPLORED " << run.spotsExplored << "\nVAULTS_OPENED " << run.vaultsOpened
+         << "\nPUZZLES_SOLVED " << run.puzzlesSolved << "\nMEALS_COOKED " << run.mealsCooked << '\n';
 }
 
 // A temporary file is written beside the target. POSIX rename replaces it
@@ -225,7 +280,7 @@ string SaveSystem::serializeItem(const Item &item) {
 
 Item SaveSystem::deserializeItem(const string &line) {
   const auto tok = split(line, '|');
-  // 7/8 fields: V1/V2; 12: V3; 14: V4/V5 add the durability cap and enhancement level.
+  // 7/8 fields: V1/V2; 12: V3; 14: V4 and later add the durability cap and enhancement level.
   if (tok.size() != 7 && tok.size() != 8 && tok.size() != 12 && tok.size() != 14)
     throw runtime_error("存档物品格式错误");
   const bool modern = tok.size() >= 12;
@@ -272,7 +327,7 @@ bool SaveSystem::saveGame(const player &hero, int floor, const string &filename)
     requireRange(hero.getcritRate(), 0, 100, "暴击");
     requireRange(hero.getfreerevives(), 0, 1000, "复活");
     ostringstream output;
-    output << "VERSION 5\nNAME " << hero.getname() << "\nJOB " << hero.getjob()
+    output << "VERSION 6\nNAME " << hero.getname() << "\nJOB " << hero.getjob()
            << "\nLEVEL " << hero.getlevel() << "\nEXP " << hero.getexp()
            << "\nCOIN " << hero.getcoin() << "\nHP " << hero.gethp()
            << "\nMAX_HP " << hero.getmaxhp() << "\nATTACK " << hero.getattack()
@@ -356,7 +411,7 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       getline(row >> ws, value);
       if (key != "ITEM" && key != "EQUIP" && key != "SKILL" && !seen.insert(key).second)
         throw runtime_error("重复字段: " + key);
-      if (key == "VERSION") version = parseNumber(value, 1, 5, key);
+      if (key == "VERSION") version = parseNumber(value, 1, 6, key);
       else if (key == "NAME") name = value;
       else if (key == "JOB") job = value;
       else if (key == "LEVEL") level = parseNumber(value, 1, 10000, key);
@@ -395,6 +450,17 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       else if (key == "USEFUL_DROPS") run.usefulDrops = parseNumber(value, 0, GameConfig::MaxCounter, key);
       else if (key == "GEAR_DROUGHT") run.gearDrought = parseNumber(value, 0, GameConfig::MaxCounter, key);
       else if (key == "LONGEST_GEAR_DROUGHT") run.longestGearDrought = parseNumber(value, 0, GameConfig::MaxCounter, key);
+      else if (key == "EXPLORED") run.explored = parseArray<101>(value, 0, kMaxExploredMask, key);
+      else if (key == "KEYS") run.keys = parseNumber(value, 0, Exploration::MaxKeys, key);
+      else if (key == "INGREDIENTS") run.ingredients = parseArray<5>(value, 0, Exploration::MaxIngredients, key);
+      else if (key == "BOON") run.boon = parseNumber(value, 0, Exploration::BoonCount, key);
+      else if (key == "BANE") run.bane = parseNumber(value, 0, Exploration::BaneCount, key);
+      else if (key == "QUEST_ITEMS")
+        run.questItems = parseArray<10>(value, 0, Exploration::QuestItemsPerChapter, key);
+      else if (key == "SPOTS_EXPLORED") run.spotsExplored = parseNumber(value, 0, GameConfig::MaxCounter, key);
+      else if (key == "VAULTS_OPENED") run.vaultsOpened = parseNumber(value, 0, GameConfig::MaxCounter, key);
+      else if (key == "PUZZLES_SOLVED") run.puzzlesSolved = parseNumber(value, 0, GameConfig::MaxCounter, key);
+      else if (key == "MEALS_COOKED") run.mealsCooked = parseNumber(value, 0, GameConfig::MaxCounter, key);
       else if (key == "BACKPACK_COUNT") backpackCount = parseNumber(value, 0, kMaxItems, key);
       else if (key == "EQUIP_COUNT") equipCount = parseNumber(value, 0, 2, key);
       else if (key == "SKILL_COUNT") skillCount = parseNumber(value, 0, 15, key);
@@ -440,9 +506,14 @@ unique_ptr<player> SaveSystem::loadGame(int &floor, const string &filename) {
       const int expected = version >= 4 ? v4Items : v3Items;
       if (expected != backpackCount + equipCount || modernSkills != skillCount)
         throw runtime_error("V" + to_string(version) + "缺少物品或专精字段");
+      for (const auto &key : exploreKeys)
+        if (seen.count(key) != (version >= 6 ? 1u : 0u))
+          throw runtime_error((version >= 6 ? "缺少探索字段: " : "旧版本包含探索字段: ") + key);
     } else {
       for (const auto &key : runKeys)
         if (seen.count(key)) throw runtime_error("旧版本包含未知章节字段: " + key);
+      for (const auto &key : exploreKeys)
+        if (seen.count(key)) throw runtime_error("旧版本包含探索字段: " + key);
       if (v3Items || v4Items || modernSkills) throw runtime_error("旧版本包含V3/V4记录");
       run.legacyRules = true;
       // V2 retains the highest reached floor even after retreat. Floors below

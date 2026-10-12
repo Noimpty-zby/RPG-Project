@@ -28,4 +28,16 @@ struct RunState {
   int usefulDrops = 0;
   int gearDrought = 0;
   int longestGearDrought = 0;
+  // Exploration (see game/exploration.h). explored: per floor, bits 0..15 mark
+  // spots found and bits 16..18 merchant goods sold.
+  std::array<int, 101> explored{};
+  int keys = 0;
+  std::array<int, 5> ingredients{}; // Fish, herb, ore, frost crystal, stardust.
+  int boon = 0; // Next encounter's blessing, 0 none.
+  int bane = 0; // Next encounter's curse, 0 none.
+  std::array<int, 10> questItems{}; // Ally quest items found per chapter, 0..3.
+  int spotsExplored = 0;
+  int vaultsOpened = 0;
+  int puzzlesSolved = 0;
+  int mealsCooked = 0;
 };

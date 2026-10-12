@@ -6,6 +6,10 @@ import { equipmentClass } from './jobs.js';
 import { below } from './random.js';
 
 export const EnemyTuning = {
+  // The base curve every enemy scales from. Raised when floor exploration joined
+  // the game, so a player who explores meets about the earlier difficulty.
+  BaseHpPercent: 110,
+  BaseAttackPercent: 115,
   OrdinaryHpPercent: 160,
   OrdinaryAttackPercent: 90,
   EliteHpPercent: 170,
@@ -156,8 +160,8 @@ export function generateLoot(hero, floor, firstClear) {
 
 export function enemyStatsForFloor(value) {
   const floor = floorOf(value);
-  const baseHp = 40 + floor * 8;
-  const baseAttack = 4 + idiv(floor * 3, 2);
+  const baseHp = idiv((40 + floor * 8) * EnemyTuning.BaseHpPercent, 100);
+  const baseAttack = idiv((4 + idiv(floor * 3, 2)) * EnemyTuning.BaseAttackPercent, 100);
   const exp = 30 + floor * 25;
   const coins = 8 + floor * 10;
   if (floor % 10 === 0)

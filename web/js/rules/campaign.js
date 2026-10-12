@@ -12,6 +12,7 @@ import { emit } from './log.js';
 import { newRunState } from './run_state.js';
 import { Objective, defaultRules } from './combat.js';
 import { EnemyTuning, generateEliteReward, generateEnemy, generateLoot, generateTargetedItem } from './world.js';
+import * as Exploration from './exploration.js';
 
 export const Chapters = [
   { name: '荒野前哨', mission: '切断警钟，护送迷路斥候', ally: '斥候' },
@@ -158,7 +159,10 @@ export function rulesFor(hero, floor) {
   return rules;
 }
 
-export function makeEnemy(hero, floor) {
+// The floor's guardian, including exploration effects (affix sources, the
+// next encounter's boon and bane, the ally's ambush). notes, when given (an
+// array), receives one line per exploration effect for previews.
+export function makeEnemy(hero, floor, notes = null) {
   if (!validFloor(floor)) throw new RangeError('floor must be 1..100');
   seedStream(hero, floor, 10 + hero.runState().attempts[floor]);
   const rules = rulesFor(hero, floor);
@@ -177,6 +181,7 @@ export function makeEnemy(hero, floor) {
     if (event === 1 && type === 0) monster.resetattack(Math.max(1, idiv(monster.getattack() * 90, 100)));
     if (event === 2 && type === 2) monster.resetattack(Math.max(1, idiv(monster.getattack() * 110, 100)));
   }
+  Exploration.applyToEncounter(hero, floor, monster, notes);
   return monster;
 }
 
@@ -385,6 +390,7 @@ export function settleEncounter(hero, monster, battle, floor) {
   run.damageTaken = addCounter(run.damageTaken, report.damageTaken);
   run.attempts[floor] = addCounter(run.attempts[floor], 1);
   hero.finishEncounterWear();
+  Exploration.finishEncounter(hero);
   if (!battle.won()) {
     if (!hero.isalive()) run.deaths = addCounter(run.deaths, 1);
     return false;
@@ -434,6 +440,9 @@ export function settleEncounter(hero, monster, battle, floor) {
   run.longestGearDrought = Math.max(run.longestGearDrought, run.gearDrought);
   return true;
 }
+
+// Adds an item to the backpack, counting gear upgrades like any other reward.
+export function grantItem(hero, item) { giveItem(hero, item); }
 
 export function revive(hero, useFree) {
   const run = hero.runState();
@@ -502,6 +511,13 @@ export function journal(hero, floor) {
     bounties: chapterBounties(hero, c).map((kind, slot) => ({
       name: bounty(kind).name, goal: bountyGoal(kind), progress: run.bounties[c * 2 + slot], target: bounty(kind).target,
     })),
+    exploration: Exploration.chapterSummary(hero, floor),
+    explorePlan: Exploration.chapterPlan(run.seed, c),
+    keys: run.keys,
+    ingredients: [...run.ingredients],
+    boon: run.boon,
+    bane: run.bane,
+    questItems: run.questItems[c],
     letter: c > 0 && run.events[c - 1] === 1
       ? `来自${Chapters[c - 1].ally}的信：上一章的合作已经记入远征日志，效果限于当地。` : '',
   };

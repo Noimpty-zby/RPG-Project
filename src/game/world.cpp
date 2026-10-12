@@ -166,7 +166,8 @@ optional<Item> generateLoot(player &hero, int floor, bool firstClear) {
 
 EnemyStats enemyStatsForFloor(int value) {
   const int floor = GameConfig::floor(value);
-  const int baseHp = 40 + floor * 8, baseAttack = 4 + floor * 3 / 2;
+  const int baseHp = (40 + floor * 8) * EnemyTuning::BaseHpPercent / 100;
+  const int baseAttack = (4 + floor * 3 / 2) * EnemyTuning::BaseAttackPercent / 100;
   const int exp = 30 + floor * 25, coins = 8 + floor * 10;
   // Bosses keep their own curve. Ordinary enemies are tougher but hit softer,
   // so fights last long enough for their intents to matter. Boss attack rises
