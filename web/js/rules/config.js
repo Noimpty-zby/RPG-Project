@@ -22,6 +22,8 @@ export const refreshCost = (floor, refreshes) =>
 export const restCost = (floor) => 60 + chapterOf(floor) * 40;
 export const repairCostPerPoint = (price, tier) =>
   Math.max(1, idiv(Math.max(0, price) * (clamp(tier, 0, 3) + 2), 80));
+// Inheriting a worn item's enhancement costs this share of enhancing anew.
+export const InheritPercent = 30;
 export const enhanceCost = (price, nextLevel) =>
   Math.min(Math.max(0, price) * clamp(nextLevel, 1, MaxEnhanceLevel), MaxCoins);
 export const repeatRewardPercent = (attempts) => (attempts <= 1 ? 30 : attempts <= 3 ? 10 : 0);
@@ -36,6 +38,13 @@ export function skillRankCap(highestFloor) {
   if (highestFloor >= 40) return 3;
   if (highestFloor >= 20) return 2;
   return 1;
+}
+// Each skill rank above the first adds this share of the attack-scaled damage,
+// so ranks keep their value as attack grows.
+export const RankDamagePercent = 8;
+// The highest floor that raises the cap to this rank (1 for rank 1).
+export function skillRankFloor(rank) {
+  return [1, 20, 40, 65, 85][clamp(rank, 1, 5) - 1];
 }
 export function skillUnlockFloor(slot) {
   return [1, 3, 6, 10, 15][clamp(slot, 1, 5) - 1];

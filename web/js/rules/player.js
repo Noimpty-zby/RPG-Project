@@ -2,7 +2,7 @@
 // equipment, durability and skills. The three jobs share one class.
 import { Character } from './character.js';
 import {
-  addCounter, clamp, EnhancePercent, enhanceCost, idiv, IntMax, MaxCoins, MaxCounter,
+  addCounter, clamp, EnhancePercent, enhanceCost, idiv, InheritPercent, IntMax, MaxCoins, MaxCounter,
   MaxEnhanceLevel, MaxLevel, MaxMaterials, floorOf, repairCostPerPoint,
 } from './config.js';
 import { Item, ItemEffect, ItemType, JobReq } from './item.js';
@@ -254,6 +254,55 @@ export class Player extends Character {
     if (item.getQuantity() <= 0) this.backpack.splice(index - 1, 1);
     return true;
   }
+  // Potion choice shared by planPotions and drinkPotionsTo.
+  potionHeal(item) {
+    if (item.getType() !== ItemType.Potion || item.getValue() <= 0) return 0;
+    return idiv(item.getValue() * this.healingPercent, 100);
+  }
+  nextPotion(left, missing) {
+    let fit = 0;
+    let smallest = 0;
+    for (let i = 0; i < this.backpack.length; i++) {
+      const heal = this.potionHeal(this.backpack[i]);
+      if (left[i] <= 0 || heal <= 0) continue;
+      if (heal <= missing && (!fit || heal > this.potionHeal(this.backpack[fit - 1]))) fit = i + 1;
+      if (!smallest || heal < this.potionHeal(this.backpack[smallest - 1])) smallest = i + 1;
+    }
+    return fit || smallest;
+  }
+  // Out-of-battle potions up to targetHp: each drink takes the largest potion
+  // that does not overshoot the HP still missing, or the smallest one when
+  // every potion would. planPotions consumes nothing; drinkPotionsTo makes the
+  // same choices and returns the HP restored. Overflow is healing past max HP.
+  planPotions(targetHp) {
+    const plan = { uses: [], restored: 0, overflow: 0 };
+    if (!this.isalive()) return plan;
+    const left = this.backpack.map((item) => item.getQuantity());
+    const target = clamp(targetHp, 0, this.max_hp);
+    for (let current = this.hp; current < target;) {
+      const slot = this.nextPotion(left, target - current);
+      if (!slot) break;
+      const heal = this.potionHeal(this.backpack[slot - 1]);
+      const restored = Math.min(heal, this.max_hp - current);
+      plan.restored += restored;
+      plan.overflow += heal - restored;
+      current += restored;
+      --left[slot - 1];
+      const use = plan.uses.find((u) => u.slot === slot);
+      if (use) ++use.count;
+      else plan.uses.push({ slot, count: 1 });
+    }
+    return plan;
+  }
+  drinkPotionsTo(targetHp) {
+    const before = this.hp;
+    const target = clamp(targetHp, 0, this.max_hp);
+    while (this.hp < target) {
+      const slot = this.nextPotion(this.backpack.map((item) => item.getQuantity()), target - this.hp);
+      if (!slot || !this.useItem(slot)) break;
+    }
+    return this.hp - before;
+  }
   canEquip(item) {
     return item.getType() !== ItemType.Potion && item.getLevelRequirement() <= this.level &&
       item.getDurability() > 0 && this.canWear(item);
@@ -371,6 +420,59 @@ export class Player extends Character {
     item.setEnhanceLevel(item.getEnhanceLevel() + 1);
     if (item.getType() === ItemType.Weapon) this.attack = addCounter(this.attack, gain);
     else this.max_hp = addCounter(this.max_hp, gain);
+    return true;
+  }
+  // The worn item of the backpack item's slot, if the item could inherit from it.
+  inheritSource(index) {
+    if (index < 1 || index > this.backpack.length) return null;
+    const item = this.backpack[index - 1];
+    if (item.getType() === ItemType.Potion || item.getLevelRequirement() > this.level || item.getDurability() <= 0 ||
+      !this.canWear(item)) return null;
+    return this.equipments.find((worn) => worn.getType() === item.getType() && worn.getEnhanceLevel() > item.getEnhanceLevel()) ?? null;
+  }
+  // Inheriting carries the worn item's enhancement onto a backpack item of the
+  // same slot that the hero can wear: the new item is enhanced to the same
+  // level at InheritPercent of the usual cost and replaces the worn one, which
+  // is consumed. inheritCost is 0 when it is not possible; inheritValue is the
+  // new item's stat afterwards.
+  inheritCost(index) {
+    const worn = this.inheritSource(index);
+    if (!worn) return 0;
+    const item = this.backpack[index - 1];
+    let full = 0;
+    for (let next = item.getEnhanceLevel() + 1; next <= worn.getEnhanceLevel(); ++next) full += enhanceCost(item.getPrice(), next);
+    return clamp(idiv(full * InheritPercent + 99, 100), 1, MaxCoins);
+  }
+  inheritValue(index) {
+    const worn = this.inheritSource(index);
+    if (!worn) return 0;
+    let value = this.backpack[index - 1].getValue();
+    for (let next = this.backpack[index - 1].getEnhanceLevel() + 1; next <= worn.getEnhanceLevel(); ++next)
+      value += Math.max(1, idiv(value * EnhancePercent, 100));
+    return Math.min(value, MaxCounter);
+  }
+  inheritEnhancement(index) {
+    const cost = this.inheritCost(index);
+    const value = this.inheritValue(index);
+    if (cost <= 0 || this.coin < cost || value > 1000000) return false;
+    const levels = this.inheritSource(index).getEnhanceLevel();
+    const selected = this.backpack[index - 1].clone();
+    this.costcoin(cost);
+    if (selected.getQuantity() === 1) this.backpack.splice(index - 1, 1);
+    else this.backpack[index - 1].setQuantity(selected.getQuantity() - 1);
+    selected.setQuantity(1);
+    selected.setValue(value);
+    selected.setEnhanceLevel(levels);
+    const slot = this.equipments.findIndex((worn) => worn.getType() === selected.getType());
+    const worn = this.equipments[slot];
+    // Swap the stat in place; current HP never drops because of the swap.
+    if (selected.getType() === ItemType.Weapon) {
+      this.attack = addCounter(Math.max(0, this.attack - worn.getValue()), value);
+    } else {
+      this.max_hp = addCounter(Math.max(1, this.max_hp - worn.getValue()), value);
+      this.hp = Math.min(this.hp, this.max_hp);
+    }
+    this.equipments[slot] = selected;
     return true;
   }
   repairCost(index) {

@@ -59,7 +59,7 @@ export class TitleScene {
       ),
       game.profileWarning ? h('p', { class: 'bad', style: { fontSize: '13px' } }, game.profileWarning) : null,
       h('div', { class: 'title-foot' },
-        '方向键 / WASD 移动 · 空格 交互 · Esc 菜单 · 战斗中数字键选择行动', h('br'),
+        '方向键 / WASD 移动 · 空格 交互 · F 前往 · Esc 菜单 · 战斗中数字键选择行动', h('br'),
         '规则与 C++ 终端版逐位一致：同一个种子在任何平台都生成相同的远征。', h('br'),
         h('a', { href: 'https://github.com/Noimpty-zby/RPG-Project', target: '_blank', rel: 'noopener' }, '源代码'))));
   }

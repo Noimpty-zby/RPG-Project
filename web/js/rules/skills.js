@@ -1,6 +1,6 @@
 // Port of src/player/skills.{h,cpp}: 15 skills, linear rank growth and the
 // mutually exclusive specializations of the first two skills.
-import { clamp, idiv, MaxCounter, skillRankCap, skillUnlockFloor, IntMax } from './config.js';
+import { clamp, idiv, MaxCounter, RankDamagePercent, skillRankCap, skillRankFloor, skillUnlockFloor, IntMax } from './config.js';
 import { Affix } from './enemy.js';
 import { ItemEffect } from './item.js';
 import { Job } from './jobs.js';
@@ -60,6 +60,19 @@ function strike(ability, target, damage, pierce = false, hit = 0) {
   target.takedamage(amount);
 }
 
+// Rank-dependent effects, shared by the skills and their previews.
+const finisherHeal = (ability) => 10 * ability.getEffectiveRank();
+const surgeMana = (ability) => 20 + (ability.getEffectiveRank() - 1) * 3;
+const lifestealPercent = (ability) => 40 + (ability.getEffectiveRank() - 1) * 3;
+const lifestealCap = (hero) => percent(hero.getRecoveryBaseHp(), 10);
+// The number a preview leads with: per-hit damage for the combo, the flat
+// bonus for the execute, otherwise the expected direct damage.
+function headlineDamage(ability, hero) {
+  if (hero.job() === Job.Assassin && ability.getskillid() === 3) return percent(ability.getScaledDamage(hero), 55);
+  if (hero.job() === Job.Assassin && ability.getskillid() === 5) return ability.getdamage();
+  return directDamage(ability, hero);
+}
+
 const SpecializationNames = [
   [['反击', '重斩'], ['坚守', '振奋']],
   [['蓄焰', '火花'], ['深冻', '碎冰']],
@@ -101,7 +114,12 @@ export class Skill {
   getcurrentcooldown() { return this.currentcooldown; }
   getdamage() { return this.damage; }
   getEffectiveRank() { return clamp(this.level, 1, 5); }
-  getScaledDamage(hero) { return clamp(this.damage + idiv(hero.getattack() * 3, 4), 0, MaxCounter); }
+  // Ranks scale the whole attack-scaled damage; only the execute's flat bonus
+  // (getdamage) still grows by 15 per rank.
+  getScaledDamage(hero) {
+    const base = this.basedamage + idiv(hero.getattack() * 3, 4);
+    return clamp(idiv(base * (100 + RankDamagePercent * (this.getEffectiveRank() - 1)), 100), 0, MaxCounter);
+  }
   getActualCost(hero) {
     if (hero.job() === Job.Mage && this.skillid === 4) return Math.max(10, idiv(hero.getmp(), 2));
     let cost = this.costmp;
@@ -173,7 +191,7 @@ export class Skill {
     const id = this.skillid;
     const branch = this.specialization;
     if (hero.job() === Job.Assassin && id === 3)
-      out += `2—4次连击，每击 ${percent(this.getScaledDamage(hero), 55)}；后续击穿盾`;
+      out += `2—4次连击，每击 ${headlineDamage(this, hero)}；后续击穿盾`;
     else if (hero.job() === Job.Assassin && id === 5)
       out += `无视护盾：当前敌HP的普通35%/Boss15% + ${this.getdamage()}`;
     else out += `当前预计伤害 ${amount}（未计敌方减免/闪避）`;
@@ -183,25 +201,50 @@ export class Skill {
         if (branch === 2) out += '；不回血，命中恢复6MP';
         else out += `；基础生命恢复 ${percent(hero.getRecoveryBaseHp(), branch === 1 ? 25 : 15)}`;
       }
-      if (id === 3) out += `；敌攻击-35%，持续 ${controlDuration(hero, 2)} 次行动`;
+      if (id === 3) out += `；无视护盾；敌攻击-35%，持续 ${controlDuration(hero, 2)} 次行动`;
       if (id === 4) out += '；生命比例>60%/30—60%/<30%对应1/1.8/3倍';
-      if (id === 5) out += `；恢复 ${10 * this.getEffectiveRank()} HP`;
+      if (id === 5) out += `；恢复 ${finisherHeal(this)} HP`;
     } else if (hero.job() === Job.Mage) {
       if (id === 1 && branch !== 2) out += '；消耗专注，最多2层';
       if (id === 1 && branch === 2) out += '；保留并增加1层专注';
       if (id === 2 && branch !== 2)
         out += `；敌攻击-${branch === 1 ? '40%' : '30%（强力敌45%）'}，持续 ${controlDuration(hero, branch === 1 ? 3 : 2)} 次行动；命中回4MP`;
       if (id === 2 && branch === 2) out += '；放弃减攻，命中回6MP';
-      if (id === 3) out += `；无视护盾，恢复 ${20 + (this.getEffectiveRank() - 1) * 3} MP`;
+      if (id === 3) out += `；无视护盾，恢复 ${surgeMana(this)} MP`;
       if (id === 4) out += '；实际消耗当前MP一半，至少10MP';
       if (id === 5) out += '；命中后敌生命<30%时追加其当前生命30%伤害';
     } else {
       if (id === 1) out += branch === 2 ? '；无视护盾' : branch === 1 ? '；命中增加2层破绽' : '；命中增加1层破绽';
       if (id === 2 && branch !== 2) out += '；消耗破绽，最多2层';
       if (id === 2 && branch === 2) out += '；命中回8MP并减攻15%一次行动';
-      if (id === 4) out += `；吸取实际伤害的 ${40 + (this.getEffectiveRank() - 1) * 3}%（最多基础生命10%）`;
+      if (id === 4) out += `；吸取实际伤害的 ${lifestealPercent(this)}%（最多基础生命10%，即 ${lifestealCap(hero)} HP）`;
     }
     return out;
+  }
+  // Current versus next rank at the hero's current stats, or why it cannot rise.
+  getUpgradePreview(hero) {
+    if (this.level >= 5) return '已满阶（5阶），无法继续升阶。';
+    const next = Object.assign(Object.create(Object.getPrototypeOf(this)), this);
+    next.restoreProgress(this.level + 1, this.currentcooldown);
+    const assassin = hero.job() === Job.Assassin;
+    const id = this.skillid;
+    let out = `升至${this.level + 1}阶（${this.getlevelUpCost()}金币）：` +
+      `${assassin && id === 3 ? '每击伤害 ' : assassin && id === 5 ? '固定加成 ' : '伤害 '}` +
+      `${headlineDamage(this, hero)}→${headlineDamage(next, hero)}，MP ${this.getActualCost(hero)}→${next.getActualCost(hero)}，` +
+      `冷却 ${this.cooldown} 不变`;
+    if (hero.job() === Job.Warrior && id === 5) out += `，恢复 ${finisherHeal(this)}→${finisherHeal(next)} HP`;
+    if (hero.job() === Job.Mage && id === 3) out += `，回复 ${surgeMana(this)}→${surgeMana(next)} MP`;
+    if (assassin && id === 4) {
+      const drain = (rank) => Math.min(percent(headlineDamage(rank, hero), lifestealPercent(rank)), lifestealCap(hero));
+      out += `，吸血比例 ${lifestealPercent(this)}%→${lifestealPercent(next)}%；按当前属性预计回复 ` +
+        `${drain(this)}→${drain(next)} HP（上限 ${lifestealCap(hero)}）`;
+      if (drain(next) === drain(this)) out += '，已触及上限，升阶不增加实际治疗';
+    }
+    if (hero.getlevel() < this.levelrequired || hero.getHighestFloor() < this.getunlockfloor()) out += '。技能尚未解锁';
+    else if (this.level >= skillRankCap(hero.getHighestFloor()))
+      out += `。当前阶数上限 ${this.level}，到达第${skillRankFloor(this.level + 1)}层后可升`;
+    else if (hero.getlevel() < this.level + 1) out += `。需要角色 Lv.${this.level + 1}`;
+    return `${out}。`;
   }
   useSkill(hero, target) { return this.useImpl(this, hero, target); }
 }
@@ -238,7 +281,7 @@ const Definitions = {
     [5, 9, 35, 6, 180, '无双斩', (s, hero, target) => {
       if (!beginCast(s, hero, target)) return false;
       strike(s, target, directDamage(s, hero));
-      hero.heal(10 * s.getEffectiveRank());
+      hero.heal(finisherHeal(s));
       return true;
     }],
   ],
@@ -265,7 +308,7 @@ const Definitions = {
     [3, 4, 0, 3, 20, '毒云术', (s, hero, target) => {
       if (!beginCast(s, hero, target)) return false;
       strike(s, target, directDamage(s, hero), true);
-      hero.gainMana(20 + (s.getEffectiveRank() - 1) * 3);
+      hero.gainMana(surgeMana(s));
       return true;
     }],
     [4, 6, 0, 5, 0, '奥术爆发', (s, hero, target) => {
@@ -319,7 +362,7 @@ const Definitions = {
       const before = target.gethp();
       strike(s, target, directDamage(s, hero));
       const actual = Math.max(0, before - target.gethp());
-      const drain = Math.min(percent(actual, 40 + (s.getEffectiveRank() - 1) * 3), percent(hero.getRecoveryBaseHp(), 10));
+      const drain = Math.min(percent(actual, lifestealPercent(s)), lifestealCap(hero));
       hero.heal(drain);
       return true;
     }],

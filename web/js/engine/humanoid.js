@@ -404,6 +404,9 @@ export const HeroLooks = [
 export const NpcLooks = {
   merchant: { hair: P.tan, hat: 'cap', hatColor: P.forest, hatAccent: P.gold, torso: P.clay, trim: P.sand, legs: P.brown,
     boots: P.plum, pack: P.brown, weapon: null, beard: P.tan },
+  // The wandering merchant met on two floors per chapter.
+  wanderer: { hair: P.silver, hat: 'straw', torso: P.violet, trim: P.gold, legs: P.ink, boots: P.brown, pack: P.clay,
+    weapon: null, beard: P.silver },
   allies: [
     { hat: 'hood', hatColor: P.forest, torso: P.pine, trim: P.green, legs: P.brown, weapon: 'dagger', hair: P.brown },
     { hat: 'straw', hair: P.brown, hairStyle: 'long', torso: P.green, trim: P.sand, legs: P.brown, pack: P.tan, weapon: null },

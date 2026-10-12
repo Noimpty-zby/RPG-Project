@@ -12,6 +12,7 @@ add_library(rpg_core
     src/enemy/enemy.cpp
     src/item/item.cpp
     src/game/campaign.cpp src/game/combat.cpp src/game/world.cpp
+    src/game/exploration.cpp src/game/exploration_text.cpp
     src/storage/save.cpp src/storage/profile.cpp
     src/ui/help.cpp)
 target_include_directories(rpg_core PUBLIC src)
@@ -23,7 +24,7 @@ target_link_libraries(RPG_Game PRIVATE rpg_core)
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(test_name random_tests enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests profile_tests)
+    foreach(test_name random_tests enemy_tests skill_progression_tests save_tests combat_tests build_tests loot_tests campaign_tests profile_tests exploration_tests)
         add_executable(${test_name} tests/unit/${test_name}.cpp)
         target_link_libraries(${test_name} PRIVATE rpg_core)
         if(MSVC)

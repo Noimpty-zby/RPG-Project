@@ -11,6 +11,14 @@ inline int skillRankCap(int highestFloor) {
   if (highestFloor >= 20) return 2;
   return 1;
 }
+// Each skill rank above the first adds this share of the attack-scaled damage,
+// so ranks keep their value as attack grows.
+constexpr int RankDamagePercent = 8;
+// The highest floor that raises the cap to this rank (1 for rank 1).
+inline int skillRankFloor(int rank) {
+  constexpr int floors[] = {1, 20, 40, 65, 85};
+  return floors[std::clamp(rank, 1, 5) - 1];
+}
 
 inline int skillUnlockFloor(int slot) {
   constexpr int floors[] = {1, 3, 6, 10, 15};

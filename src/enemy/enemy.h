@@ -137,6 +137,9 @@ public:
   EnemyIntent getIntent() const;
   void displayIntent() const;
   bool interruptCharge();
+  // Whether a successful interrupt is followed by a Recover turn. Every text
+  // that promises the rest reads this so it never contradicts the rule.
+  bool interruptGrantsRecovery() const;
   void setObjectivePressure(bool enabled);
   void setTacticalPressure(int difficulty);
   void applySabotage();

@@ -1,4 +1,5 @@
 #include "core/random.h"
+#include "game/campaign.h"
 #include "game/combat.h"
 #include "player/jobs.h"
 #include "player/skills.h"
@@ -100,12 +101,61 @@ void testChargeCounterAndRecovery() {
   require(guardHero->gethp() == 800 - heavy && guardBattle.report().damageTaken == heavy,
           "Basic guard must halve the heavy strike");
 
+  // A dodge costs the hit's damage and MP, never the correct read.
   auto missHero = hero(); auto dodging = foe(10, true); dodging.setdodgeRate(100);
+  missHero->setmp(0);
   BattleSession missBattle(*missHero, dodging);
-  turn(missBattle, {ActionType::Attack});
-  require(missBattle.report().interrupts == 0 &&
-              dodging.getIntent().kind == EnemyIntentKind::HeavyStrike,
-          "A missed attack must not count as an interruption");
+  require(missBattle.beginTurn(), "Expected a live action window");
+  const int dodgingHp = dodging.gethp(), missMp = missHero->getmp();
+  std::ostringstream shown;
+  auto *previous = std::cout.rdbuf(shown.rdbuf());
+  require(missBattle.act({ActionType::Attack}), "Expected an available action");
+  std::cout.rdbuf(previous);
+  require(missBattle.report().interrupts == 1 &&
+              dodging.getIntent().kind == EnemyIntentKind::Recover,
+          "A dodged plain attack must still interrupt the charge");
+  require(dodging.gethp() == dodgingHp && missHero->getmp() == missMp &&
+              shown.str().find("普攻虽被闪避，仍打断了蓄力") != std::string::npos,
+          "A dodged interrupt deals no damage, earns no MP and says why it still worked");
+  auto plainHero = hero(); auto plainDodger = foe(1, false); plainDodger.setdodgeRate(100);
+  BattleSession plainBattle(*plainHero, plainDodger);
+  require(!plainDodger.getIntent().interruptible, "Expected a non-charge opening intent");
+  turn(plainBattle, {ActionType::Attack});
+  require(plainBattle.report().interrupts == 0,
+          "Only a charge can be interrupted, dodged or not");
+}
+
+// Every text about an interrupt must match what the enemy then does: ordinary
+// fights and bosses rest, scarce-supply and elite fights do not.
+void testInterruptTextsMatchRecovery() {
+  struct Case { int floor; bool boss; int difficulty; bool elite; };
+  const Case cases[] = {{4, false, 0, false}, {4, false, 1, true}, {4, false, 1, false},
+                        {4, false, 2, true},  {10, true, 0, false}, {10, true, 1, false}};
+  for (const Case &c : cases) {
+    auto h = hero(); auto e = foe(c.floor, c.boss, 0);
+    EncounterRules rules;
+    rules.difficulty = c.difficulty;
+    rules.elite = c.elite;
+    BattleSession b(*h, e, rules);
+    for (int i = 0; i < 30 && !e.getIntent().interruptible; ++i) turn(b, {ActionType::Guard});
+    require(e.getIntent().interruptible, "Interrupt text fixture must reach a charge");
+    const std::string hint = e.getTacticalHint();
+    std::ostringstream shown;
+    auto *previous = std::cout.rdbuf(shown.rdbuf());
+    e.displayIntent();
+    turn(b, {ActionType::Attack});
+    std::cout.rdbuf(previous);
+    const bool rests = e.getIntent().kind == EnemyIntentKind::Recover;
+    require(b.report().interrupts == 1 && rests == (c.difficulty == 0),
+            "Only unpressured enemies rest after an interrupt");
+    const std::string text = shown.str();
+    require(rests == (text.find("敌人随后休整一回合") != std::string::npos) &&
+                rests == (text.find("下回合敌人休整") != std::string::npos) &&
+                rests != (text.find("不休整") != std::string::npos),
+            "Charge intent and interrupt log must promise rest exactly when it follows");
+    require(c.boss || rests != (hint.find("不休整") != std::string::npos),
+            "The charge guard's tactical hint must match the interrupt rule");
+  }
 }
 
 void testSuppressionAndShatterCounters() {
@@ -290,7 +340,7 @@ void testCleanupAndSabotage() {
 }
 
 void testHealingAffixAndInterrupts() {
-  // Healers mend while charging; landing a basic attack interrupts it.
+  // Healers mend while charging; a basic attack interrupts it.
   auto ignoring = hero(); auto healer = foe(10, true, 0);
   giveAffix(healer, Affix::HEALING);
   healer.removeAffix(Affix::POISONOUS);
@@ -307,6 +357,71 @@ void testHealingAffixAndInterrupts() {
   turn(broken, {ActionType::Attack});
   require(broken.report().interrupts == 1 && interrupted.gethp() < 500,
           "Interrupting the charge must deny the heal");
+}
+
+// A skill the enemy dodges entirely refunds half its MP; a landed one does not,
+// and the cooldown runs either way.
+void testDodgedSkillRefund() {
+  auto dodger = hero(); auto evasive = foe(1, false, 0);
+  evasive.setdodgeRate(100);
+  dodger->getSkill(1)->resetcurrentcooltime();
+  BattleSession dodged(*dodger, evasive);
+  require(dodged.beginTurn(), "Expected a live action window");
+  const int cost = dodger->getSkill(1)->getActualCost(*dodger), mp = dodger->getmp();
+  std::ostringstream shown;
+  auto *previous = std::cout.rdbuf(shown.rdbuf());
+  require(dodged.act({ActionType::Skill, 1}), "Expected the skill to be cast");
+  std::cout.rdbuf(previous);
+  require(dodger->getmp() == mp - cost + cost / 2 && dodger->getSkill(1)->getcurrentcooldown() > 0 &&
+              shown.str().find("【落空返还】") != std::string::npos,
+          "A fully dodged skill refunds half its MP and still cools down");
+  auto striker = hero(); auto target = foe(1, false, 0);
+  striker->getSkill(1)->resetcurrentcooltime();
+  BattleSession landed(*striker, target);
+  require(landed.beginTurn(), "Expected a live action window");
+  const int landedMp = striker->getmp();
+  require(landed.act({ActionType::Skill, 1}) &&
+              striker->getmp() == landedMp - striker->getSkill(1)->getActualCost(*striker),
+          "A landed skill refunds nothing");
+}
+
+// Poison alone is no sign of stalling: the advice needs a Defeat fight where
+// the player guarded while nothing called for it.
+void testPoisonAdviceFollowsBehavior() {
+  const auto advice = [](const BattleSession &b) {
+    std::ostringstream shown;
+    auto *previous = std::cout.rdbuf(shown.rdbuf());
+    Campaign::printBattleReport(b);
+    std::cout.rdbuf(previous);
+    return shown.str().find("格挡等待") != std::string::npos;
+  };
+  const auto waiting = [](EnemyIntentKind kind) {
+    return kind == EnemyIntentKind::Attack || kind == EnemyIntentKind::Charge ||
+           kind == EnemyIntentKind::Recover;
+  };
+
+  auto survivor = hero(); auto toxic = foe(1, false, 0);
+  giveAffix(toxic, Affix::POISONOUS);
+  BattleSession survive(*survivor, toxic, {EncounterObjective::Survive, 5});
+  while (!survive.finished()) turn(survive, {ActionType::Guard});
+  require(survive.won() && survive.report().poisonDamage > 0 && !advice(survive),
+          "Waiting out a survival objective must not be called stalling");
+
+  auto attacker = hero(); auto toxicBoss = foe(10, true, 0);
+  giveAffix(toxicBoss, Affix::POISONOUS);
+  BattleSession assault(*attacker, toxicBoss);
+  for (int i = 0; i < 6; ++i) turn(assault, {ActionType::Attack});
+  require(assault.report().poisonDamage > 0 && assault.report().waitingGuards == 0 &&
+              !advice(assault),
+          "Attacking every turn must not be called stalling");
+
+  auto staller = hero(); auto toxicFoe = foe(1, false, 0);
+  giveAffix(toxicFoe, Affix::POISONOUS);
+  BattleSession stall(*staller, toxicFoe);
+  for (int i = 0; i < 30 && stall.report().waitingGuards < 2; ++i)
+    turn(stall, {waiting(toxicFoe.getIntent().kind) ? ActionType::Guard : ActionType::Attack});
+  require(stall.report().waitingGuards == 2 && advice(stall),
+          "Guarding while nothing threatens in a poisoned Defeat fight is stalling");
 }
 
 void testAssassinCannotDodgeUnavoidableDamage() {
@@ -344,6 +459,7 @@ int main() {
     Random::seed(42);
     testInvalidActionsAndResources();
     testChargeCounterAndRecovery();
+    testInterruptTextsMatchRecovery();
     testSuppressionAndShatterCounters();
     testReadCounterAndReport();
     testObjectivesAndSettlement();
@@ -352,6 +468,8 @@ int main() {
     testCleanupAndSabotage();
     testAssassinCannotDodgeUnavoidableDamage();
     testHealingAffixAndInterrupts();
+    testPoisonAdviceFollowsBehavior();
+    testDodgedSkillRefund();
     std::cout.rdbuf(previous);
     std::cout << "combat objective tests passed\n";
   } catch (const std::exception &error) {

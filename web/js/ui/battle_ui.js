@@ -66,6 +66,7 @@ export class BattleUI {
     const lines = [];
     if (rules.elite) lines.push('【精英】至少两个词缀，生命与攻击更高，特殊意图更频繁且被打断后不休整。');
     if (rules.bossSabotaged) lines.push('供能设施已破坏，Boss护盾失效。');
+    for (const note of this.scene.notes) lines.push(`【探索】${note}`);
     for (const line of lines) this.log({ text: line, type: 'notice' });
     this.log({ text: `${this.monster.getEncounterTitle()}：${this.monster.getTacticalHint()}`, type: 'notice' });
   }
@@ -173,7 +174,7 @@ export class BattleUI {
     );
     let hint = this.hintText || '';
     if (!hint && !locked && intent) {
-      if (interrupt) hint = '敌人正在蓄力：普攻命中即可打断！';
+      if (interrupt) hint = '敌人正在蓄力：普攻即可打断！';
       else if (intent.kind === Intent.HeavyStrike) hint = '重击来袭：格挡可减半伤害。';
       else if (intent.kind === Intent.Wound) hint = '压制治疗：这回合先别回血。';
       else if (intent.kind === Intent.Shatter) hint = '破防攻击无视格挡：主动进攻更划算。';

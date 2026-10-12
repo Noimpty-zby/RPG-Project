@@ -185,7 +185,9 @@ struct BossProfile {
   EnemyIntentKind secondary;
   const char *hint;
   // Bosses without a Charge tactic never open an interrupt/recovery window,
-  // so they hit slightly softer to keep chapter difficulty comparable.
+  // so they hit slightly softer to keep chapter difficulty comparable. The
+  // throne priest (floor 90) is softer still: both its tactics punish healing,
+  // and a Wound opener never falls back to an opening Charge as ReadPattern does.
   int attackPercent;
 };
 const BossProfile bossProfiles[] = {
@@ -206,7 +208,7 @@ const BossProfile bossProfiles[] = {
     {"星蚀观测站·蚀星观测者", EnemyIntentKind::Shatter, EnemyIntentKind::ReadPattern,
      "目标：星蚀破防时主动出招，观测者预判时切换行动种类。", 90},
     {"王庭废墟·王座祭司", EnemyIntentKind::Wound, EnemyIntentKind::ReadPattern,
-     "目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。", 90},
+     "目标：避开王座抑疗安排恢复，防止回血习惯被祭司读招。", 80},
     {"天顶之门·远征裁决者", EnemyIntentKind::ReadPattern, EnemyIntentKind::Shatter,
      "目标：应对裁决者的读招、破防与低血蓄力，改变行动争取突围窗口。", 100}};
 
@@ -231,10 +233,13 @@ const char *const tacticRoles[4] = {"蓄力守卫", "抑疗猎手", "破阵斥�
 // Hints for ordinary enemies, in the same tactic order. Every ordinary enemy
 // can also Charge, so the non-Charge hints mention the interrupt counter too.
 const char *const tacticHints[4] = {
-    "会蓄力并在下回合重击；普攻实际命中可以打断，换来一回合休整。",
+    "会蓄力并在下回合重击；普攻即可打断（被闪避也算），换来一回合休整。",
     "在你治疗后压制治疗效果；先攻击或格挡，等离开该意图再回血。蓄力时普攻可打断。",
     "在你格挡后发动无视格挡的破防攻击，此时主动出手更划算。蓄力时普攻可打断。",
     "记录你的出招习惯并预判重复行动，改变行动可让预判落空。蓄力时普攻可打断。"};
+// The Charge hint for pressured enemies, which do not rest after an interrupt.
+const char *const pressuredChargeHint =
+    "会蓄力并在下回合重击；普攻即可打断（被闪避也算），但它被打断后不休整，下回合仍会行动。";
 } // namespace
 
 int bossAttackPercent(int floor) { return bossProfiles[chapterIndex(floor)].attackPercent; }
@@ -272,8 +277,12 @@ string enemy::getEncounterTitle() const {
 
 string enemy::getTacticalHint() const {
   if (bossEncounter) return bossProfiles[chapterIndex(encounterFloor)].hint;
-  if (encounterFloor > 0) return tacticHints[encounterFloor % 4];
-  return "观察早期意图：普攻命中可打断蓄力；格挡能抗重击，换招能避开预判。";
+  if (encounterFloor > 0) {
+    const int slot = encounterFloor % 4;
+    if (slot == 0 && !interruptGrantsRecovery()) return pressuredChargeHint;
+    return tacticHints[slot];
+  }
+  return "观察早期意图：普攻可打断蓄力；格挡能抗重击，换招能避开预判。";
 }
 
 EnemyIntentKind enemy::primaryTactic() const {
@@ -400,8 +409,10 @@ void enemy::displayIntent() const {
     cout << "普通攻击：造成 100% 攻击伤害，可格挡减半。";
     break;
   case EnemyIntentKind::Charge:
-    cout << "蓄力：本回合不攻击；普通攻击实际命中即可打断，敌人随后休整一回合。"
-            "未打断则下回合重击（"
+    cout << (interruptGrantsRecovery()
+                 ? "蓄力：本回合不攻击；普通攻击即可打断（被闪避也算），敌人随后休整一回合。"
+                 : "蓄力：本回合不攻击；普通攻击即可打断（被闪避也算），但该敌人被打断后不休整。")
+         << "未打断则下回合重击（"
          << makeIntent(EnemyIntentKind::HeavyStrike).damagePercent << "%），可格挡减半。";
     if (hasAffix(Affix::HEALING))
       cout << "【治疗】蓄力完成会回复 " << IntentTuning::HealingAffixPercent << "% 最大生命。";
@@ -437,12 +448,14 @@ void enemy::displayIntent() const {
 bool enemy::interruptCharge() {
   if (getIntent().kind != EnemyIntentKind::Charge) return false;
   chargePending = false;
-  // Pressured enemies (challenges, elites) shake off an interrupt at once.
-  recoveryTurns = tacticalPressure == 0 ? 1 : 0;
+  recoveryTurns = interruptGrantsRecovery() ? 1 : 0;
   interruptedThisTurn = true;
   specialCooldown = max(1, 3 - tacticalPressure) + (sabotaged ? 1 : 0);
   return true;
 }
+
+// Pressured enemies (challenges, elites) shake off an interrupt at once.
+bool enemy::interruptGrantsRecovery() const { return tacticalPressure == 0; }
 
 void enemy::setObjectivePressure(bool enabled) { objectivePressure = enabled; }
 void enemy::setTacticalPressure(int difficulty) {

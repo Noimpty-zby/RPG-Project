@@ -257,6 +257,52 @@ bool player::useItem(int index) {
   if (item.getQuantity() <= 0) backpack.erase(backpack.begin() + index - 1);
   return true;
 }
+int player::potionHeal(const Item &item) const {
+  if (item.getType() != Potion || item.getValue() <= 0) return 0;
+  return static_cast<int>(static_cast<long long>(item.getValue()) * healingPercent / 100);
+}
+int player::nextPotion(const std::vector<int> &left, int missing) const {
+  int fit = 0, smallest = 0;
+  for (int i = 0; i < static_cast<int>(backpack.size()); ++i) {
+    const int heal = potionHeal(backpack[i]);
+    if (left[i] <= 0 || heal <= 0) continue;
+    if (heal <= missing && (!fit || heal > potionHeal(backpack[fit - 1]))) fit = i + 1;
+    if (!smallest || heal < potionHeal(backpack[smallest - 1])) smallest = i + 1;
+  }
+  return fit ? fit : smallest;
+}
+player::PotionPlan player::planPotions(int targetHp) const {
+  PotionPlan plan;
+  if (!isalive()) return plan;
+  std::vector<int> left;
+  for (const Item &item : backpack) left.push_back(item.getQuantity());
+  const int target = clamp(targetHp, 0, max_hp);
+  for (int current = hp; current < target;) {
+    const int slot = nextPotion(left, target - current);
+    if (!slot) break;
+    const int heal = potionHeal(backpack[slot - 1]);
+    const int restored = min(heal, max_hp - current);
+    plan.restored += restored;
+    plan.overflow += heal - restored;
+    current += restored;
+    --left[slot - 1];
+    auto use = find_if(plan.uses.begin(), plan.uses.end(), [&](const auto &u) { return u.first == slot; });
+    if (use == plan.uses.end()) plan.uses.push_back({slot, 1});
+    else ++use->second;
+  }
+  return plan;
+}
+int player::drinkPotionsTo(int targetHp) {
+  const int before = hp;
+  const int target = clamp(targetHp, 0, max_hp);
+  while (hp < target) {
+    std::vector<int> left;
+    for (const Item &item : backpack) left.push_back(item.getQuantity());
+    const int slot = nextPotion(left, target - hp);
+    if (!slot || !useItem(slot)) break;
+  }
+  return hp - before;
+}
 bool player::equipItem(int index) {
   if (index < 1 || index > static_cast<int>(backpack.size())) return false;
   Item selected = backpack[index - 1];
@@ -378,6 +424,60 @@ bool player::enhanceEquipment(int index) {
   else max_hp = GameConfig::addCounter(max_hp, gain);
   return true;
 }
+const Item *player::inheritSource(int index) const {
+  if (index < 1 || index > static_cast<int>(backpack.size())) return nullptr;
+  const Item &item = backpack[index - 1];
+  if (item.getType() == Potion || item.getLevelRequirement() > level || item.getDurability() <= 0 ||
+      !canWear(item))
+    return nullptr;
+  for (const Item &worn : equipments)
+    if (worn.getType() == item.getType() && worn.getEnhanceLevel() > item.getEnhanceLevel()) return &worn;
+  return nullptr;
+}
+int player::inheritCost(int index) const {
+  const Item *worn = inheritSource(index);
+  if (!worn) return 0;
+  const Item &item = backpack[index - 1];
+  long long full = 0;
+  for (int next = item.getEnhanceLevel() + 1; next <= worn->getEnhanceLevel(); ++next)
+    full += GameConfig::enhanceCost(item.getPrice(), next);
+  return static_cast<int>(std::clamp((full * GameConfig::InheritPercent + 99) / 100, 1LL,
+                                     static_cast<long long>(GameConfig::MaxCoins)));
+}
+int player::inheritValue(int index) const {
+  const Item *worn = inheritSource(index);
+  if (!worn) return 0;
+  long long value = backpack[index - 1].getValue();
+  for (int next = backpack[index - 1].getEnhanceLevel() + 1; next <= worn->getEnhanceLevel(); ++next)
+    value += max(1LL, value * GameConfig::EnhancePercent / 100);
+  return static_cast<int>(min(value, static_cast<long long>(GameConfig::MaxCounter)));
+}
+bool player::inheritEnhancement(int index) {
+  const int cost = inheritCost(index);
+  const int value = inheritValue(index);
+  if (cost <= 0 || coin < cost || value > 1000000) return false;
+  const int levels = inheritSource(index)->getEnhanceLevel();
+  Item selected = backpack[index - 1];
+  costcoin(cost);
+  if (selected.getQuantity() == 1) backpack.erase(backpack.begin() + index - 1);
+  else backpack[index - 1].setQuantity(selected.getQuantity() - 1);
+  selected.setQuantity(1);
+  selected.setValue(value);
+  selected.setEnhanceLevel(levels);
+  for (Item &worn : equipments) {
+    if (worn.getType() != selected.getType()) continue;
+    // Swap the stat in place; current HP never drops because of the swap.
+    if (selected.getType() == Weapon) {
+      attack = GameConfig::addCounter(max(0, attack - worn.getValue()), value);
+    } else {
+      max_hp = GameConfig::addCounter(max(1, max_hp - worn.getValue()), value);
+      hp = min(hp, max_hp);
+    }
+    worn = selected;
+    break;
+  }
+  return true;
+}
 int player::repairCost(int index) const {
   if (index < 1 || index > static_cast<int>(equipments.size())) return 0;
   const Item &item = equipments[index - 1];
@@ -402,7 +502,8 @@ void player::showSkills() const {
          << ability.getPreview(*this) << "\n   MP " << ability.getActualCost(*this)
          << " | 冷却 " << ability.getcurrentcooldown() << "/" << ability.getcooldown()
          << " | 等级需求 " << ability.getlevelrequired() << " | 楼层需求 " << ability.getunlockfloor()
-         << " | 升级费用 " << ability.getlevelUpCost() << " | " << (ability.canUse(*this) ? "可用" : "不可用") << endl;
+         << " | 升级费用 " << ability.getlevelUpCost() << " | " << (ability.canUse(*this) ? "可用" : "不可用")
+         << "\n   " << ability.getUpgradePreview(*this) << endl;
     if (i < 2)
       cout << "   专精第" << skill::specializationFloor(i + 1) << "层开放：0基础；"
            << ability.getSpecializationOptions(*this) << "。初选免费，重选费用 "

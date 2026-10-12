@@ -1,9 +1,12 @@
 #include "game/campaign.h"
 #include "core/game_config.h"
+#include "game/exploration.h"
 #include "core/random.h"
+#include "player/skills.h"
 #include <algorithm>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 
 namespace {
@@ -66,6 +69,27 @@ void giveItem(player &hero, const Item &item) {
   }
   hero.addItem(item);
   std::cout << "获得：" << item.getDisplayName() << "（数值 " << item.getValue() << "）\n";
+}
+// Each asks for something an intent-reading player does not do by default;
+// the targets are set so the simulator's aware policy meets them by chance in
+// roughly 0-40% of chapters (see campaign_sim --report).
+constexpr Campaign::Bounty bounties[Campaign::BountyKinds] = {
+  {"连断", "在 ", " 场战斗中各打断 2 次", 3},
+  {"节药", "不喝药击败本章精英或首领 ", " 次", 1},
+  {"挡重击", "格挡化解 ", " 次重击", 3},
+  {"速胜", "3 回合内赢下 ", " 场", 4},
+  {"轻伤", "承伤不超过最大生命一成赢下 ", " 场", 4},
+  {"朴拙", "只用普攻和格挡赢下 ", " 场", 2}};
+int bountyGain(int kind, const player &hero, const BattleSession &battle, int floor) {
+  const auto &r = battle.report();
+  switch (kind) {
+  case 0: return r.interrupts >= 2;
+  case 1: return (floor % 10 == 0 || Campaign::isEliteFloor(floor)) && r.potionsUsed == 0;
+  case 2: return r.heavyGuards;
+  case 3: return battle.turns() <= 3;
+  case 4: return static_cast<long long>(r.damageTaken) * 100 <= static_cast<long long>(hero.getmaxhp()) * 10;
+  default: return r.skillsUsed == 0 && r.potionsUsed == 0;
+  }
 }
 }
 
@@ -147,7 +171,7 @@ EncounterRules rulesFor(const player &hero, int floor) {
   rules.targetTurns = 3 + c / 4;
   return rules;
 }
-enemy makeEnemy(const player &hero, int floor) {
+enemy makeEnemy(const player &hero, int floor, std::vector<std::string> *notes) {
   if (!validFloor(floor)) throw std::out_of_range("floor must be 1..100");
   seedStream(hero, floor, 10 + static_cast<unsigned>(hero.runState().attempts[floor]));
   const auto rules = rulesFor(hero, floor);
@@ -170,6 +194,7 @@ enemy makeEnemy(const player &hero, int floor) {
     if (event == 1 && type == 0) monster.resetattack(std::max(1, monster.getattack() * 90 / 100));
     if (event == 2 && type == 2) monster.resetattack(std::max(1, monster.getattack() * 110 / 100));
   }
+  Exploration::applyToEncounter(hero, floor, monster, notes);
   return monster;
 }
 bool eventPending(const player &hero, int floor) {
@@ -241,6 +266,41 @@ bool rest(player &hero, int floor) {
   ++run.campRested[GameConfig::chapter(floor)];
   return true;
 }
+Readiness readiness(const player &hero, int floor) {
+  Readiness result;
+  if (!validFloor(floor)) return result;
+  const int bossFloor = (GameConfig::chapter(floor) + 1) * GameConfig::FloorsPerChapter;
+  for (int f = floor; f <= bossFloor && !result.majorFloor; ++f)
+    if (!hero.runState().cleared[f] && (f == bossFloor || isEliteFloor(f))) result.majorFloor = f;
+  std::string cooling;
+  int coolingCount = 0;
+  for (int slot = 1; slot <= hero.getSkillCount(); ++slot) {
+    const skill &ability = *hero.getSkill(slot);
+    if (ability.getcurrentcooldown() == 0) continue;
+    cooling += (coolingCount++ ? "、" : "") + ability.getskillname() + " " +
+               std::to_string(ability.getcurrentcooldown());
+  }
+  const char *label = result.majorFloor == bossFloor ? "首领" : "精英";
+  const int rests = restsRemaining(hero, floor);
+  std::ostringstream summary;
+  summary << "出战准备：";
+  if (!result.majorFloor) summary << "本章的精英与首领都已通过";
+  else if (result.majorFloor == floor) summary << "本层就是" << label;
+  else summary << "下一场硬仗是第" << result.majorFloor << "层" << label << "（还有 " << result.majorFloor - floor << " 层）";
+  summary << "；MP " << hero.getmp() << '/' << hero.getmaxmp() << "；本章休息剩余 " << rests << " 次；"
+          << (coolingCount ? "冷却中：" + cooling + "（只在战斗回合中恢复）" : "技能全部就绪") << "。";
+  result.summary = summary.str();
+  const bool lowMp = hero.getmp() * 2 < hero.getmaxmp();
+  if (result.majorFloor == floor && (lowMp || coolingCount)) {
+    std::ostringstream warning;
+    warning << "注意：本层就是" << label << "，但 " << (lowMp ? "MP 不到一半" : "")
+            << (lowMp && coolingCount ? "、" : "")
+            << (coolingCount ? std::to_string(coolingCount) + " 个技能仍在冷却" : "") << "。"
+            << (rests ? "营火休息可恢复一半 MP。" : "本章休息次数已用完。");
+    result.warning = warning.str();
+  }
+  return result;
+}
 bool claimOrder(player &hero, int floor) {
   if (!validFloor(floor)) return false;
   auto &run = hero.runState();
@@ -301,6 +361,17 @@ bool refreshShop(player &hero, int floor) {
   run.shopPurchased[c] = 0;
   return true;
 }
+const Bounty &bounty(int kind) { return bounties[std::clamp(kind, 0, BountyKinds - 1)]; }
+std::string bountyGoal(int kind) {
+  const Bounty &b = bounty(kind);
+  return std::string(b.before) + std::to_string(b.target) + b.after;
+}
+std::array<int, 2> chapterBounties(const player &hero, int chapter) {
+  std::uint32_t h = hero.runState().seed * 2654435761u + static_cast<std::uint32_t>(chapter + 1) * 40503u;
+  h ^= h >> 15;
+  const int first = static_cast<int>(h % BountyKinds);
+  return {first, static_cast<int>((first + 1 + (h >> 8) % (BountyKinds - 1)) % BountyKinds)};
+}
 bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int floor) {
   if (!validFloor(floor) || !battle.claimSettlement()) return false;
   auto &run = hero.runState();
@@ -310,6 +381,7 @@ bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int fl
   run.damageTaken = GameConfig::addCounter(run.damageTaken, report.damageTaken);
   run.attempts[floor] = GameConfig::addCounter(run.attempts[floor], 1);
   hero.finishEncounterWear();
+  Exploration::finishEncounter(hero);
   if (!battle.won()) {
     if (!hero.isalive()) run.deaths = GameConfig::addCounter(run.deaths, 1);
     return false;
@@ -340,10 +412,22 @@ bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int fl
     run.materials = std::min(GameConfig::MaxMaterials, run.materials + 3);
     std::cout << "章节完成：" << chapter(floor).name << "；专精与改造可在营地重新准备。\n";
   }
+  const auto kinds = chapterBounties(hero, c);
+  for (int slot = 0; slot < 2; ++slot) {
+    int &progress = run.bounties[c * 2 + slot];
+    const Bounty &b = bounty(kinds[slot]);
+    if (progress >= b.target) continue;
+    progress = std::min(b.target, progress + bountyGain(kinds[slot], hero, battle, floor));
+    if (progress < b.target) continue;
+    run.materials = std::min(GameConfig::MaxMaterials, run.materials + BountyMaterials);
+    std::cout << "【悬赏完成】" << bountyGoal(kinds[slot]) << "：获得 " << BountyMaterials << " 材料与药水。\n";
+    giveItem(hero, generateTargetedItem(floor, AnyJob, Potion));
+  }
   run.cleared[floor] = 1;
   run.longestGearDrought = std::max(run.longestGearDrought, run.gearDrought);
   return true;
 }
+void grantItem(player &hero, const Item &item) { giveItem(hero, item); }
 bool revive(player &hero, bool useFree) {
   auto &run = hero.runState();
   if (run.challenge == 2 || hero.isalive()) return false;
@@ -367,7 +451,11 @@ void printBattleReport(const BattleSession &battle) {
     << " 次；药水 " << r.potionsUsed << "。\n";
   if (r.readPunishments) std::cout << "调整建议：留意预测行动，改变已被识破的出招。\n";
   if (r.suppressedHealing) std::cout << "调整建议：优先在无重伤的回合恢复，危险时仍可应急治疗。\n";
-  if (r.poisonDamage) std::cout << "调整建议：剧毒持续消耗，避免为了等冷却而无限拖延。\n";
+  // Only Defeat fights let the player set the pace; the other objectives ask
+  // them to wait, so poison alone is no sign of stalling.
+  if (r.poisonDamage && battle.objective() == EncounterObjective::Defeat && r.waitingGuards >= 2)
+    std::cout << "调整建议：剧毒每回合持续消耗，本场有 " << r.waitingGuards
+      << " 次在敌人普攻、蓄力或休整时格挡等待；用普攻或技能推进可以缩短战斗。\n";
 }
 void printJournal(const player &hero, int floor) {
   const auto &run = hero.runState();
@@ -390,7 +478,14 @@ void printJournal(const player &hero, int floor) {
     if (rules.elite) std::cout << " 第" << targetFloor << "层精英";
   }
   std::cout << "；第" << (c + 1) * 10 << "层击败Boss。\n"
-    << eventOutcome(eventType(floor), run.events[c]) << "。\n";
+    << eventOutcome(eventType(floor), run.events[c]) << "。\n本章悬赏（可选，各奖励 " << BountyMaterials << " 材料与药水）：";
+  const auto kinds = chapterBounties(hero, c);
+  for (int slot = 0; slot < 2; ++slot) {
+    const int progress = run.bounties[c * 2 + slot], target = bounty(kinds[slot]).target;
+    std::cout << (slot ? "；" : "") << bountyGoal(kinds[slot])
+      << (progress >= target ? "（已完成）" : "（" + std::to_string(progress) + "/" + std::to_string(target) + "）");
+  }
+  std::cout << "。\n" << Exploration::chapterSummary(hero, floor) << '\n';
   if (c > 0 && run.events[c - 1] == 1)
     std::cout << "来自" << chapter(floor - 10).ally << "的信：上一章的合作已经记入远征日志，效果限于当地。\n";
 }

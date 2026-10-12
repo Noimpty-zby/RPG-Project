@@ -16,9 +16,11 @@
 import { humanoidFrames, walker, HeroLooks, NpcLooks } from '../js/engine/humanoid.js';
 import { monsterGrid } from '../js/engine/monsters.js';
 import { Bestiary } from '../js/rules/enemy.js';
+import { spotSprites } from '../js/engine/spot_sprites.js';
+import { ChapterThemes } from '../js/engine/palette.js';
 const out = document.getElementById('out');
 function show(row, grid, label, scale = 4) {
-  const c = grid.toCanvas();
+  const c = grid.toCanvas ? grid.toCanvas() : grid;
   c.style.width = c.width * scale + 'px';
   c.style.height = c.height * scale + 'px';
   const cell = document.createElement('div');
@@ -55,6 +57,24 @@ if (what === 'all' || what === 'monsters') {
       const id = c * 5 + s;
       show(row, monsterGrid(id), Bestiary.entryName(id), 3);
     }
+  }
+}
+if (what === 'all' || what === 'spots') {
+  for (let theme = 0; theme < 10; theme++) {
+    const row = section(`Spots · ${ChapterThemes[theme].key}`);
+    row.style.background = ChapterThemes[theme].floor[0];
+    const art = spotSprites(theme);
+    const pair = (p, label) => { show(row, p.live, label, 3); show(row, p.spent, '', 3); };
+    pair(art.cache, 'cache');
+    art.curios.forEach((p, i) => pair(p, `curio${i}`));
+    art.gather.forEach((p, i) => pair(p, `gather${i}`));
+    pair(art.source, 'source');
+    show(row, art.key, 'key', 3); show(row, art.questItem, 'quest', 3); show(row, art.lore, 'lore', 3);
+    pair(art.stele, 'stele');
+    art.door.forEach((p, i) => pair(p, `door${i + 1}`));
+    art.strongbox.forEach((p, i) => pair(p, `box${i + 1}`));
+    show(row, art.crack, 'crack', 3); show(row, art.rubble, 'rubble', 3);
+    if (theme === 0) show(row, walker(NpcLooks.wanderer, 'down', 0), 'wanderer', 3);
   }
 }
 document.body.dataset.ready = '1';

@@ -19,7 +19,7 @@ export class BattleSession {
     this.intent = null;
     this.report = {
       turns: 0, damageTaken: 0, poisonDamage: 0, suppressedHealing: 0, readPunishments: 0,
-      potionsUsed: 0, guards: 0, interrupts: 0, timeout: false,
+      potionsUsed: 0, guards: 0, waitingGuards: 0, heavyGuards: 0, skillsUsed: 0, interrupts: 0, timeout: false,
     };
     this.awaitingAction = false;
     this.objectiveComplete = false;
@@ -61,7 +61,7 @@ export class BattleSession {
       case Objective.Survive:
         return `生存 ${this.rules.targetTurns} 个有效回合，或击败敌人（${this.turns()}/${this.rules.targetTurns}）`;
       case Objective.Disrupt:
-        return `普攻命中蓄力，累计打断 2 次，或击败敌人（${this.report.interrupts}/2；限20回合）`;
+        return `普攻蓄力中的敌人，累计打断 2 次，或击败敌人（${this.report.interrupts}/2；限20回合）`;
       case Objective.Escape:
         return `撑过至少 3 个有效回合，并以格挡撤离，或击败敌人（当前${this.turns()}回合；限15回合）`;
       default:
@@ -139,14 +139,29 @@ export class BattleSession {
           hero.attacktarget(monster);
         }
         break;
-      case ActionType.Skill:
+      case ActionType.Skill: {
+        const ability = hero.getSkill(action.index);
+        const cost = ability ? ability.getActualCost(hero) : 0;
         if (!hero.useSkill(action.index, monster)) return false;
+        // A skill the enemy dodged entirely refunds half its MP; the cooldown still runs.
+        if (cost >= 2 && monster.gethp() === enemyHpBefore) {
+          const mpBefore = hero.getmp();
+          hero.setmp(hero.getmp() + idiv(cost, 2));
+          const amount = hero.getmp() - mpBefore;
+          emit('mana', `【落空返还】技能被完全闪避，返还 ${amount} MP。`, { side: 'hero', amount });
+        }
         actionId = action.index;
+        ++this.report.skillsUsed;
         break;
+      }
       case ActionType.Guard:
         hero.guard(intent.piercesGuard);
         actionId = -1;
         ++this.report.guards;
+        // Guarding a plain attack, a charge or a rest is waiting, not answering a threat.
+        if (intent.kind === Intent.Attack || intent.kind === Intent.Charge || intent.kind === Intent.Recover)
+          ++this.report.waitingGuards;
+        if (intent.kind === Intent.HeavyStrike) ++this.report.heavyGuards;
         break;
       case ActionType.Potion:
         if (!hero.useItem(action.index)) return false;
@@ -160,11 +175,13 @@ export class BattleSession {
     const healed = hero.gethp() > hpBeforeAction;
     this.report.suppressedHealing += Math.max(0, hero.getSuppressedHealingTotal() - suppressedBefore);
     let interrupted = false;
-    if (action.type === ActionType.Attack && intent.interruptible && monster.gethp() < enemyHpBefore &&
-      monster.interruptCharge()) {
+    // A plain attack answers a charge even when dodged: the dodge costs the
+    // hit's damage and MP, never the correct read.
+    if (action.type === ActionType.Attack && intent.interruptible && monster.interruptCharge()) {
       interrupted = true;
       ++this.report.interrupts;
-      emit('interrupt', '【打断成功】普通攻击打断蓄力，下回合敌人休整。', { side: 'enemy' });
+      emit('interrupt', (monster.gethp() < enemyHpBefore ? '【打断成功】普通攻击打断蓄力' : '【打断成功】普攻虽被闪避，仍打断了蓄力') +
+        (monster.interruptGrantsRecovery() ? '，下回合敌人休整。' : '，重击取消；该敌人不休整，下回合仍会行动。'), { side: 'enemy' });
     }
 
     if (!monster.isalive()) {

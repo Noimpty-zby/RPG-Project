@@ -1,4 +1,5 @@
 #include "game/combat.h"
+#include "player/skills.h"
 #include <algorithm>
 #include <iostream>
 
@@ -47,7 +48,7 @@ std::string BattleSession::objectiveDescription() const {
            " 个有效回合，或击败敌人（" + std::to_string(turns()) + "/" +
            std::to_string(rules.targetTurns) + "）";
   case EncounterObjective::Disrupt:
-    return "普攻命中蓄力，累计打断 2 次，或击败敌人（" +
+    return "普攻蓄力中的敌人，累计打断 2 次，或击败敌人（" +
            std::to_string(battleReport.interrupts) + "/2；限20回合）";
   case EncounterObjective::Escape:
     return "撑过至少 3 个有效回合，并以格挡撤离，或击败敌人（当前" +
@@ -125,14 +126,28 @@ bool BattleSession::act(BattleAction action) {
       hero.attacktarget(monster);
     }
     break;
-  case ActionType::Skill:
+  case ActionType::Skill: {
+    const skill *ability = hero.getSkill(action.index);
+    const int cost = ability ? ability->getActualCost(hero) : 0;
     if (!hero.useSkill(action.index, monster)) return false;
+    // A skill the enemy dodged entirely refunds half its MP; the cooldown still runs.
+    if (cost >= 2 && monster.gethp() == enemyHpBefore) {
+      const int mpBefore = hero.getmp();
+      hero.setmp(hero.getmp() + cost / 2);
+      std::cout << "【落空返还】技能被完全闪避，返还 " << hero.getmp() - mpBefore << " MP。" << std::endl;
+    }
     actionId = action.index;
+    ++battleReport.skillsUsed;
     break;
+  }
   case ActionType::Guard:
     hero.guard(intent.piercesGuard);
     actionId = -1;
     ++battleReport.guards;
+    if (intent.kind == EnemyIntentKind::Attack || intent.kind == EnemyIntentKind::Charge ||
+        intent.kind == EnemyIntentKind::Recover)
+      ++battleReport.waitingGuards;
+    if (intent.kind == EnemyIntentKind::HeavyStrike) ++battleReport.heavyGuards;
     break;
   case ActionType::Potion:
     if (!hero.useItem(action.index)) return false;
@@ -147,11 +162,16 @@ bool BattleSession::act(BattleAction action) {
   battleReport.suppressedHealing +=
       std::max(0, hero.getSuppressedHealingTotal() - suppressedBefore);
   bool interrupted = false;
-  if (action.type == ActionType::Attack && intent.interruptible &&
-      monster.gethp() < enemyHpBefore && monster.interruptCharge()) {
+  // A plain attack answers a charge even when dodged: the dodge costs the
+  // hit's damage and MP, never the correct read.
+  if (action.type == ActionType::Attack && intent.interruptible && monster.interruptCharge()) {
     interrupted = true;
     ++battleReport.interrupts;
-    std::cout << "【打断成功】普通攻击打断蓄力，下回合敌人休整。" << std::endl;
+    std::cout << (monster.gethp() < enemyHpBefore ? "【打断成功】普通攻击打断蓄力"
+                                                  : "【打断成功】普攻虽被闪避，仍打断了蓄力")
+              << (monster.interruptGrantsRecovery() ? "，下回合敌人休整。"
+                                                    : "，重击取消；该敌人不休整，下回合仍会行动。")
+              << std::endl;
   }
 
   if (!monster.isalive()) {

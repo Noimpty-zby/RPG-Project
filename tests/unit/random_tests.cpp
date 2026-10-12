@@ -1,6 +1,7 @@
 #include "core/game_config.h"
 #include "core/random.h"
 #include "game/campaign.h"
+#include "game/exploration.h"
 #include "player/jobs.h"
 #include <array>
 #include <cstdint>
@@ -99,9 +100,90 @@ std::uint64_t campaignFingerprint() {
   return print.hash;
 }
 
+// Every exploration text, option, puzzle, merchant good and result for two
+// seeds; the browser port must produce the same value (parity_test.mjs).
+std::uint64_t explorationFingerprint() {
+  Fingerprint print;
+  for (unsigned seed : {1u, 777u}) {
+    Warrior hero("golden");
+    Campaign::initialize(hero, seed, 0);
+    hero.setHighestFloor(100);
+    hero.gaincoin(500);
+    hero.runState().materials = 3;
+    hero.runState().keys = 1;
+    for (int floor = 1; floor <= GameConfig::MaxFloor; ++floor) {
+      for (const auto &view : Exploration::survey(hero, floor)) {
+        print.add(static_cast<int>(view.spot.kind));
+        print.add(view.spot.variant);
+        print.add(static_cast<int>(view.spot.zone));
+        print.add(view.name);
+        print.add(view.description);
+        for (const auto &option : Exploration::options(hero, floor, view.index)) {
+          print.add(option.id);
+          print.add(option.label);
+          print.add(option.detail);
+          print.add(option.available ? 1 : 0);
+          print.add(option.reason);
+        }
+      }
+      for (const auto &good : Exploration::merchantGoods(hero, floor)) {
+        print.add(good.name);
+        print.add(good.description);
+        print.add(good.price);
+        print.add(good.sold ? 1 : 0);
+      }
+      if (Exploration::hasPuzzle(hero, floor)) {
+        const auto puzzle = Exploration::puzzle(hero, floor);
+        print.add(puzzle.title);
+        print.add(puzzle.prompt);
+        for (const auto &element : puzzle.elements) print.add(element);
+        for (const auto &clue : puzzle.clues) print.add(clue);
+        for (int value : Exploration::puzzleSolution(seed, floor)) print.add(value);
+      }
+      print.add(Exploration::chapterSummary(hero, floor));
+      print.add(Exploration::loreTitle(floor));
+      print.add(Exploration::loreText(floor));
+    }
+    for (int floor = 1; floor <= 20; ++floor) {
+      for (const auto &view : Exploration::survey(hero, floor)) {
+        if (view.done || view.spot.kind == Exploration::SpotKind::Puzzle) continue;
+        const auto result = Exploration::interact(hero, floor, view.index, 1);
+        print.add(result.ok ? 1 : 0);
+        print.add(result.text);
+        print.add(result.lorePage);
+      }
+      if (Exploration::hasPuzzle(hero, floor))
+        print.add(Exploration::solvePuzzle(hero, floor, Exploration::puzzleSolution(seed, floor)).text);
+      std::vector<std::string> notes;
+      Campaign::makeEnemy(hero, floor, &notes);
+      for (const auto &note : notes) print.add(note);
+    }
+    for (const auto &recipe : Exploration::recipes()) {
+      print.add(recipe.name);
+      print.add(recipe.description);
+      const auto result = Exploration::cook(hero, recipe.id);
+      print.add(result.ok ? 1 : 0);
+      print.add(result.text);
+    }
+    const auto &run = hero.runState();
+    for (int value : {hero.getcoin(), hero.gethp(), hero.getmp(), hero.getlevel(), run.keys, run.materials,
+                      run.boon, run.bane, run.spotsExplored, run.vaultsOpened, run.puzzlesSolved, run.mealsCooked})
+      print.add(value);
+    for (int value : run.ingredients) print.add(value);
+    for (int value : run.questItems) print.add(value);
+  }
+  return print.hash;
+}
+
+void testExplorationFingerprint() {
+  const std::uint64_t actual = explorationFingerprint();
+  require(actual == 0x5f1125db8e2b21aeULL, "exploration fingerprint is " + hex(actual));
+  require(explorationFingerprint() == actual, "exploration must not depend on earlier calls");
+}
+
 void testCampaignFingerprint() {
   const std::uint64_t actual = campaignFingerprint();
-  require(actual == 0x1c55df353407b9d7ULL, "campaign fingerprint is " + hex(actual));
+  require(actual == 0x60a12f556174ccd9ULL, "campaign fingerprint is " + hex(actual));
   require(campaignFingerprint() == actual, "generation must not depend on earlier calls");
 }
 } // namespace
@@ -113,8 +195,9 @@ int main() {
     testReferenceSequence();
     testBelow();
     testCampaignFingerprint();
+    testExplorationFingerprint();
     std::cout.rdbuf(previous);
-    std::cout << "Random tests passed: PCG32 golden sequence, unbiased bounds, campaign fingerprint.\n";
+    std::cout << "Random tests passed: PCG32 golden sequence, unbiased bounds, campaign and exploration fingerprints.\n";
   } catch (const std::exception &error) {
     std::cout.rdbuf(previous);
     std::cerr << "random tests failed: " << error.what() << '\n';

@@ -49,7 +49,7 @@ public:
     int won = 0;
     int firstFloor = 0;
   };
-  static constexpr int Version = 1;
+  static constexpr int Version = 2; // 2 adds expedition journal pages.
   static constexpr int MaxRecords = 20;
 
   static const std::vector<AchievementInfo> &achievements();
@@ -67,6 +67,10 @@ public:
   void recordEncounter(int floor, const enemy &monster);
   void recordVictory(int floor);
   void addRecord(RunRecord record);
+  // Expedition journal pages (1..100). recordLore returns true for a new page.
+  bool recordLore(int page);
+  bool loreFound(int page) const;
+  int loreCount() const;
   // Unlocks every achievement whose condition now holds and returns the new
   // ones. battle may be null when checking outside an encounter.
   std::vector<const AchievementInfo *> checkAchievements(const player &hero,
@@ -85,6 +89,8 @@ public:
   void printAffixes() const;
   void printAchievements() const;
   void printRecords() const;
+  void printLoreOverview() const;
+  void printLoreChapter(int chapter) const;
 
 private:
   std::string path;
@@ -94,6 +100,7 @@ private:
   std::set<std::string> unlockedKeys;
   int chapterOneJobs = 0; // Bit per Job that has beaten the floor 10 boss.
   std::vector<RunRecord> runRecords;
+  std::array<bool, 100> lorePages{};
 };
 
 std::string todayDate();

@@ -7,6 +7,7 @@ import {
   campfireFrames, chestFrames, deviceSprite, floorTile, signSprite, stairsSprite, stallSprite, themeProps,
   wallFace, wallTop, waystoneFrames,
 } from './tiles.js';
+import { spotSprites } from './spot_sprites.js';
 
 const cache = new Map();
 function memo(key, build) {
@@ -38,6 +39,7 @@ function walkerSet(look) {
 export const heroWalker = (job) => memo(`hero-walk-${job}`, () => walkerSet(HeroLooks[job]));
 export const merchantWalker = () => memo('merchant', () => walkerSet(NpcLooks.merchant));
 export const allyWalker = (chapter) => memo(`ally-${chapter}`, () => walkerSet(NpcLooks.allies[chapter]));
+export const wandererWalker = () => memo('wanderer', () => walkerSet(NpcLooks.wanderer));
 
 export const monster = (entry) => memo(`monster-${entry}`, () => ({
   idle: monsterGrid(entry, 'idle').toCanvas(),
@@ -54,6 +56,7 @@ export const tiles = (theme) => memo(`tiles-${theme}`, () => ({
   device: deviceSprite(theme, false),
   deviceBroken: deviceSprite(theme, true),
 }));
+export const spots = (theme) => memo(`spots-${theme}`, () => spotSprites(theme));
 export const objects = () => memo('objects', () => ({
   campfire: campfireFrames(),
   waystone: waystoneFrames(),

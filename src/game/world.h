@@ -16,9 +16,13 @@ struct EnemyStats {
 
 // Enemy tuning knobs, in percent.
 namespace EnemyTuning {
+// The base curve every enemy scales from. Raised when floor exploration joined
+// the game, so a player who explores meets about the earlier difficulty.
+constexpr int BaseHpPercent = 110;
+constexpr int BaseAttackPercent = 115;
 // Ordinary enemies relative to the base curve that bosses also scale from.
 constexpr int OrdinaryHpPercent = 160;
-constexpr int OrdinaryAttackPercent = 85;
+constexpr int OrdinaryAttackPercent = 90;
 // Elites relative to ordinary enemies of the same floor.
 constexpr int EliteHpPercent = 170;
 constexpr int EliteAttackPercent = 115;

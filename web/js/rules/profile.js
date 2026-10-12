@@ -4,7 +4,8 @@ import { addCounter, challengeName, chapterOf, clamp, floorOf, MaxCounter, MaxFl
 import { AffixCount, Bestiary } from './enemy.js';
 import { JobProfiles, jobFromKey } from './jobs.js';
 
-export const ProfileVersion = 1;
+export const ProfileVersion = 2; // 2 adds expedition journal pages.
+export const LorePages = 100;
 export const MaxRecords = 20;
 
 export const Achievements = [
@@ -25,6 +26,12 @@ export const Achievements = [
   { key: 'affix_scholar', title: '词缀学者', description: '遭遇全部7种敌人词缀' },
   { key: 'collector', title: '博物学家', description: '在图鉴中发现全部50种敌人' },
   { key: 'all_jobs', title: '三职业远征', description: '用战士、法师、刺客分别击败第10层Boss' },
+  { key: 'explorer', title: '足迹遍布', description: '单次远征探索300处地点' },
+  { key: 'vault_hunter', title: '宝库猎人', description: '单次远征打开10座宝库' },
+  { key: 'puzzle_master', title: '解谜大师', description: '单次远征解开全部10个章节谜题' },
+  { key: 'gourmet', title: '远征厨师', description: '单次远征做20次料理' },
+  { key: 'lore_keeper', title: '见闻初录', description: '收集10页见闻录' },
+  { key: 'lore_complete', title: '百层见闻', description: '收集全部100页见闻录' },
 ];
 
 export function todayDate() {
@@ -45,6 +52,7 @@ export class Profile {
     this.unlockedKeys = new Set();
     this.chapterOneJobs = 0;
     this.runRecords = [];
+    this.lorePages = new Array(LorePages).fill(false);
   }
 
   static parse(data) {
@@ -74,6 +82,11 @@ export class Profile {
       if (typeof key !== 'string' || !key || key.length > 64) throw new Error('成就键无效');
       profile.unlockedKeys.add(key);
     }
+    if (data.lore !== undefined) {
+      if (typeof data.lore !== 'string' || data.lore.length !== LorePages || /[^01]/.test(data.lore))
+        throw new Error('见闻录记录无效');
+      profile.lorePages = [...data.lore].map((c) => c === '1');
+    }
     for (const row of data.records ?? []) {
       if (profile.runRecords.length >= MaxRecords) throw new Error('记录过多');
       if (!validDate(row.date)) throw new Error('记录日期无效');
@@ -96,9 +109,19 @@ export class Profile {
       bestiary: this.bestiary.map((record, id) => ({ id, ...record })).filter((record) => record.seen > 0),
       affixes: this.affixes.map((count, id) => ({ id, count })).filter((row) => row.count > 0),
       achievements: [...this.unlockedKeys],
+      ...(this.loreCount() ? { lore: this.lorePages.map((found) => (found ? '1' : '0')).join('') } : {}),
       records: this.runRecords,
     };
   }
+
+  // Expedition journal pages (1..100). recordLore returns true for a new page.
+  recordLore(page) {
+    if (!Number.isInteger(page) || page < 1 || page > LorePages || this.lorePages[page - 1]) return false;
+    this.lorePages[page - 1] = true;
+    return true;
+  }
+  loreFound(page) { return Number.isInteger(page) && page >= 1 && page <= LorePages && this.lorePages[page - 1]; }
+  loreCount() { return this.lorePages.filter(Boolean).length; }
 
   recordEncounter(floor, monster) {
     const record = this.bestiary[Bestiary.entryForFloor(floor)];
@@ -148,6 +171,12 @@ export class Profile {
         case 'affix_scholar': return this.affixesDiscovered() === AffixCount;
         case 'collector': return this.discovered() === Bestiary.EntryCount;
         case 'all_jobs': return this.chapterOneJobs === 7;
+        case 'explorer': return run.spotsExplored >= 300;
+        case 'vault_hunter': return run.vaultsOpened >= 10;
+        case 'puzzle_master': return run.puzzlesSolved >= 10;
+        case 'gourmet': return run.mealsCooked >= 20;
+        case 'lore_keeper': return this.loreCount() >= 10;
+        case 'lore_complete': return this.loreCount() === LorePages;
         default: return false;
       }
     };

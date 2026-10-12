@@ -197,6 +197,63 @@ void testInventoryAndWear() {
           "invalid equipment entered inventory");
 }
 }
+// The potion plan avoids overshooting, consumes nothing, and drinking follows it.
+void testPotionPlan() {
+  Warrior hero("potions");
+  prepare(hero);
+  hero.sethp(100);
+  hero.addItem(Item("中药", 1, Potion, 300, 0, 1, 2, AnyJob));
+  hero.addItem(Item("小药", 1, Potion, 50, 0, 1, 5, AnyJob));
+  hero.addItem(Item("大药", 1, Potion, 500, 0, 1, 1, AnyJob));
+  const auto plan = hero.planPotions(1000);
+  require(plan.restored == 900 && plan.overflow == 0 && plan.uses.size() == 3 &&
+              plan.uses[0] == std::make_pair(3, 1) && plan.uses[1] == std::make_pair(1, 1) &&
+              plan.uses[2] == std::make_pair(2, 2),
+          "the plan must take the largest potion that fits, then smaller ones");
+  require(hero.gethp() == 100 && hero.getSaveBackpack()[0].getQuantity() == 2,
+          "planning must not drink anything");
+  require(hero.drinkPotionsTo(1000) == 900 && hero.gethp() == 1000 &&
+              hero.getSaveBackpack().size() == 2 && hero.getSaveBackpack()[0].getQuantity() == 1 &&
+              hero.getSaveBackpack()[1].getQuantity() == 3,
+          "drinking must follow the plan exactly");
+  hero.sethp(900);
+  const auto over = hero.planPotions(1000);
+  require(over.restored == 100 && over.overflow == 0 && over.uses.size() == 1 &&
+              hero.getSaveBackpack()[over.uses[0].first - 1].getName() == "小药" && over.uses[0].second == 2,
+          "small potions that fit beat a large one that overflows");
+  hero.sethp(980);
+  const auto spill = hero.planPotions(1000);
+  require(spill.restored == 20 && spill.overflow == 30, "when every potion overflows, the smallest one is used");
+  require(hero.planPotions(500).uses.empty(), "a target at or below current HP needs no potions");
+}
+
+// Inheriting enhances the new item to the worn level for 30% of the usual cost
+// and consumes the old item; it needs a lower-level, wearable item of that slot.
+void testInheritEnhancement() {
+  Warrior hero("heir");
+  prepare(hero);
+  hero.equipItem_T(Item("旧剑", 1, Weapon, 100, 50, 200, 1, AnyJob));
+  for (int i = 0; i < 3; ++i) require(hero.enhanceEquipment(1), "fixture enhancement failed");
+  const int wornValue = hero.getSaveEquipments()[0].getValue(), attack = hero.getattack();
+  hero.addItem(Item("新剑", 1, Weapon, 105, 50, 200, 1, AnyJob));
+  hero.addItem(Item("重剑", 99, Weapon, 300, 50, 200, 1, AnyJob));
+  require(hero.inheritCost(1) == 360 && hero.inheritValue(1) == 120,
+          "inheriting three levels costs 30% of 200+400+600 and compounds like enhancing");
+  require(hero.inheritCost(2) == 0, "an item the hero cannot wear cannot inherit");
+  const int coins = hero.getcoin();
+  require(hero.inheritEnhancement(1), "inheritance failed");
+  const Item &worn = hero.getSaveEquipments()[0];
+  require(worn.getName() == "新剑" && worn.getEnhanceLevel() == 3 && worn.getValue() == 120 &&
+              hero.getattack() == attack - wornValue + 120 && hero.getcoin() == coins - 360,
+          "the new item must replace the worn one at the inherited level");
+  require(hero.getSaveBackpack().size() == 1 && hero.getSaveBackpack()[0].getName() == "重剑",
+          "the old item is consumed and the new one leaves the backpack");
+  hero.addItem(Item("更旧的剑", 1, Weapon, 90, 50, 200, 1, AnyJob));
+  require(hero.inheritCost(2) > 0, "a lower-level item of the slot can inherit");
+  hero.costcoin(hero.getcoin());
+  require(!hero.inheritEnhancement(2), "inheritance needs the fee");
+}
+
 void testRepair() {
   Warrior hero("smith"); prepare(hero);
   Item epic("epic blade", 1, Weapon, 50, 40, 400, 1, WarriorOnly, 3);
@@ -249,7 +306,7 @@ int main() {
   std::ostringstream log; auto *original = std::cout.rdbuf(log.rdbuf());
   try {
     testGrowthAndTransactions(); testSpecializationTransactions(); testSpecializationEffects();
-    testRecoveryAndResources(); testInventoryAndWear(); testRepair(); testEnhancement();
+    testRecoveryAndResources(); testInventoryAndWear(); testPotionPlan(); testInheritEnhancement(); testRepair(); testEnhancement();
   } catch (const std::exception &error) {
     std::cout.rdbuf(original); std::cerr << "build tests failed: " << error.what() << '\n' << log.str(); return 1;
   }

@@ -12,6 +12,7 @@ import { emit } from './log.js';
 import { newRunState } from './run_state.js';
 import { Objective, defaultRules } from './combat.js';
 import { EnemyTuning, generateEliteReward, generateEnemy, generateLoot, generateTargetedItem } from './world.js';
+import * as Exploration from './exploration.js';
 
 export const Chapters = [
   { name: '荒野前哨', mission: '切断警钟，护送迷路斥候', ally: '斥候' },
@@ -158,7 +159,10 @@ export function rulesFor(hero, floor) {
   return rules;
 }
 
-export function makeEnemy(hero, floor) {
+// The floor's guardian, including exploration effects (affix sources, the
+// next encounter's boon and bane, the ally's ambush). notes, when given (an
+// array), receives one line per exploration effect for previews.
+export function makeEnemy(hero, floor, notes = null) {
   if (!validFloor(floor)) throw new RangeError('floor must be 1..100');
   seedStream(hero, floor, 10 + hero.runState().attempts[floor]);
   const rules = rulesFor(hero, floor);
@@ -177,6 +181,7 @@ export function makeEnemy(hero, floor) {
     if (event === 1 && type === 0) monster.resetattack(Math.max(1, idiv(monster.getattack() * 90, 100)));
     if (event === 2 && type === 2) monster.resetattack(Math.max(1, idiv(monster.getattack() * 110, 100)));
   }
+  Exploration.applyToEncounter(hero, floor, monster, notes);
   return monster;
 }
 
@@ -237,6 +242,33 @@ export function restsRemaining(hero, floor) {
   return Math.max(0, limit - hero.runState().campRested[chapterOf(floor)]);
 }
 export const restPrice = (hero, floor) => restCost(floor) * (1 + hero.runState().campRested[chapterOf(floor)]);
+// What the hero carries into the chapter's next hard fight: the first elite or
+// boss floor from here that is not yet cleared (0 if none), a summary line and,
+// when that fight is on this floor and the hero lacks half MP or a ready
+// skill, a warning. Cooldowns only tick during battle turns.
+export function readiness(hero, floor) {
+  const result = { majorFloor: 0, summary: '', warning: '' };
+  if (!validFloor(floor)) return result;
+  const bossFloor = (chapterOf(floor) + 1) * 10;
+  for (let f = floor; f <= bossFloor && !result.majorFloor; ++f)
+    if (!hero.runState().cleared[f] && (f === bossFloor || isEliteFloor(f))) result.majorFloor = f;
+  const cooling = hero.skills.filter((ability) => ability.getcurrentcooldown() > 0)
+    .map((ability) => `${ability.getskillname()} ${ability.getcurrentcooldown()}`);
+  const label = result.majorFloor === bossFloor ? '首领' : '精英';
+  const rests = restsRemaining(hero, floor);
+  let summary = '出战准备：';
+  if (!result.majorFloor) summary += '本章的精英与首领都已通过';
+  else if (result.majorFloor === floor) summary += `本层就是${label}`;
+  else summary += `下一场硬仗是第${result.majorFloor}层${label}（还有 ${result.majorFloor - floor} 层）`;
+  result.summary = `${summary}；MP ${hero.getmp()}/${hero.getmaxmp()}；本章休息剩余 ${rests} 次；` +
+    `${cooling.length ? `冷却中：${cooling.join('、')}（只在战斗回合中恢复）` : '技能全部就绪'}。`;
+  const lowMp = hero.getmp() * 2 < hero.getmaxmp();
+  if (result.majorFloor === floor && (lowMp || cooling.length)) {
+    result.warning = `注意：本层就是${label}，但 ${lowMp ? 'MP 不到一半' : ''}${lowMp && cooling.length ? '、' : ''}` +
+      `${cooling.length ? `${cooling.length} 个技能仍在冷却` : ''}。${rests ? '营火休息可恢复一半 MP。' : '本章休息次数已用完。'}`;
+  }
+  return result;
+}
 export function rest(hero, floor) {
   if (!validFloor(floor) || !hero.isalive() || restsRemaining(hero, floor) === 0) return false;
   const run = hero.runState();
@@ -311,6 +343,44 @@ export function refreshShop(hero, floor) {
   return true;
 }
 
+// Chapter bounties: two optional goals per chapter, chosen from the run seed
+// (no rules randomness is consumed) and counted over every won fight on that
+// chapter's floors. Reaching a goal pays BountyMaterials and a potion once.
+// Each asks for something an intent-reading player does not do by default;
+// the targets are set so the simulator's aware policy meets them by chance in
+// roughly 0-40% of chapters (see campaign_sim --report).
+export const BountyKinds = 6;
+export const BountyMaterials = 3;
+const Bounties = [
+  { name: '连断', before: '在 ', after: ' 场战斗中各打断 2 次', target: 3 },
+  { name: '节药', before: '不喝药击败本章精英或首领 ', after: ' 次', target: 1 },
+  { name: '挡重击', before: '格挡化解 ', after: ' 次重击', target: 3 },
+  { name: '速胜', before: '3 回合内赢下 ', after: ' 场', target: 4 },
+  { name: '轻伤', before: '承伤不超过最大生命一成赢下 ', after: ' 场', target: 4 },
+  { name: '朴拙', before: '只用普攻和格挡赢下 ', after: ' 场', target: 2 },
+];
+export const bounty = (kind) => Bounties[clamp(kind, 0, BountyKinds - 1)];
+export function bountyGoal(kind) {
+  const b = bounty(kind);
+  return `${b.before}${b.target}${b.after}`;
+}
+export function chapterBounties(hero, chapterIndex) {
+  let h = (Math.imul(hero.runState().seed, 2654435761) + Math.imul(chapterIndex + 1, 40503)) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  const first = h % BountyKinds;
+  return [first, (first + 1 + ((h >>> 8) % (BountyKinds - 1))) % BountyKinds];
+}
+function bountyGain(kind, hero, battle, floor) {
+  const r = battle.report;
+  switch (kind) {
+    case 0: return r.interrupts >= 2 ? 1 : 0;
+    case 1: return (floor % 10 === 0 || isEliteFloor(floor)) && r.potionsUsed === 0 ? 1 : 0;
+    case 2: return r.heavyGuards;
+    case 3: return battle.turns() <= 3 ? 1 : 0;
+    case 4: return r.damageTaken * 100 <= hero.getmaxhp() * 10 ? 1 : 0;
+    default: return r.skillsUsed === 0 && r.potionsUsed === 0 ? 1 : 0;
+  }
+}
 export function settleEncounter(hero, monster, battle, floor) {
   if (!validFloor(floor) || !battle.claimSettlement()) return false;
   const run = hero.runState();
@@ -320,6 +390,7 @@ export function settleEncounter(hero, monster, battle, floor) {
   run.damageTaken = addCounter(run.damageTaken, report.damageTaken);
   run.attempts[floor] = addCounter(run.attempts[floor], 1);
   hero.finishEncounterWear();
+  Exploration.finishEncounter(hero);
   if (!battle.won()) {
     if (!hero.isalive()) run.deaths = addCounter(run.deaths, 1);
     return false;
@@ -354,10 +425,24 @@ export function settleEncounter(hero, monster, battle, floor) {
     addMaterials(hero, 3);
     emit('chapterClear', `章节完成：${chapter(floor).name}；专精与改造可在营地重新准备。`, { chapter: c });
   }
+  const kinds = chapterBounties(hero, c);
+  for (let slot = 0; slot < 2; ++slot) {
+    const index = c * 2 + slot;
+    const b = bounty(kinds[slot]);
+    if (run.bounties[index] >= b.target) continue;
+    run.bounties[index] = Math.min(b.target, run.bounties[index] + bountyGain(kinds[slot], hero, battle, floor));
+    if (run.bounties[index] < b.target) continue;
+    addMaterials(hero, BountyMaterials);
+    emit('notice', `【悬赏完成】${bountyGoal(kinds[slot])}：获得 ${BountyMaterials} 材料与药水。`);
+    giveItem(hero, generateTargetedItem(floor, JobReq.AnyJob, ItemType.Potion));
+  }
   run.cleared[floor] = 1;
   run.longestGearDrought = Math.max(run.longestGearDrought, run.gearDrought);
   return true;
 }
+
+// Adds an item to the backpack, counting gear upgrades like any other reward.
+export function grantItem(hero, item) { giveItem(hero, item); }
 
 export function revive(hero, useFree) {
   const run = hero.runState();
@@ -381,7 +466,10 @@ export function battleReview(battle) {
   const lines = [`战斗复盘：${battle.turns()}回合，承伤 ${r.damageTaken}，其中剧毒 ${r.poisonDamage}；抑疗损失 ${r.suppressedHealing}；被识破 ${r.readPunishments} 次；打断 ${r.interrupts} 次；药水 ${r.potionsUsed}。`];
   if (r.readPunishments) lines.push('调整建议：留意预测行动，改变已被识破的出招。');
   if (r.suppressedHealing) lines.push('调整建议：优先在无重伤的回合恢复，危险时仍可应急治疗。');
-  if (r.poisonDamage) lines.push('调整建议：剧毒持续消耗，避免为了等冷却而无限拖延。');
+  // Only Defeat fights let the player set the pace; the other objectives ask
+  // them to wait, so poison alone is no sign of stalling.
+  if (r.poisonDamage && battle.objective() === Objective.Defeat && r.waitingGuards >= 2)
+    lines.push(`调整建议：剧毒每回合持续消耗，本场有 ${r.waitingGuards} 次在敌人普攻、蓄力或休整时格挡等待；用普攻或技能推进可以缩短战斗。`);
   return lines;
 }
 
@@ -420,6 +508,16 @@ export function journal(hero, floor) {
     longestGearDrought: run.longestGearDrought,
     goals,
     eventText: eventOutcome(eventType(floor), run.events[c]),
+    bounties: chapterBounties(hero, c).map((kind, slot) => ({
+      name: bounty(kind).name, goal: bountyGoal(kind), progress: run.bounties[c * 2 + slot], target: bounty(kind).target,
+    })),
+    exploration: Exploration.chapterSummary(hero, floor),
+    explorePlan: Exploration.chapterPlan(run.seed, c),
+    keys: run.keys,
+    ingredients: [...run.ingredients],
+    boon: run.boon,
+    bane: run.bane,
+    questItems: run.questItems[c],
     letter: c > 0 && run.events[c - 1] === 1
       ? `来自${Chapters[c - 1].ally}的信：上一章的合作已经记入远征日志，效果限于当地。` : '',
   };
