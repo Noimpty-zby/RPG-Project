@@ -11,7 +11,7 @@ import { seed as seedRandom } from './random.js';
 import { emit } from './log.js';
 import { newRunState } from './run_state.js';
 import { Objective, defaultRules } from './combat.js';
-import { EnemyTuning, generateEliteReward, generateEnemy, generateLoot, generateTargetedItem } from './world.js';
+import { EnemyTuning, generateEliteReward, generateEnemy, generateLoot, generatePatrol, generateTargetedItem } from './world.js';
 import * as Exploration from './exploration.js';
 
 export const Chapters = [
@@ -40,6 +40,19 @@ function objectiveSlot(chapter, local) {
 function loseHealthSafely(hero, percent) {
   const loss = Math.max(1, idiv(hero.gethp() * percent, 100));
   hero.sethp(Math.max(1, hero.gethp() - loss));
+}
+const PatrolStream = 1290;
+function countBattle(run, battle) {
+  run.battles = addCounter(run.battles, 1);
+  run.turns = addCounter(run.turns, battle.turns());
+  run.damageTaken = addCounter(run.damageTaken, battle.report.damageTaken);
+}
+// Chapter events that change every enemy of the chapter.
+function applyChapterEvent(hero, floor, monster) {
+  const event = hero.runState().events[chapterOf(floor)];
+  const type = eventType(floor);
+  if (event === 1 && type === 1) monster.removeAffix(Affix.POISONOUS);
+  if (event === 1 && type === 2) monster.setdodgeRate(Math.max(0, monster.getdodgeRate() - 10));
 }
 export function objectiveName(objective) {
   switch (objective) {
@@ -173,16 +186,58 @@ export function makeEnemy(hero, floor, notes = null) {
     monster.resetattack(Math.max(1, idiv(monster.getattack() * EnemyTuning.ObjectiveAttackPercent,
       EnemyTuning.OrdinaryAttackPercent)));
   }
+  applyChapterEvent(hero, floor, monster);
   const event = hero.runState().events[chapterOf(floor)];
   const type = eventType(floor);
-  if (event === 1 && type === 1) monster.removeAffix(Affix.POISONOUS);
-  if (event === 1 && type === 2) monster.setdodgeRate(Math.max(0, monster.getdodgeRate() - 10));
   if (floor % 10 === 0) {
     if (event === 1 && type === 0) monster.resetattack(Math.max(1, idiv(monster.getattack() * 90, 100)));
     if (event === 2 && type === 2) monster.resetattack(Math.max(1, idiv(monster.getattack() * 110, 100)));
   }
   Exploration.applyToEncounter(hero, floor, monster, notes);
   return monster;
+}
+
+// Fork floors: the elite patrol on the near branch (Exploration.fork). Chapter
+// events apply to it; exploration boons and banes neither apply nor get used up.
+// Seed the battle with seedStream(hero, floor, PatrolBattleStream).
+export const PatrolMaterials = 1;
+export const PatrolBattleStream = 1300;
+export function makePatrol(hero, floor) {
+  if (!validFloor(floor)) throw new RangeError('floor must be 1..100');
+  seedStream(hero, floor, PatrolStream);
+  const monster = generatePatrol(floor);
+  applyChapterEvent(hero, floor, monster);
+  return monster;
+}
+export function patrolRules(hero, floor) {
+  const rules = defaultRules();
+  rules.difficulty = hero.runState().challenge === 1 ? 1 : 0;
+  rules.targetTurns = 3 + idiv(chapterOf(floor), 4);
+  return rules;
+}
+// A win takes the patrol branch and pays its experience, coins and materials;
+// it counts toward chapter bounties like any won fight. A loss changes nothing
+// but the usual battle records, so another branch can still be taken.
+export function settlePatrol(hero, monster, battle, floor) {
+  if (!validFloor(floor) || !battle.claimSettlement()) return false;
+  const run = hero.runState();
+  countBattle(run, battle);
+  hero.finishEncounterWear();
+  if (!battle.won()) {
+    if (!hero.isalive()) run.deaths = addCounter(run.deaths, 1);
+    return false;
+  }
+  const fork = Exploration.fork(hero, floor);
+  if (fork.taken !== Exploration.Branch.None || !fork.branches.some((b) => b.kind === Exploration.Branch.Patrol)) return false;
+  const exp = monster.getexp_reward();
+  const coins = monster.getcoin_reward();
+  emit('reward', `击退巡逻：获得 ${exp} 经验、${coins} 金币。近路打通了。`, { exp, coins, first: true, percent: 100, patrol: true });
+  hero.gainexp(exp);
+  hero.gaincoin(coins);
+  addMaterials(hero, PatrolMaterials);
+  advanceBounties(hero, battle, floor);
+  Exploration.recordPatrolWin(hero, floor);
+  return true;
 }
 
 export const eventPending = (hero, floor) =>
@@ -381,13 +436,25 @@ function bountyGain(kind, hero, battle, floor) {
     default: return r.skillsUsed === 0 && r.potionsUsed === 0 ? 1 : 0;
   }
 }
+function advanceBounties(hero, battle, floor) {
+  const run = hero.runState();
+  const c = chapterOf(floor);
+  const kinds = chapterBounties(hero, c);
+  for (let slot = 0; slot < 2; ++slot) {
+    const index = c * 2 + slot;
+    const b = bounty(kinds[slot]);
+    if (run.bounties[index] >= b.target) continue;
+    run.bounties[index] = Math.min(b.target, run.bounties[index] + bountyGain(kinds[slot], hero, battle, floor));
+    if (run.bounties[index] < b.target) continue;
+    addMaterials(hero, BountyMaterials);
+    emit('notice', `【悬赏完成】${bountyGoal(kinds[slot])}：获得 ${BountyMaterials} 材料与药水。`);
+    giveItem(hero, generateTargetedItem(floor, JobReq.AnyJob, ItemType.Potion));
+  }
+}
 export function settleEncounter(hero, monster, battle, floor) {
   if (!validFloor(floor) || !battle.claimSettlement()) return false;
   const run = hero.runState();
-  const report = battle.report;
-  run.battles = addCounter(run.battles, 1);
-  run.turns = addCounter(run.turns, battle.turns());
-  run.damageTaken = addCounter(run.damageTaken, report.damageTaken);
+  countBattle(run, battle);
   run.attempts[floor] = addCounter(run.attempts[floor], 1);
   hero.finishEncounterWear();
   Exploration.finishEncounter(hero);
@@ -425,17 +492,7 @@ export function settleEncounter(hero, monster, battle, floor) {
     addMaterials(hero, 3);
     emit('chapterClear', `章节完成：${chapter(floor).name}；专精与改造可在营地重新准备。`, { chapter: c });
   }
-  const kinds = chapterBounties(hero, c);
-  for (let slot = 0; slot < 2; ++slot) {
-    const index = c * 2 + slot;
-    const b = bounty(kinds[slot]);
-    if (run.bounties[index] >= b.target) continue;
-    run.bounties[index] = Math.min(b.target, run.bounties[index] + bountyGain(kinds[slot], hero, battle, floor));
-    if (run.bounties[index] < b.target) continue;
-    addMaterials(hero, BountyMaterials);
-    emit('notice', `【悬赏完成】${bountyGoal(kinds[slot])}：获得 ${BountyMaterials} 材料与药水。`);
-    giveItem(hero, generateTargetedItem(floor, JobReq.AnyJob, ItemType.Potion));
-  }
+  advanceBounties(hero, battle, floor);
   run.cleared[floor] = 1;
   run.longestGearDrought = Math.max(run.longestGearDrought, run.gearDrought);
   return true;

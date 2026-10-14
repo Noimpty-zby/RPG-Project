@@ -268,6 +268,8 @@ export class BattleUI {
         materials ? h('p', {}, `材料 +${materials}`) : null,
         items.length ? h('div', { class: 'loot-list' }, items.map((e) => itemRow(e.item, { hero, compareUpgrade: e.upgrade }))) : null,
         items.length ? h('p', { class: 'muted' }, '战利品已放入背包，宝箱就在守卫原来的位置。') : null,
+        result.patrol ? h('p', { class: result.won ? 'good' : 'muted' }, result.won ? '近路打通了，可以去挑战守卫。'
+          : '巡逻还守在路口。可以重试，也可以改走别的路。') : null,
         notices.map((e) => h('p', { class: 'gold' }, e.text)),
         result.achievements.map((a) => h('p', { class: 'gold' }, `【成就解锁】${a.title}：${a.description}`)),
         result.worn.map((line) => h('p', { class: 'bad' }, line)),

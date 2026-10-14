@@ -301,7 +301,71 @@ const char *zoneName(Exploration::Zone zone) {
   case Exploration::Zone::Guardian: return "守卫房间";
   case Exploration::Zone::Hidden: return "隐秘处";
   case Exploration::Zone::Vault: return "上锁的侧室";
+  case Exploration::Zone::Branch: return "远路上";
   default: return "房间";
+  }
+}
+void playBattle(player &hero, enemy &monster, BattleSession &battle) {
+  monster.displayAffixes();
+  std::cout << monster.getEncounterTitle() << "：" << monster.getTacticalHint() << '\n';
+  while (battle.beginTurn()) {
+    monster.displayIntent();
+    std::cout << battle.objectiveDescription() << '\n';
+    std::cout << "HP " << hero.gethp() << '/' << hero.getmaxhp() << " MP " << hero.getmp()
+      << '/' << hero.getmaxmp() << " 敌HP " << monster.gethp() << " 药水 " << potionCount(hero) << '\n'
+      << "[1] 普攻（可打断蓄力） [2] 技能 [3] 格挡 [4] 药水 [5] 查看敌我详情\n";
+    const int action = readInt();
+    BattleAction chosen{ActionType::Attack};
+    if (action == 2) {
+      hero.showSkillsCompact(); std::cout << "技能序号，0返回：";
+      chosen = {ActionType::Skill, readInt()}; if (chosen.index == 0) continue;
+    } else if (action == 3) chosen.type = ActionType::Guard;
+    else if (action == 4) {
+      hero.printBackpack(); std::cout << "药水序号，0返回：";
+      chosen = {ActionType::Potion, readInt()}; if (chosen.index == 0) continue;
+    } else if (action == 5) { inspect(hero, monster, battle); continue; }
+    else if (action != 1) { std::cout << "无效行动。\n"; continue; }
+    if (!battle.act(chosen)) std::cout << "行动未执行，没有推进回合。\n";
+  }
+}
+void patrolFight(player &hero, int floor, Profile &profile) {
+  auto monster = Campaign::makePatrol(hero, floor);
+  std::cout << "遭遇巡逻：" << monster.getname() << "（第" << floor << "层） HP " << monster.gethp()
+    << " 攻击 " << monster.getattack() << "（探索带来的祝福和诅咒留给守卫）\n";
+  profile.recordEncounter(floor, monster);
+  Campaign::seedStream(hero, floor, Campaign::PatrolBattleStream);
+  BattleSession battle(hero, monster, Campaign::patrolRules(hero, floor));
+  playBattle(hero, monster, battle);
+  Campaign::printBattleReport(battle);
+  const bool won = Campaign::settlePatrol(hero, monster, battle, floor);
+  if (won) profile.recordVictory(floor);
+  checkAchievements(profile, hero);
+  profile.save();
+  std::cout << (won ? "可以去挑战守卫了。\n" : "没能击退巡逻。可以重试，也可以改走别的路。\n");
+}
+// Returns after a branch is taken or the hero falls.
+void forkMenu(player &hero, int floor, Profile &profile) {
+  for (;;) {
+    const auto fork = Exploration::fork(hero, floor);
+    std::cout << "—— 岔路口 ——\n" << fork.hint << '\n';
+    for (std::size_t i = 0; i < fork.branches.size(); ++i) {
+      const auto &branch = fork.branches[i];
+      std::cout << '[' << i + 1 << "] " << branch.name << "\n    代价：" << branch.cost << "\n    收获：" << branch.reward
+        << (branch.available ? "" : "\n    （" + branch.reason + "）") << '\n';
+    }
+    std::cout << "[0] 返回\n";
+    const int choice = readInt();
+    if (choice == 0) return;
+    if (choice < 1 || choice > static_cast<int>(fork.branches.size())) continue;
+    const auto &branch = fork.branches[choice - 1];
+    if (!branch.available) {
+      std::cout << branch.reason << "。\n";
+      continue;
+    }
+    if (branch.kind == Exploration::Branch::Patrol) patrolFight(hero, floor, profile);
+    else Exploration::takeBranch(hero, floor, branch.kind);
+    checkAchievements(profile, hero);
+    if (!hero.isalive() || Exploration::branchTaken(hero, floor) != Exploration::Branch::None) return;
   }
 }
 void puzzleMenu(player &hero, int floor) {
@@ -333,10 +397,20 @@ void explore(player &hero, int floor, Profile &profile) {
       << " 金币 " << hero.getcoin() << " 材料 " << run.materials << " 钥匙 " << run.keys << '\n';
     for (const auto &view : spots)
       std::cout << '[' << view.index + 1 << "] " << view.name << "（" << zoneName(view.spot.zone) << "）"
-        << (view.done ? (view.spot.kind == Exploration::SpotKind::Merchant ? " —— 已光顾" : " —— 已探索") : "") << '\n';
+        << (view.done ? (view.spot.kind == Exploration::SpotKind::Merchant ? " —— 已光顾" : " —— 已探索")
+                      : (view.blocked.empty() ? "" : " —— " + view.blocked)) << '\n';
+    const auto fork = Exploration::fork(hero, floor);
+    const int forkChoice = static_cast<int>(spots.size()) + 1;
+    if (!fork.branches.empty())
+      std::cout << '[' << forkChoice << "] 岔路口" << (fork.taken == Exploration::Branch::None ? "（还没选路）" : "（" + fork.hint + "）") << '\n';
     std::cout << "[0] 返回\n";
     const int choice = readInt();
     if (choice == 0) return;
+    if (!fork.branches.empty() && choice == forkChoice) {
+      forkMenu(hero, floor, profile);
+      if (!hero.isalive()) return;
+      continue;
+    }
     if (choice < 1 || choice > static_cast<int>(spots.size())) continue;
     const auto &view = spots[choice - 1];
     std::cout << view.name << "：" << view.description << '\n';
@@ -381,27 +455,7 @@ bool fight(player &hero, int floor, Profile &profile) {
   showObjective(rules);
   Campaign::seedStream(hero, floor, 1200 + static_cast<unsigned>(hero.runState().attempts[floor]));
   BattleSession battle(hero, monster, rules);
-  monster.displayAffixes();
-  std::cout << monster.getEncounterTitle() << "：" << monster.getTacticalHint() << '\n';
-  while (battle.beginTurn()) {
-    monster.displayIntent();
-    std::cout << battle.objectiveDescription() << '\n';
-    std::cout << "HP " << hero.gethp() << '/' << hero.getmaxhp() << " MP " << hero.getmp()
-      << '/' << hero.getmaxmp() << " 敌HP " << monster.gethp() << " 药水 " << potionCount(hero) << '\n'
-      << "[1] 普攻（可打断蓄力） [2] 技能 [3] 格挡 [4] 药水 [5] 查看敌我详情\n";
-    const int action = readInt();
-    BattleAction chosen{ActionType::Attack};
-    if (action == 2) {
-      hero.showSkillsCompact(); std::cout << "技能序号，0返回：";
-      chosen = {ActionType::Skill, readInt()}; if (chosen.index == 0) continue;
-    } else if (action == 3) chosen.type = ActionType::Guard;
-    else if (action == 4) {
-      hero.printBackpack(); std::cout << "药水序号，0返回：";
-      chosen = {ActionType::Potion, readInt()}; if (chosen.index == 0) continue;
-    } else if (action == 5) { inspect(hero, monster, battle); continue; }
-    else if (action != 1) { std::cout << "无效行动。\n"; continue; }
-    if (!battle.act(chosen)) std::cout << "行动未执行，没有推进回合。\n";
-  }
+  playBattle(hero, monster, battle);
   const auto &report = battle.report();
   const BattleOutcome outcome{floor, battle.won(), report.damageTaken, report.potionsUsed,
                               report.interrupts, hero.gethp(), hero.getmaxhp()};
@@ -579,8 +633,16 @@ int main() {
     if (action == 10) { travel(*hero, floor); continue; }
     if (action == 11) { archive(profile); continue; }
     if (action == 12) { help(); continue; }
-    if (action == 13) { explore(*hero, floor, profile); continue; }
+    if (action == 13) {
+      explore(*hero, floor, profile);
+      if (!hero->isalive()) diedThisSession = true;
+      continue;
+    }
     if (action != 1) { std::cout << "无效选择。\n"; continue; }
+    if (!Exploration::guardianReachable(*hero, floor)) {
+      std::cout << "守卫在岔路之后：先在 [13] 探索本层 的岔路口选一条路。\n";
+      continue;
+    }
     if (Campaign::eventPending(*hero, floor)) {
       std::cout << Campaign::eventDescription(floor) << '\n';
       while (!Campaign::resolveEvent(*hero, floor, readInt()))

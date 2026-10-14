@@ -84,6 +84,19 @@ check(campaignFingerprint() === fingerprint, 'generation must not depend on earl
 
 // Every exploration text, option, puzzle, merchant good and result for two
 // seeds, identical to random_tests.cpp.
+function addFork(print, hero, floor) {
+  const fork = Exploration.fork(hero, floor);
+  print.add(fork.taken);
+  print.add(fork.hint);
+  for (const branch of fork.branches) {
+    print.add(branch.kind);
+    print.add(branch.name);
+    print.add(branch.cost);
+    print.add(branch.reward);
+    print.add(branch.available ? 1 : 0);
+    print.add(branch.reason);
+  }
+}
 function explorationFingerprint() {
   const print = new Fingerprint();
   for (const seed of [1, 777]) {
@@ -100,6 +113,8 @@ function explorationFingerprint() {
         print.add(view.spot.zone);
         print.add(view.name);
         print.add(view.description);
+        print.add(view.spot.branch);
+        print.add(view.blocked);
         for (const option of Exploration.options(hero, floor, view.index)) {
           print.add(option.id);
           print.add(option.label);
@@ -114,6 +129,7 @@ function explorationFingerprint() {
         print.add(good.price);
         print.add(good.sold ? 1 : 0);
       }
+      addFork(print, hero, floor);
       if (Exploration.hasPuzzle(hero, floor)) {
         const puzzle = Exploration.puzzle(hero, floor);
         print.add(puzzle.title);
@@ -127,6 +143,14 @@ function explorationFingerprint() {
       print.add(Exploration.loreText(floor));
     }
     for (let floor = 1; floor <= 20; floor++) {
+      // Key branch when a key is left, else the fog; the patrol needs a fight.
+      for (const branch of [...Exploration.fork(hero, floor).branches].reverse()) {
+        if (branch.kind === Exploration.Branch.Patrol) continue;
+        const result = Exploration.takeBranch(hero, floor, branch.kind);
+        print.add(result.ok ? 1 : 0);
+        print.add(result.text);
+        if (result.ok) break;
+      }
       for (const view of Exploration.survey(hero, floor)) {
         if (view.done || view.spot.kind === Exploration.SpotKind.Puzzle) continue;
         const result = Exploration.interact(hero, floor, view.index, 1);
@@ -139,6 +163,9 @@ function explorationFingerprint() {
       const notes = [];
       Campaign.makeEnemy(hero, floor, notes);
       for (const note of notes) print.add(note);
+      addFork(print, hero, floor);
+      print.add(Exploration.remaining(hero, floor));
+      print.add(Exploration.guardianReachable(hero, floor) ? 1 : 0);
     }
     for (const recipe of Exploration.recipes()) {
       print.add(recipe.name);
@@ -156,7 +183,7 @@ function explorationFingerprint() {
   return print.hash;
 }
 const explorationPrint = collect(() => explorationFingerprint()).result;
-check(explorationPrint === 0x5f1125db8e2b21aen, `exploration fingerprint is 0x${explorationPrint.toString(16)}`);
+check(explorationPrint === 0x32e2c45c26efd2fcn, `exploration fingerprint is 0x${explorationPrint.toString(16)}`);
 check(collect(() => explorationFingerprint()).result === explorationPrint, 'exploration must not depend on earlier calls');
 
 const reference = process.argv[2];

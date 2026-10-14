@@ -14,6 +14,10 @@ export const EnemyTuning = {
   OrdinaryAttackPercent: 90,
   EliteHpPercent: 170,
   EliteAttackPercent: 115,
+  // Fork-floor patrols relative to ordinary enemies of the same floor; they
+  // always carry at least two affixes.
+  PatrolHpPercent: 130,
+  PatrolAttackPercent: 100,
   SurviveHpPercent: 300,
   DisruptHpPercent: 400,
   ObjectiveAttackPercent: 80,
@@ -172,6 +176,13 @@ export function enemyStatsForFloor(value) {
     expReward: exp, coinReward: coins, level: floor, boss: false };
 }
 
+function applyAffixStats(monster) {
+  if (monster.hasAffix(Affix.STRONG)) monster.resetattack(idiv(monster.getattack() * 120, 100));
+  if (monster.hasAffix(Affix.TOUGH)) monster.resethp(idiv(monster.gethp() * 120, 100));
+  if (monster.hasAffix(Affix.QUICK))
+    monster.setdodgeRate(Math.min(monster.getdodgeRate() + idiv(monster.getlevel(), 2), 25));
+}
+
 export function generateEnemy(value, elite = false) {
   const floor = floorOf(value);
   const stats = enemyStatsForFloor(floor);
@@ -187,11 +198,24 @@ export function generateEnemy(value, elite = false) {
     monster.resetcoin_reward(idiv(monster.getcoin_reward() * 3, 2));
   }
   if (stats.boss) monster.resetattack(idiv(monster.getattack() * bossAttackPercent(floor), 100));
-  if (monster.hasAffix(Affix.STRONG)) monster.resetattack(idiv(monster.getattack() * 120, 100));
-  if (monster.hasAffix(Affix.TOUGH)) monster.resethp(idiv(monster.gethp() * 120, 100));
-  if (monster.hasAffix(Affix.QUICK))
-    monster.setdodgeRate(Math.min(monster.getdodgeRate() + idiv(monster.getlevel(), 2), 25));
+  applyAffixStats(monster);
   monster.configureEncounter(floor, stats.boss);
   monster.elite = elite;
+  return monster;
+}
+
+// The patrol guarding a fork floor's near branch; see Campaign.makePatrol.
+export function generatePatrol(value) {
+  const floor = floorOf(value);
+  const stats = enemyStatsForFloor(floor);
+  const monster = new Enemy(`巡逻·${enemyNameForFloor(floor)}`, stats.hp, stats.attack, 0, stats.expReward,
+    stats.coinReward, stats.level);
+  monster.setAffix(floor);
+  monster.ensureAffixes(2);
+  monster.resethp(idiv(monster.gethp() * EnemyTuning.PatrolHpPercent, 100));
+  monster.resetattack(Math.max(1, idiv(monster.getattack() * EnemyTuning.PatrolAttackPercent, 100)));
+  applyAffixStats(monster);
+  monster.configureEncounter(floor, false);
+  monster.elite = false;
   return monster;
 }

@@ -149,16 +149,19 @@ export class Game {
   }
 
   // ---- Battles -------------------------------------------------------------------
-  startBattle() {
+  // kind: 'guardian', or 'patrol' for a fork floor's near branch.
+  startBattle(kind = 'guardian') {
     const hero = this.hero;
     const notes = [];
-    const monster = Campaign.makeEnemy(hero, this.floor, notes);
-    const rules = Campaign.rulesFor(hero, this.floor);
+    const patrol = kind === 'patrol';
+    const monster = patrol ? Campaign.makePatrol(hero, this.floor) : Campaign.makeEnemy(hero, this.floor, notes);
+    const rules = patrol ? Campaign.patrolRules(hero, this.floor) : Campaign.rulesFor(hero, this.floor);
     this.profile.recordEncounter(this.floor, monster);
-    Campaign.seedStream(hero, this.floor, 1200 + hero.runState().attempts[this.floor]);
+    Campaign.seedStream(hero, this.floor, patrol ? Campaign.PatrolBattleStream : 1200 + hero.runState().attempts[this.floor]);
     const battle = new BattleSession(hero, monster, rules);
-    this.firstFinalClear = this.floor === MaxFloor && !this.cleared(MaxFloor);
-    return { monster, rules, battle, notes };
+    this.battleKind = kind;
+    this.firstFinalClear = !patrol && this.floor === MaxFloor && !this.cleared(MaxFloor);
+    return { monster, rules, battle, notes, patrol };
   }
   // Settle a finished battle; returns what happened for the result screen.
   finishBattle(monster, battle) {
@@ -168,7 +171,9 @@ export class Game {
     const outcome = { floor: this.floor, won: battle.won(), damageTaken: report.damageTaken, potionsUsed: report.potionsUsed,
       interrupts: report.interrupts, hpAfter: hero.gethp(), maxHp: hero.getmaxhp() };
     const review = Campaign.battleReview(battle);
-    const { result: won, events } = collect(() => Campaign.settleEncounter(hero, monster, battle, this.floor));
+    const patrol = this.battleKind === 'patrol';
+    const settle = patrol ? Campaign.settlePatrol : Campaign.settleEncounter;
+    const { result: won, events } = collect(() => settle(hero, monster, battle, this.floor));
     if (won) this.profile.recordVictory(this.floor);
     const achievements = this.checkAchievements(outcome);
     this.saveProfile();
@@ -182,7 +187,7 @@ export class Game {
     if (!hero.isalive()) this.diedThisSession = true;
     // A death is saved too, so reloading cannot undo it (the next load offers revive or ends the run).
     this.autosave();
-    return { won, events, achievements, review, worn, summit, timeout: report.timeout, alive: hero.isalive() };
+    return { won, events, achievements, review, worn, summit, timeout: report.timeout, alive: hero.isalive(), patrol };
   }
   // Revive choices after a death; null when the run is over.
   reviveOptions() {
@@ -249,6 +254,11 @@ export class Game {
   // once: spot results come from the seed, so reloading would not change them.
   explore(index, option) {
     return this.exploreResult(() => Exploration.interact(this.hero, this.floor, index, option));
+  }
+  fork() { return Exploration.fork(this.hero, this.floor); }
+  guardianReachable() { return Exploration.guardianReachable(this.hero, this.floor); }
+  takeBranch(branch) {
+    return this.exploreResult(() => Exploration.takeBranch(this.hero, this.floor, branch));
   }
   solvePuzzle(order) {
     return this.exploreResult(() => Exploration.solvePuzzle(this.hero, this.floor, order));

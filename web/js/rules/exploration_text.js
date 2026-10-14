@@ -279,5 +279,41 @@ export const LorePages = [
   { title: "天顶之门", text: "门开了。门后的风是从塔外吹来的。——第十次远征，完。" },
 ];
 
+// Fork floors: the fog on the far branch and its source, the high ground, the
+// two kinds of shortcut (crack, bridge lever) and the stash behind the key gate.
+export const ForkTexts = [
+  { fog: '瘴气', fogSource: '瘴气泉眼', fogSourceDescription: '泥沼里冒着泡的泉眼，瘴气就是从这里升起来的。',
+    vantage: '哨塔残基', vantageDescription: '倒塌哨塔剩下的石基，站上去能看清岔路两边的动静。',
+    shortcuts: ['长满裂纹的土墙', '吊桥绞盘'], stash: '斥候藏物处' },
+  { fog: '孢子雾', fogSource: '巨型孢子囊', fogSourceDescription: '鼓胀的孢子囊，每隔一会儿就喷出一团雾。',
+    vantage: '古树树冠', vantageDescription: '顺着藤蔓爬上古树，林间的动静一览无余。',
+    shortcuts: ['被树根撑裂的石墙', '藤桥机关'], stash: '采药人的地窖' },
+  { fog: '霉雾', fogSource: '发霉的书堆', fogSourceDescription: '泡烂的书堆长满霉菌，霉雾正从书页间渗出。',
+    vantage: '顶层书廊', vantageDescription: '没被水淹的顶层书廊，可以俯瞰下面的书架迷宫。',
+    shortcuts: ['被水泡软的隔墙', '升降书梯'], stash: '上锁的阅览室' },
+  { fog: '矿井毒气', fogSource: '毒气裂隙', fogSourceDescription: '岩缝里嘶嘶冒出黄绿色的气体。',
+    vantage: '升降井架', vantageDescription: '高高的井架顶端，能看清每一条坑道。',
+    shortcuts: ['松动的支护墙', '矿车吊桥闸'], stash: '矿工的应急仓' },
+  { fog: '冻雾', fogSource: '寒雾冰泉', fogSourceDescription: '冒着白气的冰泉，周围的空气冷得刺骨。',
+    vantage: '关隘箭楼', vantageDescription: '关隘上的箭楼，风雪里也能看见很远。',
+    shortcuts: ['冻裂的冰墙', '吊桥绞索'], stash: '守关人的储冰窖' },
+  { fog: '熔炉浓烟', fogSource: '失控的排烟阀', fogSourceDescription: '排烟阀卡死了，滚烫的浓烟灌进走廊。',
+    vantage: '冷却塔顶', vantageDescription: '冷却塔的顶端，整座要塞的走廊都在脚下。',
+    shortcuts: ['烧裂的砖墙', '传送桥拉杆'], stash: '锻造师的工具库' },
+  { fog: '幻雾', fogSource: '幻雾香炉', fogSourceDescription: '舞台边的香炉，烟雾会让人看见不存在的东西。',
+    vantage: '顶层包厢', vantageDescription: '剧场最高处的包厢，舞台和后台都看得见。',
+    shortcuts: ['布景后的假墙', '升降舞台机关'], stash: '道具间' },
+  { fog: '星尘乱流', fogSource: '破裂的星尘管', fogSourceDescription: '破裂的导管里喷出闪光的星尘，吸进去会头晕。',
+    vantage: '观测穹顶', vantageDescription: '观测站的穹顶，透过镜片能看见每一条走廊。',
+    shortcuts: ['陨石砸裂的外墙', '伸缩栈桥控制台'], stash: '星图保管室' },
+  { fog: '诅咒黑雾', fogSource: '倒扣的香炉', fogSourceDescription: '王座厅流出来的黑雾，源头是一只倒扣的香炉。',
+    vantage: '残破钟楼', vantageDescription: '王庭的钟楼还没倒，站在上面能看见整片废墟。',
+    shortcuts: ['坍塌的宫墙', '护城吊桥绞盘'], stash: '王室密库' },
+  { fog: '能量乱流', fogSource: '泄漏的能量导管', fogSourceDescription: '导管裂开了，紊乱的能量在走廊里乱窜。',
+    vantage: '门框平台', vantageDescription: '巨门框架上的检修平台，能看清门后的每一条路。',
+    shortcuts: ['过载烧穿的隔板', '能量桥开关'], stash: '远征队补给舱' },
+];
+
 export const chapterText = (chapter) => ChapterTexts[Math.min(Math.max(chapter, 0), 9)];
+export const forkText = (chapter) => ForkTexts[Math.min(Math.max(chapter, 0), 9)];
 export const lore = (page) => LorePages[Math.min(Math.max(page, 1), 100) - 1];

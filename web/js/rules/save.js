@@ -11,7 +11,7 @@ import { newRunState } from './run_state.js';
 export const SaveVersion = 2;
 const ExplorationFields = ['explored', 'keys', 'ingredients', 'boon', 'bane', 'questItems', 'spotsExplored',
   'vaultsOpened', 'puzzlesSolved', 'mealsCooked'];
-const MaxExploredMask = (1 << (Exploration.MerchantBit + Exploration.MerchantGoods)) - 1;
+const MaxExploredMask = (1 << (Exploration.BranchBit + 2)) - 1;
 
 function itemData(item) {
   return {
@@ -87,8 +87,10 @@ function validateExploration(run, highestFloor) {
     require(floor <= highestFloor, '探索记录超出最高楼层');
     const spots = Exploration.generate(run.seed, floor);
     const spotBits = mask & ((1 << Exploration.MerchantBit) - 1);
-    const goodsBits = mask >> Exploration.MerchantBit;
+    const goodsBits = (mask >> Exploration.MerchantBit) & ((1 << Exploration.MerchantGoods) - 1);
+    const branch = mask >> Exploration.BranchBit;
     require((spotBits >> spots.length) === 0, '探索记录与楼层内容不符');
+    require(!branch || Exploration.branches(run.seed, floor).includes(branch), '岔路记录与楼层内容不符');
     const merchant = spots.map((s) => s.kind).lastIndexOf(Exploration.SpotKind.Merchant);
     require(!(goodsBits && merchant < 0), '该楼层没有商人');
     require(merchant < 0 || (((spotBits >> merchant) & 1) !== 0) === (goodsBits !== 0), '商人记录矛盾');

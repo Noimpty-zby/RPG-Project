@@ -180,6 +180,15 @@ EnemyStats enemyStatsForFloor(int value) {
           exp, coins, floor, false};
 }
 
+namespace {
+void applyAffixStats(enemy &monster) {
+  if (monster.hasAffix(Affix::STRONG)) monster.resetattack(monster.getattack() * 120 / 100);
+  if (monster.hasAffix(Affix::TOUGH)) monster.resethp(monster.gethp() * 120 / 100);
+  if (monster.hasAffix(Affix::QUICK))
+    monster.setdodgeRate(min(monster.getdodgeRate() + monster.getlevel() / 2, 25));
+}
+} // namespace
+
 enemy generateEnemy(int value, bool elite) {
   const int floor = GameConfig::floor(value);
   const auto stats = enemyStatsForFloor(floor);
@@ -196,10 +205,21 @@ enemy generateEnemy(int value, bool elite) {
     monster.resetcoin_reward(monster.getcoin_reward() * 3 / 2);
   }
   if (stats.boss) monster.resetattack(monster.getattack() * bossAttackPercent(floor) / 100);
-  if (monster.hasAffix(Affix::STRONG)) monster.resetattack(monster.getattack() * 120 / 100);
-  if (monster.hasAffix(Affix::TOUGH)) monster.resethp(monster.gethp() * 120 / 100);
-  if (monster.hasAffix(Affix::QUICK))
-    monster.setdodgeRate(min(monster.getdodgeRate() + monster.getlevel() / 2, 25));
+  applyAffixStats(monster);
   monster.configureEncounter(floor, stats.boss);
+  return monster;
+}
+
+enemy generatePatrol(int value) {
+  const int floor = GameConfig::floor(value);
+  const auto stats = enemyStatsForFloor(floor);
+  enemy monster("巡逻·" + enemyNameForFloor(floor), stats.hp, stats.attack, 0, stats.expReward,
+                stats.coinReward, stats.level);
+  monster.setAffix(floor);
+  monster.ensureAffixes(2);
+  monster.resethp(monster.gethp() * EnemyTuning::PatrolHpPercent / 100);
+  monster.resetattack(max(1, monster.getattack() * EnemyTuning::PatrolAttackPercent / 100));
+  applyAffixStats(monster);
+  monster.configureEncounter(floor, false);
   return monster;
 }

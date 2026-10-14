@@ -23,6 +23,19 @@ struct ChapterText {
 };
 const ChapterText &chapter(int chapter);
 
+// Fork floors: the fog on the far branch and its source, the high ground, the
+// two kinds of shortcut and the stash behind the key gate.
+struct ForkText {
+  const char *fog;
+  const char *fogSource;
+  const char *fogSourceDescription;
+  const char *vantage;
+  const char *vantageDescription;
+  const char *shortcuts[2]; // Crack, bridge lever.
+  const char *stash;
+};
+const ForkText &fork(int chapter);
+
 struct LorePage {
   const char *title;
   const char *text;
