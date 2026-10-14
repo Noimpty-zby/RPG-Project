@@ -12,13 +12,16 @@ import { HelpTopics } from '../rules/help.js';
 import { h, button, openModal, choose, alertBox, toast } from './dom.js';
 import { compareTable, isUpgrade, itemRow, statsBlock } from './widgets.js';
 import * as Sprites from '../engine/sprites.js';
+import { FogColors } from '../engine/spot_sprites.js';
 import { P } from '../engine/palette.js';
 import { TILE } from '../engine/tiles.js';
 import { sfx, audioSettings, setAudio } from '../engine/audio.js';
 
 const RouteIcons = ['', '⚒', '✚', '⚗'];
 const { SpotKind } = Exploration;
-const ZoneNames = ['房间', '守卫房间', '隐秘处', '上锁的侧室'];
+const ZoneNames = ['房间', '守卫房间', '隐秘处', '上锁的侧室', '远路上'];
+const FogColorsFor = (scene) => FogColors[scene.theme];
+const BranchShort = ['', '巡逻', '远路', '钥匙'];
 
 export class Menus {
   constructor(app) {
@@ -332,6 +335,12 @@ export class Menus {
       h('p', {}, `钥匙 ${j.keys} · ${Campaign.chapter(this.game.floor).ally}的遗物 ${j.questItems}/3（集齐后本章 Boss 生命 -8%）`),
       h('p', {}, `宝库 第${plan.vaultFloors[0]}层（1 把钥匙）、第${plan.vaultFloors[1]}层（2 把） · 谜题 第${plan.puzzleFloor}层 · ` +
         `流浪商人 第${plan.merchantFloors[0]}、${plan.merchantFloors[1]}层`),
+      h('p', {}, '岔路：', plan.forkFloors.map((f) => {
+        const taken = Exploration.branchTaken(hero, f);
+        const ways = Exploration.branches(hero.runState().seed, f).map((b) => BranchShort[b]).join(' / ');
+        return h('span', { class: `tag ${taken ? 'done' : 'goal'}`, title: taken ? `走了${BranchShort[taken]}` : '还没选路' },
+          `${f}层 ${ways}${taken ? ` → ${BranchShort[taken]}` : ''}`);
+      })),
       h('p', {}, '剩余地点：', floors),
       h('p', {}, '食材：', Exploration.IngredientNames.map((name, i) => `${name} ${j.ingredients[i]}`).join(' · ')),
       h('p', { class: j.bane ? 'bad' : 'muted' }, `下一场战斗：祝福 ${Exploration.boonDescription(j.boon)}；诅咒 ${Exploration.baneDescription(j.bane)}`));
@@ -879,9 +888,100 @@ export class Menus {
     });
   }
 
+  // ---- Forks -------------------------------------------------------------------------------
+  // All branches side by side, from the signpost in the hall.
+  openFork(scene) {
+    const game = this.game;
+    openModal({
+      title: `第 ${game.floor} 层 · 岔路口`,
+      render: (m) => {
+        const fork = game.fork();
+        return h('div', {},
+          h('p', { class: 'muted' }, fork.hint),
+          h('div', { class: 'grid-list' }, fork.branches.map((b) => h('div', { class: 'row-item option-row' },
+            h('div', {},
+              h('div', { class: 'title' }, b.name),
+              h('div', { class: 'meta' }, `代价：${b.cost}`),
+              h('div', { class: 'meta' }, `收获：${b.reward}`),
+              b.available ? null : h('div', { class: 'meta bad' }, b.reason)),
+            h('div', { class: 'actions' }, button(b.kind === Exploration.Branch.Patrol ? '迎战' : '走这条路', async () => {
+              m.close();
+              await this.chooseBranch(scene, b.kind);
+            }, { cls: 'small primary', disabled: !b.available }))))),
+          this.resourceLine());
+      },
+    });
+  }
+  // Takes a branch from its gate or the signpost: the patrol needs its fight,
+  // the fog and key branches a confirmation.
+  async chooseBranch(scene, kind) {
+    const game = this.game;
+    const b = game.fork().branches.find((branch) => branch.kind === kind);
+    if (!b) return;
+    if (!b.available) {
+      sfx('error');
+      toast(b.reason);
+      return;
+    }
+    if (kind === Exploration.Branch.Patrol) {
+      await this.challengePatrol(scene);
+      return;
+    }
+    const ok = await choose(b.name, h('div', {},
+      h('p', {}, `代价：${b.cost}`),
+      h('p', {}, `收获：${b.reward}`),
+      h('p', { class: 'muted' }, '岔路只能选一条：走上这条路，其他路就关闭了。'),
+      this.resourceLine()),
+    [{ label: kind === Exploration.Branch.Fog ? '走进去' : '用钥匙开门', value: true, cls: 'primary' }, { label: '再想想', value: false }]);
+    if (!ok) return;
+    const hero = this.hero;
+    const hp = hero.gethp();
+    const result = game.takeBranch(kind);
+    if (!result.ok) {
+      sfx('error');
+      toast('没有执行：条件不足。');
+      return;
+    }
+    const hurt = hero.gethp() < hp;
+    sfx(hurt ? 'hit' : 'chest');
+    if (hurt) scene.fx.flash(FogColorsFor(scene), 0.3);
+    this.report(result.events);
+    scene.refreshEntities();
+    alertBox(b.name, h('div', {}, h('p', { class: hurt ? 'bad' : 'good' }, result.text), this.resourceLine()), '好的');
+  }
+  async challengePatrol(scene) {
+    const game = this.game;
+    const preview = Campaign.makePatrol(game.hero, game.floor);
+    preview.setTacticalPressure(Campaign.patrolRules(game.hero, game.floor).difficulty);
+    const b = game.fork().branches.find((branch) => branch.kind === Exploration.Branch.Patrol);
+    const sprite = Sprites.monster(preview.bestiaryEntry()).idle;
+    const ok = await choose('巡逻近路', h('div', {},
+      h('div', { style: { display: 'flex', gap: '12px', alignItems: 'center' } },
+        h('img', { src: Sprites.spriteUrl(`m${preview.bestiaryEntry()}`, sprite), width: 96, height: 96, class: 'px', style: { imageRendering: 'pixelated', background: '#0e0b16', border: '2px solid #000' }, alt: '' }),
+        h('div', {},
+          h('h3', {}, preview.getname()),
+          h('p', { class: 'muted' }, `${preview.getEncounterTitle()} · HP ${preview.getmaxhp()} · 攻击 ${preview.getattack()} · 闪避 ${preview.getdodgeRate()}%`),
+          h('p', {}, preview.getAffixes().map((a) => h('span', { class: 'tag elite', title: affixDescription(a) }, affixName(a)))))),
+      h('p', {}, h('span', { class: 'gold' }, '收获：'), b.reward),
+      h('p', { class: 'muted' }, '打赢后近路打通，直达守卫；岔路只能选一条，其他路随之关闭。'),
+      h('p', { class: 'bad' }, '输了会倒下：复活后巡逻还在，可以重试，也可以改走别的路。'),
+      h('p', { class: 'muted' }, '探索带来的祝福和诅咒不用在巡逻身上，留给守卫。'),
+      h('p', { class: 'muted' }, `战术提示：${preview.getTacticalHint()}`),
+      h('ul', { class: 'lines muted', style: { fontSize: '13px' } }, preview.getAffixes().map((a) => h('li', {}, `[${affixName(a)}] ${affixDescription(a)}`))),
+      this.resourceLine()),
+    [{ label: '开战', value: true, cls: 'primary' }, { label: '返回', value: false }], { size: '' });
+    if (!ok) return;
+    this.app.startBattle(scene, 'patrol');
+  }
+
   // ---- Encounter ---------------------------------------------------------------------------
   async challenge(scene) {
     const game = this.game;
+    if (!game.guardianReachable()) {
+      sfx('error');
+      toast('守卫在岔路之后：先在岔路口选一条路。');
+      return;
+    }
     if (game.eventPending()) {
       toast(`先与${Campaign.chapter(game.floor).ally}交谈。`);
       const resolved = await this.eventDialog(scene);

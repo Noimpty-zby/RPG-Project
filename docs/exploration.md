@@ -31,8 +31,13 @@ const views = Exploration.survey(hero, floor);
 | `QuestItem` | 断裂的望远镜等（`variant` 0..2） | 1 个选项 |
 | `Puzzle` | 烽火台点火顺序 | 不走 `interact()`，见「谜题」 |
 | `Lore` | 见闻录残页 | 1 个选项，需要写入档案，见「见闻录」 |
+| `FogSource` | 瘴气泉眼 | 岔路层：1 个选项，免费；封住后毒雾远路不再扣血 |
+| `Vantage` | 哨塔残基 | 岔路层：1 个选项，免费；之后 `fork()` 给出巡逻和储藏的确切内容 |
+| `Shortcut` | 长满裂纹的土墙（`variant` 0）/ 吊桥绞盘（`variant` 1） | 岔路层，约一半：1 个选项；打通后走哪条路都能拿远路的补给 |
 
-每层 5–12 个地点（普通楼层平均约 6 个），Boss 层固定 3 个：补给、珍品、见闻录。
+`Cache` 的 `variant` 1 是毒雾远路上的「遗落的药箱」，必出 1 瓶药水。
+
+每层 5–15 个地点（普通楼层平均约 6 个），Boss 层固定 3 个：补给、珍品、见闻录。
 
 ## 地图放置（zone）
 
@@ -42,6 +47,9 @@ const views = Exploration.survey(hero, floor);
 | `Zone.Guardian` | 守卫房间 | 只有词缀源头使用，放在守卫身边，让玩家一眼看出它和守卫有关 |
 | `Zone.Hidden` | 隐秘处 | 墙角凹室、墙上的裂缝。现在的 `mapgen.js` 已经有装饰凹室，可以把它们用作隐秘处；做成走近才显形或有细微闪光会更有发现感 |
 | `Zone.Vault` | 上锁的侧室 | 需要地图新增一间带门的小侧室，门就是交互点；打开后可以画成门开着的样子 |
+| `Zone.Branch` | 某条岔路上（`spot.branch`） | 目前只有毒雾远路（`Branch.Fog`）有地点：本层露天的补给包、采集点和药箱 |
+
+岔路层上，`Zone.Guardian` 的地点（词缀源头、捷径）在岔路之后，其余地点都必须在选路之前就能走到。
 
 地图布局请继续使用 `VisualRng`（以种子和楼层为输入）决定坐标，**不要**调用 `rules/random.js`，否则会和 C++ 版失去一致。
 
@@ -103,6 +111,25 @@ Exploration.ingredientName(i);    // 鲜鱼、草药、矿砂、霜晶、星尘
 ```
 
 料理只会设置**下一场战斗**的祝福（`hero.runState().boon`），新祝福会替换旧的。`远征杂烩`（id 6）用数量最多的两种不同食材各 1 份。
+
+## 岔路
+
+每章 3 层是岔路层（`Exploration.isForkFloor(seed, floor)`，`chapterPlan().forkFloors`）。`Exploration.branches(seed, floor)` 按「近路、远路、钥匙」的顺序给出这一层的路，毒雾远路一定在其中：
+
+```js
+const fork = Exploration.fork(hero, floor);
+// { branches: [{ kind, name, cost, reward, available, reason }], taken, hint }
+//   kind：Exploration.Branch.Patrol / Fog / Locked；cost、reward 已写好，直接显示
+//   taken：已经走的路（Branch.None 表示还没选）；hint：一行提示
+Exploration.guardianReachable(hero, floor); // 岔路层没选路时为 false：先选路才能挑战守卫
+```
+
+- **远路、钥匙小径**：`game.act(() => Exploration.takeBranch(hero, floor, kind))`，返回值与 `interact()` 相同（`result.ok`、`result.text`）。远路在没封住源头时扣当前生命 20%（不会致死），钥匙小径扣 1 把钥匙并立即给出储藏。
+- **巡逻近路**：打一场战斗。`Campaign.makePatrol(hero, floor)` 生成敌人，`Campaign.patrolRules(hero, floor)` 是战斗规则，开战前 `Campaign.seedStream(hero, floor, Campaign.PatrolBattleStream)`，结束后 `Campaign.settlePatrol(hero, monster, battle, floor)`：赢了记为走了近路并发放经验、金币和 1 份材料；输了什么都不记，可以重试或改走别的路。巡逻不吃也不消耗祝福和诅咒。
+- 选了一条路，其他路就关闭（`fork().branches` 里 `available=false`，`reason` 说明原因）。远路上的地点只有走了远路或打通捷径后才能探索；其他时候 `survey()` 的 `blocked` 写着原因，`options()` 的选项全部不可选。走了远路之后，捷径不再计入剩余地点。
+- 记录在 `run.explored[floor]` 的第 19–20 位（`Exploration.BranchBit`），存档格式不变。
+
+网页地图（`mapgen.js`）把每条路画成一条一格宽的路，`layout.lanes[]` 给出每条路的 `branch`、两端 `entry`/`exit`（关卡所在的格子）、两端前面的格子 `entryFront`/`exitFront`、路上所有格子 `tiles`，以及毒雾覆盖的格子 `fogTiles`；有捷径时 `exitSpot` 是捷径的地点编号，捷径就画在远路的出口上。大厅里的路牌位置是 `layout.forkSign`。
 
 ## 战斗前后
 

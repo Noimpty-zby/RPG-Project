@@ -59,13 +59,13 @@ const app = {
     if (!this.explore) this.explore = new ExploreScene(this);
     loop.setScene(this.explore);
   },
-  async startBattle(scene) {
+  async startBattle(scene, kind = 'guardian') {
     if (this.busy) return;
     this.busy = true;
     sfx('encounter');
     scene.fx.flash('#ffffff', 0.25);
     scene.fx.shake(3, 0.2);
-    const { monster, rules, battle, notes } = this.game.startBattle();
+    const { monster, rules, battle, notes } = this.game.startBattle(kind);
     const keep = { tx: scene.player.tx, ty: scene.player.ty, dir: scene.player.dir };
     await fade(() => {
       this.busy = false;
@@ -78,7 +78,7 @@ const app = {
   async endBattle(scene, result, keep) {
     await this.transition(() => {
       scene.resume = result.alive ? keep : null;
-      scene.pendingChest = result.won ? result.events.filter((e) => e.type === 'loot').map((e) => e.item) : [];
+      scene.pendingChest = result.won && !result.patrol ? result.events.filter((e) => e.type === 'loot').map((e) => e.item) : [];
       loop.setScene(scene);
     });
     for (const line of result.worn) toast(line);

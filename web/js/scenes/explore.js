@@ -1,6 +1,7 @@
 // Top-down floor exploration: walk the generated map, talk to the merchant
 // and allies, rest at the campfire, search the floor's exploration spots and
-// challenge the floor's guardian.
+// challenge the floor's guardian. On fork floors the guardian lies past one of
+// two or three lanes; each lane's ends are closed until its branch is taken.
 import { generateLayout, FLOOR } from '../engine/mapgen.js';
 import { TILE } from '../engine/tiles.js';
 import * as Sprites from '../engine/sprites.js';
@@ -14,11 +15,12 @@ import * as Campaign from '../rules/campaign.js';
 import { Objective } from '../rules/combat.js';
 import * as Exploration from '../rules/exploration.js';
 import { chapterText } from '../rules/exploration_text.js';
+import { FogColors } from '../engine/spot_sprites.js';
 import { modalOpen } from '../ui/dom.js';
 
 const Dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const MoveTime = 0.14;
-const { SpotKind } = Exploration;
+const { SpotKind, Branch } = Exploration;
 // Picked up when explored, so nothing stays on the map.
 const PickedUp = [SpotKind.Key, SpotKind.QuestItem, SpotKind.Lore];
 
@@ -74,10 +76,17 @@ export class ExploreScene {
     this.theme = chapterOf(floor);
     const boss = floor % 10 === 0;
     const set = Sprites.tiles(this.theme);
+    const fork = game.fork();
+    this.fork = fork;
     const layout = generateLayout({ seed: game.run.seed, floor, boss, propCount: set.props.length,
-      spots: Exploration.generate(game.run.seed, floor) });
+      spots: Exploration.generate(game.run.seed, floor), fork: fork.branches.map((b) => b.kind) });
     this.layout = layout;
     const views = Exploration.survey(game.hero, floor);
+    const doneKind = (kind) => views.some((v) => v.spot.kind === kind && v.done);
+    // Floors cleared before forks existed have no branch taken: every lane stays open.
+    this.lanesOpen = fork.branches.length > 0 && fork.taken === Branch.None && game.cleared();
+    this.fogClear = doneKind(SpotKind.FogSource);
+    this.scouted = doneKind(SpotKind.Vantage);
     this.status = { remaining: views.filter((v) => !v.done && Exploration.countsTowardCompletion(v.spot.kind)).length };
     this.openWalls(views);
     this.bakeMap();
@@ -102,11 +111,24 @@ export class ExploreScene {
       objective: rules.objective, name: Bestiary.entryName(entry) });
     this.stairs = add({ type: 'stairs', ...layout.stairs, solid: false, name: floor === MaxFloor ? '天顶之门' : '楼梯' });
     for (const prop of layout.props) add({ type: 'prop', ...prop, solid: true, def: set.props[prop.kind] });
+    if (layout.forkSign) add({ type: 'forksign', ...layout.forkSign, solid: true, name: '岔路口' });
+    for (const lane of layout.lanes) {
+      const view = fork.branches.find((b) => b.kind === lane.branch);
+      if (fork.taken === lane.branch || this.lanesOpen) continue;
+      const closed = fork.taken !== Branch.None;
+      const gate = { type: 'lanegate', branch: lane.branch, name: view.name, closed, solid: true };
+      add({ ...gate, ...lane.entry, end: 'entry',
+        entry: lane.branch === Branch.Patrol ? Bestiary.entryForFloor(floor) : null });
+      if (lane.exitSpot === undefined) add({ ...gate, ...lane.exit, end: 'exit' });
+    }
     for (const view of views) {
       const place = layout.spots[view.index];
       const hidden = place && place.crack >= 0 && !layout.cracks[place.crack].open;
       if (place && !hidden && !(view.done && PickedUp.includes(view.spot.kind))) add(this.spotEntity(view, place));
     }
+    // The fog lane's far end opens with its shortcut, with the fog branch, or on an old cleared floor.
+    for (const e of this.entities)
+      if (e.type === 'spot' && e.shortcut && (fork.taken === Branch.Fog || this.lanesOpen)) Object.assign(e, { solid: false, open: true });
     layout.cracks.forEach((crack, i) => add(crack.open ? { type: 'rubble', x: crack.x, y: crack.y, solid: false }
       : { type: 'crack', x: crack.x, y: crack.y, solid: true, crack: i, name: '墙上的裂缝' }));
     // An emptied chest at the back of each opened vault.
@@ -192,9 +214,9 @@ export class ExploreScene {
       (spot.kind === SpotKind.Curio && spot.variant > 0));
     return {
       type: 'spot', x: place.x, y: place.y, index: view.index, kind: spot.kind, variant: spot.variant, zone: spot.zone,
-      name: view.name, done, door: place.vault && !place.fallback, fallback: place.fallback,
-      // An opened vault door and an emptied cache can be walked through.
-      solid: !(done && (place.vault && !place.fallback || spot.kind === SpotKind.Cache)),
+      name: view.name, done, door: place.vault && !place.fallback, fallback: place.fallback, shortcut: Boolean(place.shortcut),
+      // An opened vault door, an emptied cache and an opened shortcut can be walked through.
+      solid: !(done && (place.vault && !place.fallback || spot.kind === SpotKind.Cache || place.shortcut)),
       light: glows ? accent : null,
     };
   }
@@ -227,8 +249,8 @@ export class ExploreScene {
     if (e && e.type === 'stairs') return this.game.cleared();
     return !e || !e.solid;
   }
-  // Landmarks for quick travel, most useful first. The map holds no fights
-  // besides the guardian, so every walk is safe to automate.
+  // Landmarks for quick travel, most useful first. Fights (the guardian, a
+  // patrol) only start from a dialog, so every walk is safe to automate.
   travelTargets() {
     const { game } = this;
     const byType = (type) => this.entities.find((e) => e.type === type);
@@ -236,6 +258,7 @@ export class ExploreScene {
     const add = (entity, label, primary = false) => { if (entity) list.push({ entity, label, primary }); };
     if (this.chest && !this.chest.entity.opened) add(this.chest.entity, '宝箱', true);
     if (game.cleared()) add(this.stairs, game.floor === MaxFloor ? '天顶之门' : '楼梯（下一层）', true);
+    else if (!game.guardianReachable()) add(byType('forksign'), '岔路口（选一条路）', true);
     else add(this.guardian, `守卫：${this.guardian.name}`, true);
     add(byType('campfire'), '营火');
     add(byType('merchant'), '商人');
@@ -377,7 +400,8 @@ export class ExploreScene {
     const nx = p.tx + dx;
     const ny = p.ty + dy;
     if (this.walkable(nx, ny)) {
-      p.moving = { fx: p.tx, fy: p.ty, t: 0, fast: Boolean(this.route) };
+      // A cleared floor is safe: walk back at double speed.
+      p.moving = { fx: p.tx, fy: p.ty, t: 0, fast: Boolean(this.route) || this.game.cleared() };
       p.tx = nx;
       p.ty = ny;
       p.step = p.step === 1 ? 2 : 1;
@@ -410,10 +434,20 @@ export class ExploreScene {
       case 'chest': return e.opened ? null : '打开宝箱';
       case 'spot': return this.spotPrompt(e);
       case 'crack': return '敲开墙上的裂缝';
+      case 'forksign': return '岔路口：比较各条路';
+      case 'lanegate': return this.gatePrompt(e);
       case 'stairs': return game.cleared() ? (game.floor === MaxFloor ? '踏入天顶之门' : '前往下一层') : '楼梯被封印';
       case 'prop': return null;
       default: return null;
     }
+  }
+
+  gatePrompt(e) {
+    if (e.closed) return `${e.name}已经关闭`;
+    if (e.end === 'exit') return `${e.name}的出口：从岔路口那边进来`;
+    if (e.branch === Branch.Patrol) return `迎战巡逻（${e.name}）`;
+    if (e.branch === Branch.Fog) return `走进${e.name}（${this.fogClear ? '源头已封住' : '会损失生命'}）`;
+    return `${e.name}：用 1 把钥匙打开（现有 ${this.game.run.keys}）`;
   }
 
   spotPrompt(e) {
@@ -438,6 +472,15 @@ export class ExploreScene {
       case 'chest': this.openChest(e); break;
       case 'spot': menus.openSpot(this, e); break;
       case 'crack': this.breakCrack(e); break;
+      case 'forksign': menus.openFork(this); break;
+      case 'lanegate':
+        if (e.closed || e.end === 'exit') {
+          sfx('error');
+          this.app.toast(this.gatePrompt(e));
+        } else {
+          await menus.chooseBranch(this, e.branch);
+        }
+        break;
       case 'stairs': await this.goStairs(); break;
       default: break;
     }
@@ -529,6 +572,7 @@ export class ExploreScene {
     drawables.push({ e: { type: 'player' }, y: this.player.y + 0.5 });
     drawables.sort((a, b) => a.y - b.y);
     for (const { e } of drawables) this.drawEntity(ctx, e);
+    this.drawFog(ctx);
     this.fx.draw(ctx, 'world');
     for (const a of this.ambient) {
       const t = a.age / a.life;
@@ -661,9 +705,66 @@ export class ExploreScene {
         if (Math.random() < 0.02) this.fx.particle({ x: px + 5 + Math.random() * 6, y: py + 6 + Math.random() * 6, vy: 14, life: 0.7, size: 1, color: '#c0cbdc' });
         break;
       case 'rubble': ctx.drawImage(Sprites.spots(this.theme).rubble, px, py); break;
+      case 'forksign': ctx.drawImage(objects.sign, px, py); break;
+      case 'lanegate': this.drawGate(ctx, e, px, py, shadow); break;
       case 'decor': ctx.drawImage(Sprites.objects().chest[1], px, py); break;
       default:
         break;
+    }
+  }
+
+  // A lane's end: the patrol in the near lane's doorway, a wall of fog, an
+  // iron gate or a barricade. Closed lanes keep theirs, drawn dimmer.
+  drawGate(ctx, e, px, py, shadow) {
+    const t = this.time;
+    const art = Sprites.spots(this.theme);
+    if (e.closed) ctx.globalAlpha = 0.6;
+    if (e.branch === Branch.Patrol && e.end === 'entry') {
+      const sprite = Sprites.monster(e.entry).idle;
+      const bob = e.closed ? 0 : Math.round(Math.sin(t * 2.4 + 1) * 1);
+      shadow(px + 8, py + 15, 18);
+      if (!e.closed) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.3 + Math.sin(t * 4) * 0.1;
+        ctx.drawImage(tintGlow('#e43b44'), px - 12, py - 20, 40, 40);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
+      }
+      ctx.drawImage(sprite, Math.round(px + 8 - sprite.width / 2), Math.round(py + 16 - sprite.height + bob));
+    } else if (e.branch === Branch.Patrol) {
+      ctx.drawImage(art.barricade, px, py);
+    } else if (e.branch === Branch.Locked) {
+      ctx.drawImage(art.gate.live, px, py);
+    } else {
+      // A wall of fog: thick even after the source is shut, until walked into.
+      this.drawFogPuff(ctx, px + 8, py + 6, 1.8, 7);
+      this.drawFogPuff(ctx, px + 8, py + 12, 1.8, 11);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // A drifting clump of the chapter's fog centered on (x, y).
+  drawFogPuff(ctx, x, y, density, seed) {
+    const t = this.time;
+    const color = FogColors[this.theme];
+    for (let i = 0; i < 5; i++) {
+      const a = t * 0.8 + seed * 1.7 + i * 1.3;
+      ctx.globalAlpha = Math.min(1, (0.34 + 0.1 * Math.sin(a * 1.4)) * density);
+      ctx.drawImage(tintGlow(color), x - 10 + Math.sin(a) * 4 - 3 + (i % 3) * 3, y - 12 + Math.cos(a * 0.7) * 3 + (i % 2) * 4, 20, 20);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // Fog fills the fog lane's way in until its source is shut: a tinted layer
+  // on each tile with drifting puffs over it.
+  drawFog(ctx) {
+    if (this.fogClear) return;
+    const color = FogColors[this.theme];
+    for (const lane of this.layout.lanes) {
+      if (lane.branch !== Branch.Fog) continue;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.32 + 0.06 * Math.sin(this.time * 1.5);
+      for (const p of [lane.entry, ...lane.fogTiles]) ctx.fillRect(p.x * TILE, p.y * TILE, TILE, TILE);
+      ctx.globalAlpha = 1;
+      for (const p of lane.fogTiles) this.drawFogPuff(ctx, p.x * TILE + 8, p.y * TILE + 8, 1, p.x * 3 + p.y);
     }
   }
 
@@ -672,7 +773,10 @@ export class ExploreScene {
     const art = Sprites.spots(this.theme);
     const look = (pair) => (e.done ? pair.spent : pair.live);
     switch (e.kind) {
-      case SpotKind.Cache: return look(art.cache);
+      case SpotKind.Cache: return look(e.variant === 1 ? art.medkit : art.cache);
+      case SpotKind.FogSource: return look(art.fogSource);
+      case SpotKind.Vantage: return look(art.lookout);
+      case SpotKind.Shortcut: return e.done || e.open ? art.shortcuts[e.variant].spent : art.shortcuts[e.variant].live;
       case SpotKind.Curio: return look(art.curios[e.variant]);
       case SpotKind.Gather: return look(art.gather[chapterText(this.theme).gatherIngredient[e.variant]]);
       case SpotKind.AffixSource: return look(art.source);
@@ -700,7 +804,7 @@ export class ExploreScene {
     }
     const sprite = this.spotSprite(e);
     if (!sprite) return;
-    if (e.door) {
+    if (e.door || e.shortcut) {
       ctx.drawImage(sprite, px, py);
       return;
     }
@@ -728,6 +832,14 @@ export class ExploreScene {
     else if (g.objective !== Objective.Defeat) tag = [Campaign.objectiveName(g.objective), '#b55088'];
     if (tag) this.drawTag(ctx, cx, top, tag[0], tag[1]);
     for (const e of this.entities) {
+      if (e.type === 'lanegate' && e.end === 'entry' && e.branch === Branch.Patrol && !e.closed) {
+        const sprite = Sprites.monster(e.entry).idle;
+        this.drawTag(ctx, e.x * TILE + 8, e.y * TILE + 16 - sprite.height - 6 + Math.sin(t * 3) * 1.5, '巡逻', '#e43b44');
+      }
+      if (e.type === 'forksign' && this.fork.taken === Branch.None && !this.lanesOpen)
+        this.drawTag(ctx, e.x * TILE + 8, e.y * TILE - 4 + Math.sin(t * 4) * 1.5, '岔路', '#feae34');
+      // From the lookout the cracked walls of this floor can be seen.
+      if (e.type === 'crack' && this.scouted) this.drawTag(ctx, e.x * TILE + 8, e.y * TILE - 2 + Math.sin(t * 4 + e.x) * 1.5, '?', '#68386c');
       if (e.type === 'ally' && this.game.eventPending()) this.drawTag(ctx, e.x * TILE + 8, e.y * TILE - 6 + Math.sin(t * 4) * 1.5, '!', '#feae34');
       if (e.type === 'chest' && !e.opened) this.drawTag(ctx, e.x * TILE + 8, e.y * TILE - 4 + Math.sin(t * 4) * 1.5, '!', '#feae34');
       if (e.type !== 'spot' || e.done) continue;
