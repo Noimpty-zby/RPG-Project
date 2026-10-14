@@ -211,6 +211,17 @@ BattleAction choose(player &hero, enemy &monster, BattleSession &battle, bool aw
   }
   return {ActionType::Attack};
 }
+// Fight to the end with the policy; returns whether the hero won.
+template <class Settle>
+bool playOut(player &hero, enemy &monster, BattleSession &battle, bool aware, Settle settle) {
+  int cursor = 0;
+  while (battle.beginTurn()) {
+    const auto action = choose(hero, monster, battle, aware, cursor);
+    if (!battle.act(action)) throw std::runtime_error("simulation submitted invalid action");
+  }
+  if (battle.turns() > battle.turnLimit()) throw std::runtime_error("encounter exceeded its turn bound");
+  return settle();
+}
 struct Result { int floor, level, coins, turns, potions, deaths, upgrades, drought, timeouts, objectiveWins, explored; };
 // Standard-mode pacing per class, for --report.
 struct Pacing {
@@ -218,11 +229,47 @@ struct Pacing {
   long long eliteAttempts = 0, eliteWins = 0, eliteTurns = 0;
   long long enhanceCoins = 0, repairCoins = 0, restCoins = 0, endCoins = 0, runs = 0;
   long long explored = 0, vaults = 0, puzzles = 0, meals = 0, merchantCoins = 0, keysLeft = 0;
+  long long patrolFights = 0, patrolWins = 0;
+  std::array<long long, 4> branches{}; // Taken per Exploration::Branch.
   std::array<std::array<int, 2>, 10> bossFirstAttempts{}; // {wins, attempts} per chapter
   // Bounties of chapters whose boss was cleared: {completed, offered} per kind and policy.
   std::array<std::array<std::array<int, 2>, Campaign::BountyKinds>, 2> bounties{};
 };
 std::array<Pacing, 3> pacing{};
+// Both policies take a fork like a careful player who has just prepared at
+// camp: fight the patrol with two thirds of their health, spend a key on the stash when hurt or
+// rich in keys, else walk the fog (whose source explore() shuts first). A lost
+// patrol fight is not retried. Returns false when the hero fell for good.
+bool takeFork(player &hero, int floor, bool aware, Pacing &stats, bool standard) {
+  using Exploration::Branch;
+  const auto fork = Exploration::fork(hero, floor);
+  if (fork.branches.empty() || fork.taken != Branch::None) return true;
+  const auto offered = [&](Branch kind) {
+    return std::any_of(fork.branches.begin(), fork.branches.end(),
+                       [&](const Exploration::BranchView &b) { return b.kind == kind && b.available; });
+  };
+  const bool fresh = hero.gethp() * 100 >= hero.getmaxhp() * 65;
+  if (offered(Branch::Patrol) && fresh) {
+    auto monster = Campaign::makePatrol(hero, floor);
+    Campaign::seedStream(hero, floor, Campaign::PatrolBattleStream);
+    BattleSession battle(hero, monster, Campaign::patrolRules(hero, floor));
+    const bool won = playOut(hero, monster, battle, aware,
+                             [&] { return Campaign::settlePatrol(hero, monster, battle, floor); });
+    if (standard) {
+      ++stats.patrolFights;
+      stats.patrolWins += won;
+    }
+    if (!hero.isalive() && !Campaign::revive(hero, hero.getfreerevives() > 0)) return false;
+  }
+  if (Exploration::branchTaken(hero, floor) == Branch::None) {
+    const int keys = hero.runState().keys;
+    const bool hurt = hero.gethp() * 100 < hero.getmaxhp() * 60;
+    if (offered(Branch::Locked) && keys >= 1 && (hurt || keys >= 3)) Exploration::takeBranch(hero, floor, Branch::Locked);
+    else Exploration::takeBranch(hero, floor, Branch::Fog);
+  }
+  if (standard) ++stats.branches[static_cast<int>(Exploration::branchTaken(hero, floor))];
+  return true;
+}
 Result run(int job, unsigned seed, int route, int challenge, bool aware) {
   std::unique_ptr<player> hero;
   if (job == 0) hero = std::make_unique<Warrior>("sim");
@@ -238,6 +285,12 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
     if (Campaign::eventPending(*hero, floor))
       Campaign::resolveEvent(*hero, floor, hero->getcoin() >= GameConfig::restCost(floor) ? 1 : 2);
     explore(*hero, floor, spend);
+    if (!Exploration::fork(*hero, floor).branches.empty()) {
+      prepare(*hero, floor, seed % 2 + 1, spend);
+      if (!takeFork(*hero, floor, aware, stats, challenge == 0)) break;
+      explore(*hero, floor, spend); // The branch and the guardian's side of the fork.
+    }
+    if (!Exploration::guardianReachable(*hero, floor)) throw std::runtime_error("fork left the guardian unreachable");
     bool won = false;
     for (int retry = 0; retry < 3 && !won; ++retry) {
       prepare(*hero, floor, seed % 2 + 1, spend);
@@ -246,13 +299,8 @@ Result run(int job, unsigned seed, int route, int challenge, bool aware) {
       const auto rules = Campaign::rulesFor(*hero, floor);
       const int startMaxHp = hero->getmaxhp();
       BattleSession battle(*hero, monster, rules);
-      int cursor = 0;
-      while (battle.beginTurn()) {
-        const auto action = choose(*hero, monster, battle, aware, cursor);
-        if (!battle.act(action)) throw std::runtime_error("simulation submitted invalid action");
-      }
+      playOut(*hero, monster, battle, aware, [] { return true; });
       timeouts += battle.report().timeout;
-      if (battle.turns() > battle.turnLimit()) throw std::runtime_error("encounter exceeded its turn bound");
       if (battle.won() && monster.isalive()) ++objectiveWins;
       if (challenge == 0 && floor % 10 == 0 && retry == 0) {
         auto &tally = stats.bossFirstAttempts[floor / 10 - 1];
@@ -368,14 +416,17 @@ int main(int argc, char **argv) {
                 << std::setw(10) << average(p.endCoins, p.runs) << std::setprecision(1) << '\n';
     }
     std::cout << "\nStandard mode exploration per run\n"
-              << "job      spots  vaults puzzles  meals merchant-coins keys-left\n";
+              << "job      spots  vaults puzzles  meals merchant-coins keys-left patrol-win% patrol fog  key\n";
     for (int job = 0; job < 3; ++job) {
       const Pacing &p = pacing[job];
       std::cout << std::left << std::setw(8) << names[job] << std::right
                 << std::setw(6) << average(p.explored, p.runs) << std::setw(8) << average(p.vaults, p.runs)
                 << std::setw(8) << average(p.puzzles, p.runs) << std::setw(7) << average(p.meals, p.runs)
                 << std::setw(15) << std::setprecision(0) << average(p.merchantCoins, p.runs)
-                << std::setprecision(1) << std::setw(10) << average(p.keysLeft, p.runs) << '\n';
+                << std::setprecision(1) << std::setw(10) << average(p.keysLeft, p.runs)
+                << std::setw(12) << average(p.patrolWins, p.patrolFights, 100)
+                << std::setw(7) << average(p.branches[1], p.runs) << std::setw(5) << average(p.branches[2], p.runs)
+                << std::setw(5) << average(p.branches[3], p.runs) << '\n';
     }
     std::cout << "\nFirst attempt at each boss, win %\njob     ";
     for (int chapter = 1; chapter <= 10; ++chapter) std::cout << std::setw(5) << chapter * 10;

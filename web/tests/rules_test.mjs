@@ -326,9 +326,11 @@ check(HelpTopics.every((topic) => topic.lines().length > 0), 'help pages render'
   Campaign.initialize(hero, 4321, 0);
   hero.setHighestFloor(20);
   collect(() => {
-    for (let floor = 1; floor <= 20; floor++)
+    for (let floor = 1; floor <= 20; floor++) {
+      Exploration.takeBranch(hero, floor, Exploration.Branch.Fog);
       for (const view of Exploration.survey(hero, floor))
         if (!view.done && view.spot.kind !== Exploration.SpotKind.Puzzle) Exploration.interact(hero, floor, view.index, 1);
+    }
   });
   hero.runState().boon = 3;
   const data = serializeGame(hero, 20);
@@ -364,6 +366,17 @@ check(HelpTopics.every((topic) => topic.lines().length > 0), 'help pages render'
   const plain = Array.from({ length: 20 }, (_, i) => i + 1)
     .find((f) => !Exploration.generate(4321, f).some((s) => s.kind === Exploration.SpotKind.Merchant));
   mutate((r) => { r.explored[plain] |= 1 << Exploration.MerchantBit; }, 'goods without a merchant');
+  // Forks: the branch taken round trips; a branch off a fork floor, or one the fork lacks, is refused.
+  const forkFloor = Exploration.chapterPlan(4321, 0).forkFloors[0];
+  check(Exploration.branchTaken(loaded, forkFloor) === Exploration.Branch.Fog, 'the branch taken round trips');
+  const flat = Array.from({ length: 20 }, (_, i) => i + 1).find((f) => !Exploration.isForkFloor(4321, f));
+  mutate((r) => { r.explored[flat] |= Exploration.Branch.Fog << Exploration.BranchBit; }, 'a branch off a fork floor');
+  const keyless = Array.from({ length: 20 }, (_, i) => i + 1)
+    .find((f) => Exploration.isForkFloor(4321, f) && !Exploration.branches(4321, f).includes(Exploration.Branch.Locked));
+  if (keyless) mutate((r) => {
+    r.explored[keyless] = (r.explored[keyless] & ((1 << Exploration.BranchBit) - 1)) | (Exploration.Branch.Locked << Exploration.BranchBit);
+  }, 'a branch the fork lacks');
+  mutate((r) => { r.explored[forkFloor] |= 1 << (Exploration.BranchBit + 2); }, 'bits past the branch');
 }
 
 // Journal pages live in the profile: recorded once, round trip, malformed data refused.
@@ -394,4 +407,4 @@ if (failures) {
   console.error(`${failures} rules check(s) failed`);
   process.exit(1);
 }
-console.log('Rules tests passed: save round trips and validation, exploration saves, journal pages, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans, dodged-skill refunds, inheritance.');
+console.log('Rules tests passed: save round trips and validation, exploration and fork saves, journal pages, profile parsing, achievements, help, dodged interrupts, interrupt and review texts, upgrade previews, readiness, potion plans, dodged-skill refunds, inheritance.');

@@ -35,7 +35,7 @@ const vector<string> runKeys{
 const vector<string> exploreKeys{
     "EXPLORED", "KEYS", "INGREDIENTS", "BOON", "BANE", "QUEST_ITEMS", "SPOTS_EXPLORED",
     "VAULTS_OPENED", "PUZZLES_SOLVED", "MEALS_COOKED"};
-constexpr int kMaxExploredMask = (1 << (Exploration::MerchantBit + Exploration::MerchantGoods)) - 1;
+constexpr int kMaxExploredMask = (1 << (Exploration::BranchBit + 2)) - 1;
 
 vector<string> split(const string &s, char delim) {
   vector<string> tokens;
@@ -103,8 +103,14 @@ void validateExploration(const RunState &run, int highestFloor) {
     if (floor > highestFloor) throw runtime_error("探索记录超出最高楼层");
     const auto spots = Exploration::generate(run.seed, floor);
     const int spotBits = mask & ((1 << Exploration::MerchantBit) - 1);
-    const int goodsBits = mask >> Exploration::MerchantBit;
+    const int goodsBits = (mask >> Exploration::MerchantBit) & ((1 << Exploration::MerchantGoods) - 1);
+    const int branch = mask >> Exploration::BranchBit;
     if (spotBits >> spots.size()) throw runtime_error("探索记录与楼层内容不符");
+    if (branch) {
+      const auto ways = Exploration::branches(run.seed, floor);
+      if (std::find(ways.begin(), ways.end(), static_cast<Exploration::Branch>(branch)) == ways.end())
+        throw runtime_error("岔路记录与楼层内容不符");
+    }
     int merchant = -1;
     for (size_t i = 0; i < spots.size(); ++i)
       if (spots[i].kind == Exploration::SpotKind::Merchant) merchant = static_cast<int>(i);

@@ -16,7 +16,8 @@ using namespace Exploration;
 // Seed streams. Each consumer reseeds, so exploring never shifts battles,
 // shops or loot. Spot outcomes use SpotStream + index.
 constexpr unsigned FloorStream = 700, PlanStream = 701, SpotStream = 720, VaultStream = 740,
-                   VaultGearStream = 741, MerchantStream = 750, BlindBoxStream = 760, PuzzleStream = 780;
+                   VaultGearStream = 741, MerchantStream = 750, BlindBoxStream = 760, PuzzleStream = 780,
+                   ForkPlanStream = 790, ForkStream = 791, StashStream = 792;
 
 // Outcome tables as cumulative percent thresholds on one roll of 0..99, and
 // the other tuning knobs. Option texts are built from these.
@@ -35,6 +36,11 @@ constexpr int BoonAttackPercent = 92, BoonHealthPercent = 92, BoonDodgePoints = 
 constexpr int BaneAttackPercent = 112, BaneHealthPercent = 110;
 constexpr int AmbushHealthPercent = 92;
 constexpr int PuzzleHealthPercent = 5;
+// Forks: which branches beside the fog one, what the fog costs, and how often
+// the fog source hides and a shortcut exists. The stash pays like a one-key vault.
+constexpr int PatrolForkPercent = 35, KeyForkPercent = 25; // Else all three branches.
+constexpr int FogHealthPercent = 20;
+constexpr int HiddenSourcePercent = 50, ShortcutPercent = 50;
 
 const char *const ingredientNames[IngredientCount] = {"鲜鱼", "草药", "矿砂", "霜晶", "星尘"};
 // Dangerous affixes in the order an affix source or the boon removes them.
@@ -72,6 +78,71 @@ void markExplored(RunState &run, int floor, int index) {
   if (spotDone(run, floor, index)) return;
   run.explored[floor] |= 1 << index;
   run.spotsExplored = GameConfig::addCounter(run.spotsExplored, 1);
+}
+bool hasKind(const std::vector<Spot> &spots, SpotKind kind) {
+  return std::any_of(spots.begin(), spots.end(), [&](const Spot &s) { return s.kind == kind; });
+}
+bool kindDone(const RunState &run, const std::vector<Spot> &spots, int floor, SpotKind kind) {
+  for (std::size_t i = 0; i < spots.size(); ++i)
+    if (spots[i].kind == kind && spotDone(run, floor, static_cast<int>(i))) return true;
+  return false;
+}
+// Every fork floor has a fog source, so it marks the fork.
+bool forked(const std::vector<Spot> &spots) { return hasKind(spots, SpotKind::FogSource); }
+Branch takenOf(const RunState &run, int floor) {
+  return static_cast<Branch>((run.explored[floor] >> BranchBit) & 3);
+}
+// The guardian's side of a fork floor opens once a branch is taken. Floors
+// cleared before forks existed stay open.
+bool guardianOpen(const RunState &run, int floor, const std::vector<Spot> &spots) {
+  return !forked(spots) || takenOf(run, floor) != Branch::None || run.cleared[floor] != 0;
+}
+std::string farName(int floor) {
+  return std::string(ExplorationText::fork(GameConfig::chapter(floor)).fog) + "远路";
+}
+std::string branchName(Branch branch, int floor) {
+  switch (branch) {
+  case Branch::Patrol: return "巡逻近路";
+  case Branch::Fog: return farName(floor);
+  case Branch::Locked: return "钥匙小径";
+  default: return "";
+  }
+}
+// Why a spot cannot be reached now, or empty. A spot on a branch that was not
+// taken opens through a shortcut.
+std::string blockedReason(const RunState &run, const std::vector<Spot> &spots, int floor, int index) {
+  const Spot &spot = spots[index];
+  if (spot.zone == Zone::Branch) {
+    const Branch taken = takenOf(run, floor);
+    if (taken == spot.branch || (taken != Branch::None && kindDone(run, spots, floor, SpotKind::Shortcut)))
+      return "";
+    if (taken == Branch::None) return "在" + branchName(spot.branch, floor) + "上：先在岔路口选这条路";
+    return branchName(spot.branch, floor) + "已经关闭" +
+           (hasKind(spots, SpotKind::Shortcut) ? "，打通守卫房间附近的捷径才能过去" : "");
+  }
+  if (spot.zone == Zone::Guardian && !guardianOpen(run, floor, spots)) return "在岔路之后：先在岔路口选一条路";
+  return "";
+}
+// A spot the branch taken settled: on a closed branch that no shortcut can
+// open, or the shortcut itself once the fog branch was walked.
+bool settledByBranch(const RunState &run, const std::vector<Spot> &spots, int floor, int index) {
+  const Spot &spot = spots[index];
+  const Branch taken = takenOf(run, floor);
+  if (spot.kind == SpotKind::Shortcut) return taken == Branch::Fog;
+  return spot.zone == Zone::Branch && taken != Branch::None && taken != spot.branch &&
+         !hasKind(spots, SpotKind::Shortcut);
+}
+// The fork's branches from the current random state: one roll.
+std::vector<Branch> drawBranches() {
+  const int roll = Random::below(100);
+  if (roll < PatrolForkPercent) return {Branch::Patrol, Branch::Fog};
+  if (roll < PatrolForkPercent + KeyForkPercent) return {Branch::Fog, Branch::Locked};
+  return {Branch::Patrol, Branch::Fog, Branch::Locked};
+}
+// The key branch's stash: one roll on the one-key vault table.
+int stashRoll(std::uint32_t seed, int floor) {
+  seedFor(seed, floor, StashStream);
+  return Random::below(100);
 }
 void loseHealthSafely(player &hero, int percent) {
   const int loss = std::max(1, static_cast<int>(static_cast<long long>(hero.gethp()) * percent / 100));
@@ -195,7 +266,7 @@ std::string clueText(const Clue &clue, const ExplorationText::ChapterText &text)
 std::string spotName(const Spot &spot, int floor) {
   const auto &text = ExplorationText::chapter(GameConfig::chapter(floor));
   switch (spot.kind) {
-  case SpotKind::Cache: return spot.zone == Zone::Hidden ? text.hiddenCache : text.cache;
+  case SpotKind::Cache: return spot.variant == 1 ? "遗落的药箱" : spot.zone == Zone::Hidden ? text.hiddenCache : text.cache;
   case SpotKind::Curio: return text.curios[spot.variant];
   case SpotKind::Gather: return text.gather[spot.variant];
   case SpotKind::AffixSource: return text.affixSource;
@@ -205,6 +276,9 @@ std::string spotName(const Spot &spot, int floor) {
   case SpotKind::QuestItem: return text.questItems[spot.variant];
   case SpotKind::Puzzle: return text.puzzleTitle;
   case SpotKind::Lore: return "见闻录残页";
+  case SpotKind::FogSource: return ExplorationText::fork(GameConfig::chapter(floor)).fogSource;
+  case SpotKind::Vantage: return ExplorationText::fork(GameConfig::chapter(floor)).vantage;
+  case SpotKind::Shortcut: return ExplorationText::fork(GameConfig::chapter(floor)).shortcuts[spot.variant];
   }
   return "";
 }
@@ -212,7 +286,7 @@ std::string spotDescription(const player &hero, const Spot &spot, int floor) {
   const int c = GameConfig::chapter(floor);
   const auto &text = ExplorationText::chapter(c);
   switch (spot.kind) {
-  case SpotKind::Cache: return "可能有金币、药水或材料。";
+  case SpotKind::Cache: return spot.variant == 1 ? "前一支队伍留下的药箱，里面应该还有药水。" : "可能有金币、药水或材料。";
   case SpotKind::Curio: return text.curioDescriptions[spot.variant];
   case SpotKind::Gather:
     return std::string(text.gatherDescriptions[spot.variant]) + "（可采集" +
@@ -226,6 +300,12 @@ std::string spotDescription(const player &hero, const Spot &spot, int floor) {
            std::to_string(hero.runState().questItems[c]) + "/3）。";
   case SpotKind::Puzzle: return text.puzzlePrompt;
   case SpotKind::Lore: return "墙缝里夹着一页泛黄的纸。";
+  case SpotKind::FogSource: return ExplorationText::fork(c).fogSourceDescription;
+  case SpotKind::Vantage: return ExplorationText::fork(c).vantageDescription;
+  case SpotKind::Shortcut:
+    return spot.variant == 0
+        ? "墙后就是" + farName(floor) + "的补给点。砸开它，不穿过" + ExplorationText::fork(c).fog + "也能过去。"
+        : "拉下机关，桥会落到" + farName(floor) + "的补给点旁边。";
   }
   return "";
 }
@@ -251,6 +331,45 @@ std::string vaultContents(const player &hero, int floor, int keys) {
   if (roll < VaultMaterialsRoll) return std::to_string(vaultMaterials(c)) + " 份材料";
   if (roll < VaultPotionRoll) return potionText(1) + "与 " + std::to_string(coinUnit(floor) * 2) + " 金币";
   return std::to_string(coinUnit(floor) * 5) + " 金币";
+}
+
+std::string stashContents(std::uint32_t seed, int floor) {
+  const int roll = stashRoll(seed, floor);
+  if (roll < VaultMaterialsRoll) return std::to_string(vaultMaterials(GameConfig::chapter(floor))) + " 份材料";
+  if (roll < VaultPotionRoll) return potionText(1) + "与 " + std::to_string(coinUnit(floor) * 2) + " 金币";
+  return std::to_string(coinUnit(floor) * 5) + " 金币";
+}
+std::string openStash(player &hero, int floor) {
+  const int roll = stashRoll(hero.runState().seed, floor);
+  if (roll < VaultMaterialsRoll)
+    return "获得 " + std::to_string(addMaterials(hero, vaultMaterials(GameConfig::chapter(floor)))) + " 份材料";
+  if (roll < VaultPotionRoll) {
+    givePotions(hero, floor, 1);
+    hero.gaincoin(coinUnit(floor) * 2);
+    return "获得 1 瓶药水与 " + std::to_string(coinUnit(floor) * 2) + " 金币";
+  }
+  hero.gaincoin(coinUnit(floor) * 5);
+  return "获得 " + std::to_string(coinUnit(floor) * 5) + " 金币";
+}
+std::string patrolReport(const player &hero, int floor) {
+  const enemy monster = Campaign::makePatrol(hero, floor);
+  std::string affixes;
+  for (Affix affix : monster.getAffixes()) affixes += std::string(affixes.empty() ? "" : "、") + affixName(affix);
+  return monster.getname() + "（生命 " + std::to_string(monster.getmaxhp()) + "，攻击 " +
+         std::to_string(monster.getattack()) + "，词缀 " + affixes + "）";
+}
+// What the high ground shows: the patrol and the stash, for the branches the fork has.
+std::string scoutReport(const player &hero, int floor, const std::vector<Branch> &list) {
+  std::string text;
+  for (Branch branch : list) {
+    if (branch == Branch::Patrol) {
+      text += "巡逻近路是" + patrolReport(hero, floor);
+    } else if (branch == Branch::Locked) {
+      text += std::string(text.empty() ? "" : "；") + ExplorationText::fork(GameConfig::chapter(floor)).stash +
+              "里是 " + stashContents(hero.runState().seed, floor);
+    }
+  }
+  return text;
 }
 
 Result finish(Result result) {
@@ -290,6 +409,15 @@ ChapterPlan chapterPlan(std::uint32_t seed, int chapter) {
   std::sort(plan.questFloors.begin(), plan.questFloors.end());
   pool = {3, 4, 5, 6, 7, 8, 9};
   plan.puzzleFloor = base + pick(pool);
+  // Forks draw from their own stream so the floors above never move.
+  seedFor(seed, chapter * 10 + 1, ForkPlanStream);
+  pool.clear();
+  for (int floor = base + 2; floor <= base + 9; ++floor)
+    if (floor != Campaign::eliteFloor(chapter) && floor != plan.puzzleFloor &&
+        floor != plan.vaultFloors[0] && floor != plan.vaultFloors[1])
+      pool.push_back(floor);
+  for (int &floor : plan.forkFloors) floor = pick(pool);
+  std::sort(plan.forkFloors.begin(), plan.forkFloors.end());
   return plan;
 }
 
@@ -325,7 +453,33 @@ std::vector<Spot> generate(std::uint32_t seed, int floor) {
     if (plan.questFloors[i] == floor) spots.push_back({SpotKind::QuestItem, i, Zone::Middle});
   if (plan.puzzleFloor == floor) spots.push_back({SpotKind::Puzzle, 0, Zone::Middle});
   spots.push_back({SpotKind::Lore, floor, Zone::Hidden});
+  if (std::find(plan.forkFloors.begin(), plan.forkFloors.end(), floor) == plan.forkFloors.end()) return spots;
+  // The far branch carries the floor's supplies: open caches, gathering spots
+  // and, past the fog, a medicine chest.
+  seedFor(seed, floor, ForkStream);
+  drawBranches();
+  for (auto &spot : spots)
+    if ((spot.kind == SpotKind::Cache && spot.zone == Zone::Middle) || spot.kind == SpotKind::Gather) {
+      spot.zone = Zone::Branch;
+      spot.branch = Branch::Fog;
+    }
+  spots.push_back({SpotKind::FogSource, 0, Random::below(100) < HiddenSourcePercent ? Zone::Hidden : Zone::Middle});
+  spots.push_back({SpotKind::Vantage, 0, Zone::Middle});
+  spots.push_back({SpotKind::Cache, 1, Zone::Branch, Branch::Fog});
+  if (Random::below(100) < ShortcutPercent) spots.push_back({SpotKind::Shortcut, Random::below(2), Zone::Guardian});
   return spots;
+}
+
+bool isForkFloor(std::uint32_t seed, int floor) {
+  if (!validFloor(floor)) return false;
+  const auto plan = chapterPlan(seed, GameConfig::chapter(floor));
+  return std::find(plan.forkFloors.begin(), plan.forkFloors.end(), floor) != plan.forkFloors.end();
+}
+
+std::vector<Branch> branches(std::uint32_t seed, int floor) {
+  if (!isForkFloor(seed, floor)) return {};
+  seedFor(seed, floor, ForkStream);
+  return drawBranches();
 }
 
 bool countsTowardCompletion(SpotKind kind) { return kind != SpotKind::Merchant; }
@@ -340,15 +494,21 @@ std::vector<SpotView> survey(const player &hero, int floor) {
     view.done = spotDone(hero.runState(), floor, view.index);
     view.name = spotName(spots[i], floor);
     view.description = spotDescription(hero, spots[i], floor);
+    view.blocked = blockedReason(hero.runState(), spots, floor, view.index);
     views.push_back(view);
   }
   return views;
 }
 
 int remaining(const player &hero, int floor) {
+  const auto &run = hero.runState();
+  const auto spots = generate(run.seed, floor);
   int count = 0;
-  for (const auto &view : survey(hero, floor))
-    count += !view.done && countsTowardCompletion(view.spot.kind);
+  for (std::size_t i = 0; i < spots.size(); ++i) {
+    const int index = static_cast<int>(i);
+    count += !spotDone(run, floor, index) && countsTowardCompletion(spots[i].kind) &&
+             !settledByBranch(run, spots, floor, index);
+  }
   return count;
 }
 
@@ -367,6 +527,10 @@ std::vector<Option> options(const player &hero, int floor, int index) {
   std::vector<Option> list;
   switch (spot.kind) {
   case SpotKind::Cache:
+    if (spot.variant == 1) {
+      list.push_back(makeOption(1, "打开", "必定获得 1 瓶药水"));
+      break;
+    }
     list.push_back(makeOption(1, "打开", std::to_string(CacheGold) + "%：" + unit + " 金币；" +
         std::to_string(CachePotion - CacheGold) + "%：1 瓶药水；" + std::to_string(100 - CachePotion) +
         "%：1 份材料与 " + std::to_string(coinUnit(floor) / 2) + " 金币"));
@@ -444,7 +608,29 @@ std::vector<Option> options(const player &hero, int floor, int index) {
   case SpotKind::Lore:
     list.push_back(makeOption(1, "阅读", "收入见闻录（远征档案中查看，跨远征保留）"));
     break;
+  case SpotKind::FogSource:
+    list.push_back(makeOption(1, "封住源头", farName(floor) + "不再损失生命"));
+    break;
+  case SpotKind::Vantage: {
+    const auto ways = branches(run.seed, floor);
+    const bool patrol = std::find(ways.begin(), ways.end(), Branch::Patrol) != ways.end();
+    const bool locked = std::find(ways.begin(), ways.end(), Branch::Locked) != ways.end();
+    list.push_back(makeOption(1, "登高远望", std::string("看清") + (patrol ? "巡逻精英的生命、攻击和词缀" : "") +
+                              (patrol && locked ? "，以及" : "") +
+                              (locked ? std::string(ExplorationText::fork(c).stash) + "里的东西" : "")));
+    break;
   }
+  case SpotKind::Shortcut:
+    list.push_back(makeOption(1, spot.variant == 0 ? "砸开" : "拉下机关",
+                              "打通到" + farName(floor) + "补给点的捷径：走哪条路都能拿到沿途的补给"));
+    break;
+  }
+  const std::string blocked = blockedReason(run, spots, floor, index);
+  if (!blocked.empty())
+    for (auto &option : list) {
+      option.available = false;
+      option.reason = blocked;
+    }
   return list;
 }
 
@@ -468,6 +654,11 @@ Result interact(player &hero, int floor, int index, int option) {
   int experience = 0; // Granted after the text, so level-up messages follow it.
   switch (spot.kind) {
   case SpotKind::Cache: {
+    if (spot.variant == 1) {
+      givePotions(hero, floor, 1);
+      outcome = "获得 1 瓶药水";
+      break;
+    }
     const int roll = Random::below(100);
     if (roll < CacheGold) {
       hero.gaincoin(coinUnit(floor));
@@ -646,6 +837,16 @@ Result interact(player &hero, int floor, int index, int option) {
     outcome = std::string("【见闻录 ") + std::to_string(floor) + "/100 · " + page.title + "】" + page.text;
     break;
   }
+  case SpotKind::FogSource:
+    outcome = "封住了" + name + "：" + ExplorationText::fork(c).fog + "散去，" + farName(floor) + "可以安全通过";
+    break;
+  case SpotKind::Vantage:
+    outcome = "站在" + name + "上远望：" + scoutReport(hero, floor, branches(seed, floor));
+    break;
+  case SpotKind::Shortcut:
+    outcome = std::string(spot.variant == 0 ? "砸开了" : "拉下了") + name + "：现在不管走哪条路，都能去" +
+              farName(floor) + "的补给点";
+    break;
   case SpotKind::Puzzle:
     return result;
   }
@@ -655,6 +856,104 @@ Result interact(player &hero, int floor, int index, int option) {
   finish(result);
   hero.gainexp(experience);
   return result;
+}
+
+Branch branchTaken(const player &hero, int floor) {
+  return validFloor(floor) ? takenOf(hero.runState(), floor) : Branch::None;
+}
+
+bool guardianReachable(const player &hero, int floor) {
+  return validFloor(floor) && guardianOpen(hero.runState(), floor, generate(hero.runState().seed, floor));
+}
+
+Fork fork(const player &hero, int floor) {
+  Fork result;
+  const auto list = branches(hero.runState().seed, floor);
+  if (list.empty()) return result;
+  const auto &run = hero.runState();
+  const auto spots = generate(run.seed, floor);
+  const auto &text = ExplorationText::fork(GameConfig::chapter(floor));
+  const bool scouted = kindDone(run, spots, floor, SpotKind::Vantage);
+  const bool safe = kindDone(run, spots, floor, SpotKind::FogSource);
+  result.taken = takenOf(run, floor);
+  for (Branch kind : list) {
+    BranchView view;
+    view.kind = kind;
+    view.name = branchName(kind, floor);
+    if (kind == Branch::Patrol) {
+      const enemy monster = Campaign::makePatrol(hero, floor);
+      view.cost = scouted ? "打赢" + patrolReport(hero, floor)
+                          : "打赢巡逻精英（至少两个词缀，比普通敌人多 " +
+                                std::to_string(EnemyTuning::PatrolHpPercent - 100) + "% 生命）；登上" + text.vantage +
+                                "可以看清它";
+      view.reward = std::to_string(monster.getexp_reward()) + " 经验、" + std::to_string(monster.getcoin_reward()) +
+                    " 金币、" + std::to_string(Campaign::PatrolMaterials) + " 份材料；输了可以改走别的路";
+    } else if (kind == Branch::Fog) {
+      view.cost = safe ? std::string("源头已封住，安全通过")
+                       : std::string("穿过") + text.fog + "：损失当前生命 " + std::to_string(FogHealthPercent) +
+                             "%（不会致死）；封住" + text.fogSource + "就不会";
+      std::string supplies;
+      int count = 0;
+      for (std::size_t i = 0; i < spots.size(); ++i)
+        if (spots[i].zone == Zone::Branch && spots[i].branch == Branch::Fog) {
+          supplies += (count++ ? "、" : "") + spotName(spots[i], floor);
+        }
+      view.reward = "沿途 " + std::to_string(count) + " 处补给：" + supplies;
+    } else {
+      view.cost = "1 把钥匙（现有 " + std::to_string(run.keys) + "）";
+      view.reward = std::string(text.stash) + (scouted ? "：" + stashContents(run.seed, floor)
+                                                       : "（内容不明，登上" + std::string(text.vantage) + "可以看清）");
+    }
+    if (result.taken == kind) view.reason = "已经走了这条路";
+    else if (result.taken != Branch::None) view.reason = "已经走了" + branchName(result.taken, floor) + "，这条路关闭了";
+    else if (!reachable(hero, floor)) view.reason = "现在无法通行";
+    else if (kind == Branch::Locked && run.keys < 1) view.reason = "钥匙不足（现有 0）";
+    view.available = view.reason.empty();
+    result.branches.push_back(view);
+  }
+  if (result.taken == Branch::None) {
+    result.hint = "岔路只能选一条，选定后其他路关闭。";
+    if (!scouted) result.hint += std::string("登上") + text.vantage + "能先看清路上有什么。";
+    if (!safe) result.hint += std::string("找到") + text.fogSource + "并封住，远路就不再伤人。";
+  } else {
+    result.hint = "已走：" + branchName(result.taken, floor);
+    if (result.taken != Branch::Fog && hasKind(spots, SpotKind::Shortcut))
+      result.hint += kindDone(run, spots, floor, SpotKind::Shortcut) ? "；捷径已打通，远路的补给也能拿"
+                                                                       : "；守卫房间附近有通往远路补给的捷径";
+  }
+  return result;
+}
+
+Result takeBranch(player &hero, int floor, Branch branch) {
+  Result result;
+  if (!reachable(hero, floor) || branch == Branch::Patrol) return result;
+  auto &run = hero.runState();
+  const auto list = branches(run.seed, floor);
+  if (std::find(list.begin(), list.end(), branch) == list.end() || takenOf(run, floor) != Branch::None) return result;
+  const auto &text = ExplorationText::fork(GameConfig::chapter(floor));
+  if (branch == Branch::Fog) {
+    if (kindDone(run, generate(run.seed, floor), floor, SpotKind::FogSource)) {
+      result.text = std::string("源头已经封住，安全穿过了") + text.fog + "。沿途的补给可以拿了";
+    } else {
+      loseHealthSafely(hero, FogHealthPercent);
+      result.text = std::string("硬闯") + text.fog + "：损失当前生命的 " + std::to_string(FogHealthPercent) +
+                    "%。沿途的补给可以拿了";
+    }
+  } else {
+    if (run.keys < 1) return result;
+    run.keys -= 1;
+    result.text = std::string("用 1 把钥匙打开小径，") + text.stash + "：" + openStash(hero, floor);
+  }
+  run.explored[floor] |= static_cast<int>(branch) << BranchBit;
+  result.ok = true;
+  return finish(result);
+}
+
+void recordPatrolWin(player &hero, int floor) {
+  auto &run = hero.runState();
+  const auto list = branches(run.seed, floor);
+  if (std::find(list.begin(), list.end(), Branch::Patrol) != list.end() && takenOf(run, floor) == Branch::None)
+    run.explored[floor] |= static_cast<int>(Branch::Patrol) << BranchBit;
 }
 
 std::vector<Good> merchantGoods(const player &hero, int floor) {
@@ -895,7 +1194,8 @@ std::string chapterSummary(const player &hero, int floor) {
                      "层（1把）、第" + std::to_string(plan.vaultFloors[1]) + "层（2把）；谜题 第" +
                      std::to_string(plan.puzzleFloor) + "层；商人 第" + std::to_string(plan.merchantFloors[0]) +
                      "、" + std::to_string(plan.merchantFloors[1]) + "层；" + Campaign::chapter(floor).ally +
-                     "的遗物 " + std::to_string(run.questItems[c]) + "/3\n食材：";
+                     "的遗物 " + std::to_string(run.questItems[c]) + "/3；岔路 第" + std::to_string(plan.forkFloors[0]) +
+                     "、" + std::to_string(plan.forkFloors[1]) + "、" + std::to_string(plan.forkFloors[2]) + "层\n食材：";
   for (int i = 0; i < IngredientCount; ++i)
     text += std::string(i ? " " : "") + ingredientNames[i] + std::to_string(run.ingredients[i]);
   text += "；下一场战斗：祝福 " + boonDescription(run.boon) + "，诅咒 " + baneDescription(run.bane);

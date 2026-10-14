@@ -33,6 +33,19 @@ int objectiveSlot(int chapter, int local) {
     if (local == (positions[slot] - 1 + chapter * 2) % 9 + 1) return slot;
   return -1;
 }
+constexpr unsigned PatrolStream = 1290;
+void countBattle(RunState &run, const BattleSession &battle) {
+  run.battles = GameConfig::addCounter(run.battles, 1);
+  run.turns = GameConfig::addCounter(run.turns, battle.turns());
+  run.damageTaken = GameConfig::addCounter(run.damageTaken, battle.report().damageTaken);
+}
+// Chapter events that change every enemy of the chapter.
+void applyChapterEvent(const player &hero, int floor, enemy &monster) {
+  const int event = hero.runState().events[GameConfig::chapter(floor)];
+  const int type = eventType(floor);
+  if (event == 1 && type == 1) monster.removeAffix(Affix::POISONOUS);
+  if (event == 1 && type == 2) monster.setdodgeRate(std::max(0, monster.getdodgeRate() - 10));
+}
 void loseHealthSafely(player &hero, int percent) {
   const int loss = std::max(1, static_cast<int>(static_cast<long long>(hero.gethp()) * percent / 100));
   hero.sethp(std::max(1, hero.gethp() - loss));
@@ -94,6 +107,7 @@ int bountyGain(int kind, const player &hero, const BattleSession &battle, int fl
 }
 
 namespace Campaign {
+void advanceBounties(player &hero, const BattleSession &battle, int floor);
 const Chapter &chapter(int floor) { return chapters[GameConfig::chapter(floor)]; }
 JobReq jobOf(const player &hero) { return equipmentClass(hero.job()); }
 void seedStream(const player &hero, int floor, unsigned stream) {
@@ -186,16 +200,51 @@ enemy makeEnemy(const player &hero, int floor, std::vector<std::string> *notes) 
     monster.resetattack(std::max(1, monster.getattack() * EnemyTuning::ObjectiveAttackPercent /
                                         EnemyTuning::OrdinaryAttackPercent));
   }
+  applyChapterEvent(hero, floor, monster);
   const int event = hero.runState().events[GameConfig::chapter(floor)];
   const int type = eventType(floor);
-  if (event == 1 && type == 1) monster.removeAffix(Affix::POISONOUS);
-  if (event == 1 && type == 2) monster.setdodgeRate(std::max(0, monster.getdodgeRate() - 10));
   if (floor % 10 == 0) {
     if (event == 1 && type == 0) monster.resetattack(std::max(1, monster.getattack() * 90 / 100));
     if (event == 2 && type == 2) monster.resetattack(std::max(1, monster.getattack() * 110 / 100));
   }
   Exploration::applyToEncounter(hero, floor, monster, notes);
   return monster;
+}
+enemy makePatrol(const player &hero, int floor) {
+  if (!validFloor(floor)) throw std::out_of_range("floor must be 1..100");
+  seedStream(hero, floor, PatrolStream);
+  auto monster = generatePatrol(floor);
+  applyChapterEvent(hero, floor, monster);
+  return monster;
+}
+EncounterRules patrolRules(const player &hero, int floor) {
+  EncounterRules rules;
+  rules.difficulty = hero.runState().challenge == 1 ? 1 : 0;
+  rules.targetTurns = 3 + GameConfig::chapter(floor) / 4;
+  return rules;
+}
+bool settlePatrol(player &hero, enemy &monster, BattleSession &battle, int floor) {
+  if (!validFloor(floor) || !battle.claimSettlement()) return false;
+  auto &run = hero.runState();
+  countBattle(run, battle);
+  hero.finishEncounterWear();
+  if (!battle.won()) {
+    if (!hero.isalive()) run.deaths = GameConfig::addCounter(run.deaths, 1);
+    return false;
+  }
+  const auto fork = Exploration::fork(hero, floor);
+  const bool open = fork.taken == Exploration::Branch::None &&
+      std::any_of(fork.branches.begin(), fork.branches.end(),
+                  [](const Exploration::BranchView &b) { return b.kind == Exploration::Branch::Patrol; });
+  if (!open) return false;
+  std::cout << "击退巡逻：获得 " << monster.getexp_reward() << " 经验、" << monster.getcoin_reward() << " 金币、"
+            << PatrolMaterials << " 份材料。近路打通了。\n";
+  hero.gainexp(monster.getexp_reward());
+  hero.gaincoin(monster.getcoin_reward());
+  run.materials = std::min(GameConfig::MaxMaterials, run.materials + PatrolMaterials);
+  advanceBounties(hero, battle, floor);
+  Exploration::recordPatrolWin(hero, floor);
+  return true;
 }
 bool eventPending(const player &hero, int floor) {
   return validFloor(floor) && localFloor(floor) >= 5 &&
@@ -372,13 +421,25 @@ std::array<int, 2> chapterBounties(const player &hero, int chapter) {
   const int first = static_cast<int>(h % BountyKinds);
   return {first, static_cast<int>((first + 1 + (h >> 8) % (BountyKinds - 1)) % BountyKinds)};
 }
+void advanceBounties(player &hero, const BattleSession &battle, int floor) {
+  auto &run = hero.runState();
+  const int c = GameConfig::chapter(floor);
+  const auto kinds = chapterBounties(hero, c);
+  for (int slot = 0; slot < 2; ++slot) {
+    int &progress = run.bounties[c * 2 + slot];
+    const Bounty &b = bounty(kinds[slot]);
+    if (progress >= b.target) continue;
+    progress = std::min(b.target, progress + bountyGain(kinds[slot], hero, battle, floor));
+    if (progress < b.target) continue;
+    run.materials = std::min(GameConfig::MaxMaterials, run.materials + BountyMaterials);
+    std::cout << "【悬赏完成】" << bountyGoal(kinds[slot]) << "：获得 " << BountyMaterials << " 材料与药水。\n";
+    giveItem(hero, generateTargetedItem(floor, AnyJob, Potion));
+  }
+}
 bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int floor) {
   if (!validFloor(floor) || !battle.claimSettlement()) return false;
   auto &run = hero.runState();
-  const auto &report = battle.report();
-  run.battles = GameConfig::addCounter(run.battles, 1);
-  run.turns = GameConfig::addCounter(run.turns, battle.turns());
-  run.damageTaken = GameConfig::addCounter(run.damageTaken, report.damageTaken);
+  countBattle(run, battle);
   run.attempts[floor] = GameConfig::addCounter(run.attempts[floor], 1);
   hero.finishEncounterWear();
   Exploration::finishEncounter(hero);
@@ -412,17 +473,7 @@ bool settleEncounter(player &hero, enemy &monster, BattleSession &battle, int fl
     run.materials = std::min(GameConfig::MaxMaterials, run.materials + 3);
     std::cout << "章节完成：" << chapter(floor).name << "；专精与改造可在营地重新准备。\n";
   }
-  const auto kinds = chapterBounties(hero, c);
-  for (int slot = 0; slot < 2; ++slot) {
-    int &progress = run.bounties[c * 2 + slot];
-    const Bounty &b = bounty(kinds[slot]);
-    if (progress >= b.target) continue;
-    progress = std::min(b.target, progress + bountyGain(kinds[slot], hero, battle, floor));
-    if (progress < b.target) continue;
-    run.materials = std::min(GameConfig::MaxMaterials, run.materials + BountyMaterials);
-    std::cout << "【悬赏完成】" << bountyGoal(kinds[slot]) << "：获得 " << BountyMaterials << " 材料与药水。\n";
-    giveItem(hero, generateTargetedItem(floor, AnyJob, Potion));
-  }
+  advanceBounties(hero, battle, floor);
   run.cleared[floor] = 1;
   run.longestGearDrought = std::max(run.longestGearDrought, run.gearDrought);
   return true;

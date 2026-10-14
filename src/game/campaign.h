@@ -25,6 +25,17 @@ EncounterRules rulesFor(const player &hero, int floor);
 // next encounter's boon and bane, the ally's ambush). notes, when given,
 // receives one line per exploration effect for previews.
 enemy makeEnemy(const player &hero, int floor, std::vector<std::string> *notes = nullptr);
+// Fork floors: the elite patrol on the near branch (Exploration::fork). Chapter
+// events apply to it; exploration boons and banes neither apply nor get used up.
+// Seed the battle with seedStream(hero, floor, PatrolBattleStream).
+constexpr int PatrolMaterials = 1;
+constexpr unsigned PatrolBattleStream = 1300;
+enemy makePatrol(const player &hero, int floor);
+EncounterRules patrolRules(const player &hero, int floor);
+// A win takes the patrol branch and pays its experience, coins and materials;
+// it counts toward chapter bounties like any won fight. A loss changes nothing
+// but the usual battle records, so another branch can still be taken.
+bool settlePatrol(player &hero, enemy &monster, BattleSession &battle, int floor);
 bool eventPending(const player &hero, int floor);
 std::string eventDescription(int floor);
 bool resolveEvent(player &hero, int floor, int choice);

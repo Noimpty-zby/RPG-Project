@@ -8,9 +8,9 @@ import { Affix, affixName } from './enemy.js';
 import { ItemType, JobReq } from './item.js';
 import { below, seed as seedRandom } from './random.js';
 import { emit } from './log.js';
-import { chapterText, lore } from './exploration_text.js';
-import { generateEliteReward, generateTargetedItem } from './world.js';
-import { Chapters, grantItem } from './campaign.js';
+import { chapterText, forkText, lore } from './exploration_text.js';
+import { EnemyTuning, generateEliteReward, generateTargetedItem } from './world.js';
+import { Chapters, eliteFloor, grantItem, makePatrol, PatrolMaterials } from './campaign.js';
 
 export const SpotKind = {
   Cache: 1,       // Supply cache: free, small random reward.
@@ -23,14 +23,31 @@ export const SpotKind = {
   QuestItem: 8,   // One of the chapter ally's three lost items.
   Puzzle: 9,      // The chapter's ordering puzzle; see puzzle()/solvePuzzle().
   Lore: 10,       // A hidden page of the expedition journal (cross-run collection).
+  FogSource: 11,  // Fork floors: shutting it makes the fog branch safe.
+  Vantage: 12,    // Fork floors: high ground that shows the patrol and the stash.
+  Shortcut: 13,   // Fork floors, past the fork: a crack (variant 0) or a bridge lever
+                  // (variant 1) that opens the fog branch's supplies from whichever
+                  // branch was taken.
 };
 // Where a map should put a spot. Hidden spots sit in alcoves or behind cracked
-// walls; vaults are locked side rooms.
-export const Zone = { Middle: 0, Guardian: 1, Hidden: 2, Vault: 3 };
+// walls; vaults are locked side rooms. On fork floors the guardian's room lies
+// past the fork, and Branch spots lie along one branch (spot.branch).
+export const Zone = { Middle: 0, Guardian: 1, Hidden: 2, Vault: 3, Branch: 4 };
+
+// The ways past a fork floor's fork; only one can be taken. The fog branch is
+// always offered and can always be walked, so a fork never blocks the guardian.
+export const Branch = {
+  None: 0,
+  Patrol: 1, // Near: win a fight against an elite patrol (Campaign.makePatrol).
+  Fog: 2,    // Far: lose some health in the fog unless its source is shut; supplies on the way.
+  Locked: 3, // Key: spend one key; a stash behind the gate.
+};
 
 export const MaxSpots = 16;     // run.explored bits 0..15, one per spot.
 export const MerchantBit = 16;  // Bits 16..18: merchant goods sold on this floor.
 export const MerchantGoods = 3;
+export const BranchBit = 19;    // Bits 19..20: the Branch taken on a fork floor.
+export const ForkFloorsPerChapter = 3;
 export const IngredientCount = 5;
 export const MaxKeys = 99;
 export const MaxIngredients = 99;
@@ -49,6 +66,9 @@ const VaultGearStream = 741;
 const MerchantStream = 750;
 const BlindBoxStream = 760;
 const PuzzleStream = 780;
+const ForkPlanStream = 790;
+const ForkStream = 791;
+const StashStream = 792;
 
 // Outcome tables as cumulative percent thresholds on one roll of 0..99, and
 // the other tuning knobs. Option texts are built from these.
@@ -67,6 +87,11 @@ const BoonAttackPercent = 92, BoonHealthPercent = 92, BoonDodgePoints = 8;
 const BaneAttackPercent = 112, BaneHealthPercent = 110;
 const AmbushHealthPercent = 92;
 const PuzzleHealthPercent = 5;
+// Forks: which branches beside the fog one, what the fog costs, and how often
+// the fog source hides and a shortcut exists. The stash pays like a one-key vault.
+const PatrolForkPercent = 35, KeyForkPercent = 25; // Else all three branches.
+const FogHealthPercent = 20;
+const HiddenSourcePercent = 50, ShortcutPercent = 50;
 
 export const IngredientNames = ['鲜鱼', '草药', '矿砂', '霜晶', '星尘'];
 // Dangerous affixes in the order an affix source or the boon removes them.
@@ -103,6 +128,58 @@ function markExplored(run, floor, index) {
   if (spotDone(run, floor, index)) return;
   run.explored[floor] |= 1 << index;
   run.spotsExplored = addCounter(run.spotsExplored, 1);
+}
+const hasKind = (spots, kind) => spots.some((s) => s.kind === kind);
+const kindDone = (run, spots, floor, kind) => spots.some((s, i) => s.kind === kind && spotDone(run, floor, i));
+// Every fork floor has a fog source, so it marks the fork.
+const forked = (spots) => hasKind(spots, SpotKind.FogSource);
+const takenOf = (run, floor) => (run.explored[floor] >> BranchBit) & 3;
+// The guardian's side of a fork floor opens once a branch is taken. Floors
+// cleared before forks existed stay open.
+const guardianOpen = (run, floor, spots) => !forked(spots) || takenOf(run, floor) !== Branch.None || run.cleared[floor] !== 0;
+const farName = (floor) => `${forkText(chapterOf(floor)).fog}远路`;
+function branchName(branch, floor) {
+  switch (branch) {
+    case Branch.Patrol: return '巡逻近路';
+    case Branch.Fog: return farName(floor);
+    case Branch.Locked: return '钥匙小径';
+    default: return '';
+  }
+}
+// Why a spot cannot be reached now, or ''. A spot on a branch that was not
+// taken opens through a shortcut.
+function blockedReason(run, spots, floor, index) {
+  const spot = spots[index];
+  if (spot.zone === Zone.Branch) {
+    const taken = takenOf(run, floor);
+    if (taken === spot.branch || (taken !== Branch.None && kindDone(run, spots, floor, SpotKind.Shortcut))) return '';
+    if (taken === Branch.None) return `在${branchName(spot.branch, floor)}上：先在岔路口选这条路`;
+    return `${branchName(spot.branch, floor)}已经关闭` +
+      (hasKind(spots, SpotKind.Shortcut) ? '，打通守卫房间附近的捷径才能过去' : '');
+  }
+  if (spot.zone === Zone.Guardian && !guardianOpen(run, floor, spots)) return '在岔路之后：先在岔路口选一条路';
+  return '';
+}
+// A spot the branch taken settled: on a closed branch that no shortcut can
+// open, or the shortcut itself once the fog branch was walked.
+function settledByBranch(run, spots, floor, index) {
+  const spot = spots[index];
+  const taken = takenOf(run, floor);
+  if (spot.kind === SpotKind.Shortcut) return taken === Branch.Fog;
+  return spot.zone === Zone.Branch && taken !== Branch.None && taken !== spot.branch &&
+    !hasKind(spots, SpotKind.Shortcut);
+}
+// The fork's branches from the current random state: one roll.
+function drawBranches() {
+  const roll = below(100);
+  if (roll < PatrolForkPercent) return [Branch.Patrol, Branch.Fog];
+  if (roll < PatrolForkPercent + KeyForkPercent) return [Branch.Fog, Branch.Locked];
+  return [Branch.Patrol, Branch.Fog, Branch.Locked];
+}
+// The key branch's stash: one roll on the one-key vault table.
+function stashRoll(seedValue, floor) {
+  seedFor(seedValue, floor, StashStream);
+  return below(100);
 }
 function loseHealthSafely(hero, percent) {
   const loss = Math.max(1, idiv(hero.gethp() * percent, 100));
@@ -226,7 +303,7 @@ function clueText(clue, text) {
 function spotName(spot, floor) {
   const text = chapterText(chapterOf(floor));
   switch (spot.kind) {
-    case SpotKind.Cache: return spot.zone === Zone.Hidden ? text.hiddenCache : text.cache;
+    case SpotKind.Cache: return spot.variant === 1 ? '遗落的药箱' : spot.zone === Zone.Hidden ? text.hiddenCache : text.cache;
     case SpotKind.Curio: return text.curios[spot.variant];
     case SpotKind.Gather: return text.gather[spot.variant];
     case SpotKind.AffixSource: return text.affixSource;
@@ -236,6 +313,9 @@ function spotName(spot, floor) {
     case SpotKind.QuestItem: return text.questItems[spot.variant];
     case SpotKind.Puzzle: return text.puzzleTitle;
     case SpotKind.Lore: return '见闻录残页';
+    case SpotKind.FogSource: return forkText(chapterOf(floor)).fogSource;
+    case SpotKind.Vantage: return forkText(chapterOf(floor)).vantage;
+    case SpotKind.Shortcut: return forkText(chapterOf(floor)).shortcuts[spot.variant];
     default: return '';
   }
 }
@@ -243,7 +323,7 @@ function spotDescription(hero, spot, floor) {
   const c = chapterOf(floor);
   const text = chapterText(c);
   switch (spot.kind) {
-    case SpotKind.Cache: return '可能有金币、药水或材料。';
+    case SpotKind.Cache: return spot.variant === 1 ? '前一支队伍留下的药箱，里面应该还有药水。' : '可能有金币、药水或材料。';
     case SpotKind.Curio: return text.curioDescriptions[spot.variant];
     case SpotKind.Gather:
       return `${text.gatherDescriptions[spot.variant]}（可采集${IngredientNames[text.gatherIngredient[spot.variant]]}）`;
@@ -255,6 +335,12 @@ function spotDescription(hero, spot, floor) {
       return `${Chapters[c].ally}遗落的物品（本章已找到 ${hero.runState().questItems[c]}/3）。`;
     case SpotKind.Puzzle: return text.puzzlePrompt;
     case SpotKind.Lore: return '墙缝里夹着一页泛黄的纸。';
+    case SpotKind.FogSource: return forkText(c).fogSourceDescription;
+    case SpotKind.Vantage: return forkText(c).vantageDescription;
+    case SpotKind.Shortcut:
+      return spot.variant === 0
+        ? `墙后就是${farName(floor)}的补给点。砸开它，不穿过${forkText(c).fog}也能过去。`
+        : `拉下机关，桥会落到${farName(floor)}的补给点旁边。`;
     default: return '';
   }
 }
@@ -270,6 +356,39 @@ function vaultContents(hero, floor, keys) {
   if (roll < VaultMaterialsRoll) return `${vaultMaterials(c)} 份材料`;
   if (roll < VaultPotionRoll) return `${potionText(1)}与 ${coinUnit(floor) * 2} 金币`;
   return `${coinUnit(floor) * 5} 金币`;
+}
+
+function stashContents(seedValue, floor) {
+  const roll = stashRoll(seedValue, floor);
+  if (roll < VaultMaterialsRoll) return `${vaultMaterials(chapterOf(floor))} 份材料`;
+  if (roll < VaultPotionRoll) return `${potionText(1)}与 ${coinUnit(floor) * 2} 金币`;
+  return `${coinUnit(floor) * 5} 金币`;
+}
+function openStash(hero, floor) {
+  const roll = stashRoll(hero.runState().seed, floor);
+  if (roll < VaultMaterialsRoll) return `获得 ${addMaterials(hero, vaultMaterials(chapterOf(floor)))} 份材料`;
+  if (roll < VaultPotionRoll) {
+    givePotions(hero, floor, 1);
+    hero.gaincoin(coinUnit(floor) * 2);
+    return `获得 1 瓶药水与 ${coinUnit(floor) * 2} 金币`;
+  }
+  hero.gaincoin(coinUnit(floor) * 5);
+  return `获得 ${coinUnit(floor) * 5} 金币`;
+}
+function patrolReport(hero, floor) {
+  const monster = makePatrol(hero, floor);
+  const affixes = monster.getAffixes().map((affix) => affixName(affix)).join('、');
+  return `${monster.getname()}（生命 ${monster.getmaxhp()}，攻击 ${monster.getattack()}，词缀 ${affixes}）`;
+}
+// What the high ground shows: the patrol and the stash, for the branches the fork has.
+function scoutReport(hero, floor, list) {
+  let text = '';
+  for (const branch of list) {
+    if (branch === Branch.Patrol) text += `巡逻近路是${patrolReport(hero, floor)}`;
+    else if (branch === Branch.Locked)
+      text += `${text ? '；' : ''}${forkText(chapterOf(floor)).stash}里是 ${stashContents(hero.runState().seed, floor)}`;
+  }
+  return text;
 }
 
 function finish(result, data = {}) {
@@ -300,10 +419,21 @@ export function chapterPlan(seedValue, chapter) {
   const merchantFloors = draw([2, 3, 4, 5, 6, 7, 8, 9], 2);
   const questFloors = draw([1, 2, 3, 4, 5, 6, 7, 8, 9], 3);
   const puzzleFloor = base + pick([3, 4, 5, 6, 7, 8, 9]);
-  return { keyFloors, vaultFloors, merchantFloors, questFloors, puzzleFloor };
+  // Forks draw from their own stream so the floors above never move. Never the
+  // first floor, the elite floor, a vault floor or the puzzle floor.
+  seedFor(seedValue, chapter * 10 + 1, ForkPlanStream);
+  const forkPool = [];
+  for (let floor = base + 2; floor <= base + 9; ++floor)
+    if (floor !== eliteFloor(chapter) && floor !== puzzleFloor && !vaultFloors.includes(floor)) forkPool.push(floor);
+  const forkFloors = Array.from({ length: ForkFloorsPerChapter }, () => pick(forkPool)).sort((x, y) => x - y);
+  return { keyFloors, vaultFloors, merchantFloors, questFloors, puzzleFloor, forkFloors };
 }
 
 // Pure generation from the run seed; usable without a hero (save validation).
+// Spots keep their indices when forks change: a fork floor lists the same
+// spots as before, moves its open caches and gathering spots onto the fog
+// branch, and appends its own spots after them. Each spot is
+// { kind, variant, zone, branch }.
 export function generate(seedValue, floor) {
   if (!validFloor(floor)) return [];
   const local = localOf(floor);
@@ -333,26 +463,64 @@ export function generate(seedValue, floor) {
     if (plan.questFloors[i] === floor) spots.push({ kind: SpotKind.QuestItem, variant: i, zone: Zone.Middle });
   if (plan.puzzleFloor === floor) spots.push({ kind: SpotKind.Puzzle, variant: 0, zone: Zone.Middle });
   spots.push({ kind: SpotKind.Lore, variant: floor, zone: Zone.Hidden });
+  for (const spot of spots) spot.branch = Branch.None;
+  if (!plan.forkFloors.includes(floor)) return spots;
+  // The far branch carries the floor's supplies: open caches, gathering spots
+  // and, past the fog, a medicine chest.
+  seedFor(seedValue, floor, ForkStream);
+  drawBranches();
+  for (const spot of spots)
+    if ((spot.kind === SpotKind.Cache && spot.zone === Zone.Middle) || spot.kind === SpotKind.Gather) {
+      spot.zone = Zone.Branch;
+      spot.branch = Branch.Fog;
+    }
+  spots.push({ kind: SpotKind.FogSource, variant: 0, zone: below(100) < HiddenSourcePercent ? Zone.Hidden : Zone.Middle,
+    branch: Branch.None });
+  spots.push({ kind: SpotKind.Vantage, variant: 0, zone: Zone.Middle, branch: Branch.None });
+  spots.push({ kind: SpotKind.Cache, variant: 1, zone: Zone.Branch, branch: Branch.Fog });
+  if (below(100) < ShortcutPercent)
+    spots.push({ kind: SpotKind.Shortcut, variant: below(2), zone: Zone.Guardian, branch: Branch.None });
   return spots;
+}
+
+export function isForkFloor(seedValue, floor) {
+  return validFloor(floor) && chapterPlan(seedValue, chapterOf(floor)).forkFloors.includes(floor);
+}
+
+// The fork's branches in the order near, far, key; empty without a fork.
+export function branches(seedValue, floor) {
+  if (!isForkFloor(seedValue, floor)) return [];
+  seedFor(seedValue, floor, ForkStream);
+  return drawBranches();
 }
 
 // Whether finding everything on a floor includes this spot (merchants do not).
 export const countsTowardCompletion = (kind) => kind !== SpotKind.Merchant;
 
 // Each spot with its index (pass to options()/interact()), state and texts.
+// blocked says why the spot cannot be reached yet on a fork floor (past the
+// fork, or on a branch that was not taken); '' when it can.
 export function survey(hero, floor) {
   const run = hero.runState();
-  return generate(run.seed, floor).map((spot, index) => ({
+  const spots = generate(run.seed, floor);
+  return spots.map((spot, index) => ({
     index, spot, done: spotDone(run, floor, index), name: spotName(spot, floor),
-    description: spotDescription(hero, spot, floor),
+    description: spotDescription(hero, spot, floor), blocked: blockedReason(run, spots, floor, index),
   }));
 }
 
-// Spots that count toward completion and are not explored yet.
-export const remaining = (hero, floor) =>
-  survey(hero, floor).filter((view) => !view.done && countsTowardCompletion(view.spot.kind)).length;
+// Spots that count toward completion, are not explored yet and still matter:
+// a branch that was not taken stays open only through a shortcut, and the
+// shortcut is moot once the fog branch was walked.
+export function remaining(hero, floor) {
+  const run = hero.runState();
+  const spots = generate(run.seed, floor);
+  return spots.filter((spot, index) => !spotDone(run, floor, index) && countsTowardCompletion(spot.kind) &&
+    !settledByBranch(run, spots, floor, index)).length;
+}
 
-// Choices for a spot; empty for an invalid, unreachable or finished spot.
+// Choices for a spot; empty for an invalid, unreachable or finished spot. A spot
+// that cannot be reached yet (survey's blocked) lists its choices as unavailable.
 export function options(hero, floor, index) {
   if (!reachable(hero, floor)) return [];
   const spots = generate(hero.runState().seed, floor);
@@ -369,6 +537,10 @@ export function options(hero, floor, index) {
   const list = [];
   switch (spot.kind) {
     case SpotKind.Cache:
+      if (spot.variant === 1) {
+        list.push(makeOption(1, '打开', '必定获得 1 瓶药水'));
+        break;
+      }
       list.push(makeOption(1, '打开', `${CacheGold}%：${unit} 金币；${CachePotion - CacheGold}%：1 瓶药水；` +
         `${100 - CachePotion}%：1 份材料与 ${idiv(coinUnit(floor), 2)} 金币`));
       break;
@@ -429,9 +601,26 @@ export function options(hero, floor, index) {
     case SpotKind.Lore:
       list.push(makeOption(1, '阅读', '收入见闻录（远征档案中查看，跨远征保留）'));
       break;
+    case SpotKind.FogSource:
+      list.push(makeOption(1, '封住源头', `${farName(floor)}不再损失生命`));
+      break;
+    case SpotKind.Vantage: {
+      const ways = branches(run.seed, floor);
+      const patrol = ways.includes(Branch.Patrol);
+      const locked = ways.includes(Branch.Locked);
+      list.push(makeOption(1, '登高远望', `看清${patrol ? '巡逻精英的生命、攻击和词缀' : ''}${patrol && locked ? '，以及' : ''}` +
+        `${locked ? `${forkText(c).stash}里的东西` : ''}`));
+      break;
+    }
+    case SpotKind.Shortcut:
+      list.push(makeOption(1, spot.variant === 0 ? '砸开' : '拉下机关',
+        `打通到${farName(floor)}补给点的捷径：走哪条路都能拿到沿途的补给`));
+      break;
     default:
       break;
   }
+  const blocked = blockedReason(run, spots, floor, index);
+  if (blocked) for (const option of list) Object.assign(option, { available: false, reason: blocked });
   return list;
 }
 
@@ -458,6 +647,11 @@ export function interact(hero, floor, index, option) {
   let experience = 0; // Granted after the text, so level-up messages follow it.
   switch (spot.kind) {
     case SpotKind.Cache: {
+      if (spot.variant === 1) {
+        givePotions(hero, floor, 1);
+        outcome = '获得 1 瓶药水';
+        break;
+      }
       const roll = below(100);
       if (roll < CacheGold) {
         hero.gaincoin(coinUnit(floor));
@@ -632,6 +826,15 @@ export function interact(hero, floor, index, option) {
       outcome = `【见闻录 ${floor}/100 · ${page.title}】${page.text}`;
       break;
     }
+    case SpotKind.FogSource:
+      outcome = `封住了${name}：${forkText(c).fog}散去，${farName(floor)}可以安全通过`;
+      break;
+    case SpotKind.Vantage:
+      outcome = `站在${name}上远望：${scoutReport(hero, floor, branches(seedValue, floor))}`;
+      break;
+    case SpotKind.Shortcut:
+      outcome = `${spot.variant === 0 ? '砸开了' : '拉下了'}${name}：现在不管走哪条路，都能去${farName(floor)}的补给点`;
+      break;
     default:
       return result;
   }
@@ -641,6 +844,96 @@ export function interact(hero, floor, index, option) {
   finish(result, { floor, index, kind: spot.kind, lorePage: result.lorePage });
   hero.gainexp(experience);
   return result;
+}
+
+// ---- Forks ------------------------------------------------------------------------------
+export const branchTaken = (hero, floor) => (validFloor(floor) ? takenOf(hero.runState(), floor) : Branch.None);
+
+// False on a fork floor until a branch is taken (floors cleared before forks
+// existed stay open). Frontends check it before starting the guardian's fight.
+export const guardianReachable = (hero, floor) =>
+  validFloor(floor) && guardianOpen(hero.runState(), floor, generate(hero.runState().seed, floor));
+
+// { branches: [{ kind, name, cost, reward, available, reason }], taken, hint };
+// branches is empty when the floor has no fork.
+export function fork(hero, floor) {
+  const result = { branches: [], taken: Branch.None, hint: '' };
+  const list = branches(hero.runState().seed, floor);
+  if (!list.length) return result;
+  const run = hero.runState();
+  const spots = generate(run.seed, floor);
+  const text = forkText(chapterOf(floor));
+  const scouted = kindDone(run, spots, floor, SpotKind.Vantage);
+  const safe = kindDone(run, spots, floor, SpotKind.FogSource);
+  result.taken = takenOf(run, floor);
+  for (const kind of list) {
+    const view = { kind, name: branchName(kind, floor), cost: '', reward: '', available: false, reason: '' };
+    if (kind === Branch.Patrol) {
+      const monster = makePatrol(hero, floor);
+      view.cost = scouted ? `打赢${patrolReport(hero, floor)}`
+        : `打赢巡逻精英（至少两个词缀，比普通敌人多 ${EnemyTuning.PatrolHpPercent - 100}% 生命）；登上${text.vantage}可以看清它`;
+      view.reward = `${monster.getexp_reward()} 经验、${monster.getcoin_reward()} 金币、${PatrolMaterials} 份材料；输了可以改走别的路`;
+    } else if (kind === Branch.Fog) {
+      view.cost = safe ? '源头已封住，安全通过'
+        : `穿过${text.fog}：损失当前生命 ${FogHealthPercent}%（不会致死）；封住${text.fogSource}就不会`;
+      const supplies = spots.filter((spot) => spot.zone === Zone.Branch && spot.branch === Branch.Fog)
+        .map((spot) => spotName(spot, floor));
+      view.reward = `沿途 ${supplies.length} 处补给：${supplies.join('、')}`;
+    } else {
+      view.cost = `1 把钥匙（现有 ${run.keys}）`;
+      view.reward = text.stash + (scouted ? `：${stashContents(run.seed, floor)}` : `（内容不明，登上${text.vantage}可以看清）`);
+    }
+    if (result.taken === kind) view.reason = '已经走了这条路';
+    else if (result.taken !== Branch.None) view.reason = `已经走了${branchName(result.taken, floor)}，这条路关闭了`;
+    else if (!reachable(hero, floor)) view.reason = '现在无法通行';
+    else if (kind === Branch.Locked && run.keys < 1) view.reason = '钥匙不足（现有 0）';
+    view.available = !view.reason;
+    result.branches.push(view);
+  }
+  if (result.taken === Branch.None) {
+    result.hint = '岔路只能选一条，选定后其他路关闭。';
+    if (!scouted) result.hint += `登上${text.vantage}能先看清路上有什么。`;
+    if (!safe) result.hint += `找到${text.fogSource}并封住，远路就不再伤人。`;
+  } else {
+    result.hint = `已走：${branchName(result.taken, floor)}`;
+    if (result.taken !== Branch.Fog && hasKind(spots, SpotKind.Shortcut))
+      result.hint += kindDone(run, spots, floor, SpotKind.Shortcut) ? '；捷径已打通，远路的补给也能拿'
+        : '；守卫房间附近有通往远路补给的捷径';
+  }
+  return result;
+}
+
+// Takes the fog or key branch; returns { ok, text, lorePage }. The patrol
+// branch is taken by winning its fight (Campaign.settlePatrol). Taking a
+// branch closes the others for the run.
+export function takeBranch(hero, floor, branch) {
+  const result = { ok: false, text: '', lorePage: 0 };
+  if (!reachable(hero, floor) || branch === Branch.Patrol) return result;
+  const run = hero.runState();
+  if (!branches(run.seed, floor).includes(branch) || takenOf(run, floor) !== Branch.None) return result;
+  const text = forkText(chapterOf(floor));
+  if (branch === Branch.Fog) {
+    if (kindDone(run, generate(run.seed, floor), floor, SpotKind.FogSource)) {
+      result.text = `源头已经封住，安全穿过了${text.fog}。沿途的补给可以拿了`;
+    } else {
+      loseHealthSafely(hero, FogHealthPercent);
+      result.text = `硬闯${text.fog}：损失当前生命的 ${FogHealthPercent}%。沿途的补给可以拿了`;
+    }
+  } else {
+    if (run.keys < 1) return result;
+    run.keys -= 1;
+    result.text = `用 1 把钥匙打开小径，${text.stash}：${openStash(hero, floor)}`;
+  }
+  run.explored[floor] |= branch << BranchBit;
+  result.ok = true;
+  return finish(result, { floor, branch });
+}
+
+// For Campaign.settlePatrol: records the patrol branch as taken.
+export function recordPatrolWin(hero, floor) {
+  const run = hero.runState();
+  if (branches(run.seed, floor).includes(Branch.Patrol) && takenOf(run, floor) === Branch.None)
+    run.explored[floor] |= Branch.Patrol << BranchBit;
 }
 
 // The merchant's goods on this floor ({ kind, name, description, price, sold });
@@ -868,7 +1161,7 @@ export function chapterSummary(hero, floor) {
   const plan = chapterPlan(run.seed, c);
   return `探索：钥匙 ${run.keys}；宝库 第${plan.vaultFloors[0]}层（1把）、第${plan.vaultFloors[1]}层（2把）；` +
     `谜题 第${plan.puzzleFloor}层；商人 第${plan.merchantFloors[0]}、${plan.merchantFloors[1]}层；` +
-    `${Chapters[c].ally}的遗物 ${run.questItems[c]}/3\n食材：` +
+    `${Chapters[c].ally}的遗物 ${run.questItems[c]}/3；岔路 第${plan.forkFloors.join('、')}层\n食材：` +
     IngredientNames.map((name, i) => `${name}${run.ingredients[i]}`).join(' ') +
     `；下一场战斗：祝福 ${boonDescription(run.boon)}，诅咒 ${baneDescription(run.bane)}`;
 }

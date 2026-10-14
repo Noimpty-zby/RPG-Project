@@ -24,15 +24,32 @@ enum class SpotKind {
   Merchant = 7,    // Wandering merchant with three goods.
   QuestItem = 8,   // One of the chapter ally's three lost items.
   Puzzle = 9,      // The chapter's ordering puzzle; see puzzle()/solvePuzzle().
-  Lore = 10        // A hidden page of the expedition journal (cross-run collection).
+  Lore = 10,       // A hidden page of the expedition journal (cross-run collection).
+  FogSource = 11,  // Fork floors: shutting it makes the fog branch safe.
+  Vantage = 12,    // Fork floors: high ground that shows the patrol and the stash.
+  Shortcut = 13    // Fork floors, past the fork: a crack (variant 0) or a bridge
+                   // lever (variant 1) that opens the fog branch's supplies from
+                   // whichever branch was taken.
 };
 // Where a map should put a spot. Hidden spots sit in alcoves or behind cracked
-// walls; vaults are locked side rooms.
-enum class Zone { Middle = 0, Guardian = 1, Hidden = 2, Vault = 3 };
+// walls; vaults are locked side rooms. On fork floors the guardian's room lies
+// past the fork, and Branch spots lie along one branch (Spot::branch).
+enum class Zone { Middle = 0, Guardian = 1, Hidden = 2, Vault = 3, Branch = 4 };
+
+// The ways past a fork floor's fork; only one can be taken. The fog branch is
+// always offered and can always be walked, so a fork never blocks the guardian.
+enum class Branch {
+  None = 0,
+  Patrol = 1, // Near: win a fight against an elite patrol (Campaign::makePatrol).
+  Fog = 2,    // Far: lose some health in the fog unless its source is shut; supplies on the way.
+  Locked = 3  // Key: spend one key; a stash behind the gate.
+};
 
 constexpr int MaxSpots = 16;     // RunState::explored bits 0..15, one per spot.
 constexpr int MerchantBit = 16;  // Bits 16..18: merchant goods sold on this floor.
 constexpr int MerchantGoods = 3;
+constexpr int BranchBit = 19;    // Bits 19..20: the Branch taken on a fork floor.
+constexpr int ForkFloorsPerChapter = 3;
 constexpr int IngredientCount = 5;
 constexpr int MaxKeys = 99;
 constexpr int MaxIngredients = 99;
@@ -44,23 +61,34 @@ constexpr int RecipeCount = 6;
 
 struct Spot {
   SpotKind kind = SpotKind::Cache;
-  int variant = 0; // Curio type 0..2, gather node 0..1, vault keys 1..2, quest item 0..2.
+  // Curio type 0..2, gather node 0..1, vault keys 1..2, quest item 0..2,
+  // shortcut 0..1; a cache of variant 1 is the fog branch's medicine chest.
+  int variant = 0;
   Zone zone = Zone::Middle;
+  Branch branch = Branch::None; // The branch a Zone::Branch spot lies on.
 };
 
-// One chapter's fixed layout of keys, vaults, merchants, quest items and puzzle,
-// as floor numbers (local floors 1..9; bosses never hold them).
+// One chapter's fixed layout of keys, vaults, merchants, quest items, puzzle
+// and forks, as floor numbers (local floors 1..9; bosses never hold them).
 struct ChapterPlan {
   std::array<int, 2> keyFloors{};
   std::array<int, 2> vaultFloors{}; // [0] needs one key, [1] needs two.
   std::array<int, 2> merchantFloors{};
   std::array<int, 3> questFloors{};
   int puzzleFloor = 0;
+  // Never the first floor, the elite floor, a vault floor or the puzzle floor.
+  std::array<int, ForkFloorsPerChapter> forkFloors{};
 };
 
 // Pure generation from the run seed; usable without a hero (save validation).
 ChapterPlan chapterPlan(std::uint32_t seed, int chapter);
+// Spots keep their indices when forks change: a fork floor lists the same
+// spots as before, moves its open caches and gathering spots onto the fog
+// branch, and appends its own spots after them.
 std::vector<Spot> generate(std::uint32_t seed, int floor);
+bool isForkFloor(std::uint32_t seed, int floor);
+// The fork's branches in the order near, far, key; empty without a fork.
+std::vector<Branch> branches(std::uint32_t seed, int floor);
 // Whether finding everything on a floor includes this spot (merchants do not).
 bool countsTowardCompletion(SpotKind kind);
 
@@ -70,9 +98,14 @@ struct SpotView {
   bool done = false; // Explored; a merchant is done after its first sale.
   std::string name;
   std::string description;
+  // Why the spot cannot be reached yet on a fork floor (past the fork, or on a
+  // branch that was not taken); empty when it can.
+  std::string blocked;
 };
 std::vector<SpotView> survey(const player &hero, int floor);
-// Spots that count toward completion and are not explored yet.
+// Spots that count toward completion, are not explored yet and still matter:
+// a branch that was not taken stays open only through a shortcut, and the
+// shortcut is moot once the fog branch was walked.
 int remaining(const player &hero, int floor);
 
 struct Option {
@@ -82,7 +115,8 @@ struct Option {
   bool available = false;
   std::string reason;   // Why it is unavailable.
 };
-// Choices for a spot; empty for an invalid, unreachable or finished spot.
+// Choices for a spot; empty for an invalid, unreachable or finished spot. A spot
+// that cannot be reached yet (SpotView::blocked) lists its choices as unavailable.
 std::vector<Option> options(const player &hero, int floor, int index);
 
 struct Result {
@@ -93,6 +127,31 @@ struct Result {
 // Applies a choice. A floor above the highest reached, a dead hero, a finished
 // spot or an unaffordable choice changes nothing.
 Result interact(player &hero, int floor, int index, int option);
+
+// ---- Forks --------------------------------------------------------------------
+struct BranchView {
+  Branch kind = Branch::None;
+  std::string name;
+  std::string cost;     // What taking it costs, in exact numbers once known.
+  std::string reward;   // What lies along it.
+  bool available = false;
+  std::string reason;   // Why it cannot be taken.
+};
+struct Fork {
+  std::vector<BranchView> branches; // Empty when the floor has no fork.
+  Branch taken = Branch::None;
+  std::string hint;                 // One line about the choice and what helps it.
+};
+Fork fork(const player &hero, int floor);
+Branch branchTaken(const player &hero, int floor);
+// False on a fork floor until a branch is taken (floors cleared before forks
+// existed stay open). Frontends check it before starting the guardian's fight.
+bool guardianReachable(const player &hero, int floor);
+// Takes the fog or key branch. The patrol branch is taken by winning its fight
+// (Campaign::settlePatrol). Taking a branch closes the others for the run.
+Result takeBranch(player &hero, int floor, Branch branch);
+// For Campaign::settlePatrol: records the patrol branch as taken.
+void recordPatrolWin(player &hero, int floor);
 
 struct Good {
   int kind = 0; // 0 blind box, 1 key, 2 charm, 3 ingredient pack.

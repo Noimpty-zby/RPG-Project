@@ -54,6 +54,15 @@ for job in (1, 2, 3):
         assert "卖出数量（1-4" in menus and "×2，获得" in menus
         assert save.read_text(encoding="utf-8") == saved
 
+        # Fork floors: the guardian waits until a branch is taken (seed 777,
+        # floor 2: the fog and key branches, nine spots, then the fork).
+        save.write_text(saved.replace("\nFLOOR 1\n", "\nFLOOR 2\n").replace("HIGHEST_FLOOR 1\n", "HIGHEST_FLOOR 2\n"),
+                        encoding="utf-8")
+        forked = run("1\n1\n13\n10\n1\n0\n4\n2\n")
+        assert "守卫在岔路之后" in forked and "—— 岔路口 ——" in forked and "钥匙不足" in forked
+        assert "硬闯瘴气" in forked and "已走：瘴气远路" in forked and "探索第2层（剩余 8 处）" in forked
+        save.write_text(saved, encoding="utf-8")
+
         # Exploring the first spot (always a supply cache) is saved; the journal
         # and camp cooking open from their menus.
         explored = run("1\n13\n1\n1\n0\n5\n11\n5\n0\n0\n8\n11\n0\n0\n4\n2\n")
@@ -85,5 +94,5 @@ for job in (1, 2, 3):
         run("1\n")
         assert profile.read_text(encoding="utf-8").count("RECORD ") == 1
 
-print("CLI smoke passed: three jobs, V6 round-trip, exploration, journal, cooking, camp, inventory, input bounds, battle cancellation, EOF, "
+print("CLI smoke passed: three jobs, V6 round-trip, exploration, forks, journal, cooking, camp, inventory, input bounds, battle cancellation, EOF, "
       "old save preservation, help, archive, travel, inspect, stack sales, batch potions, enhance/repair, run records.")

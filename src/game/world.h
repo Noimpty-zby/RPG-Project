@@ -26,6 +26,10 @@ constexpr int OrdinaryAttackPercent = 90;
 // Elites relative to ordinary enemies of the same floor.
 constexpr int EliteHpPercent = 170;
 constexpr int EliteAttackPercent = 115;
+// Fork-floor patrols relative to ordinary enemies of the same floor; they
+// always carry at least two affixes.
+constexpr int PatrolHpPercent = 130;
+constexpr int PatrolAttackPercent = 100;
 // Objective guardians relative to the base curve: durable, slightly weaker hits.
 constexpr int SurviveHpPercent = 300;
 constexpr int DisruptHpPercent = 400;
@@ -39,3 +43,5 @@ Item generateEliteReward(const player &hero, int floor);
 std::optional<Item> generateLoot(player &hero, int floor, bool firstClear);
 EnemyStats enemyStatsForFloor(int floor);
 enemy generateEnemy(int floor, bool elite = false);
+// The patrol guarding a fork floor's near branch; see Campaign::makePatrol.
+enemy generatePatrol(int floor);

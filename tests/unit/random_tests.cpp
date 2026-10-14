@@ -102,6 +102,19 @@ std::uint64_t campaignFingerprint() {
 
 // Every exploration text, option, puzzle, merchant good and result for two
 // seeds; the browser port must produce the same value (parity_test.mjs).
+void addFork(Fingerprint &print, const player &hero, int floor) {
+  const auto fork = Exploration::fork(hero, floor);
+  print.add(static_cast<int>(fork.taken));
+  print.add(fork.hint);
+  for (const auto &branch : fork.branches) {
+    print.add(static_cast<int>(branch.kind));
+    print.add(branch.name);
+    print.add(branch.cost);
+    print.add(branch.reward);
+    print.add(branch.available ? 1 : 0);
+    print.add(branch.reason);
+  }
+}
 std::uint64_t explorationFingerprint() {
   Fingerprint print;
   for (unsigned seed : {1u, 777u}) {
@@ -118,6 +131,8 @@ std::uint64_t explorationFingerprint() {
         print.add(static_cast<int>(view.spot.zone));
         print.add(view.name);
         print.add(view.description);
+        print.add(static_cast<int>(view.spot.branch));
+        print.add(view.blocked);
         for (const auto &option : Exploration::options(hero, floor, view.index)) {
           print.add(option.id);
           print.add(option.label);
@@ -132,6 +147,7 @@ std::uint64_t explorationFingerprint() {
         print.add(good.price);
         print.add(good.sold ? 1 : 0);
       }
+      addFork(print, hero, floor);
       if (Exploration::hasPuzzle(hero, floor)) {
         const auto puzzle = Exploration::puzzle(hero, floor);
         print.add(puzzle.title);
@@ -145,6 +161,15 @@ std::uint64_t explorationFingerprint() {
       print.add(Exploration::loreText(floor));
     }
     for (int floor = 1; floor <= 20; ++floor) {
+      // Key branch when a key is left, else the fog; the patrol needs a fight.
+      const auto fork = Exploration::fork(hero, floor);
+      for (auto branch = fork.branches.rbegin(); branch != fork.branches.rend(); ++branch) {
+        if (branch->kind == Exploration::Branch::Patrol) continue;
+        const auto result = Exploration::takeBranch(hero, floor, branch->kind);
+        print.add(result.ok ? 1 : 0);
+        print.add(result.text);
+        if (result.ok) break;
+      }
       for (const auto &view : Exploration::survey(hero, floor)) {
         if (view.done || view.spot.kind == Exploration::SpotKind::Puzzle) continue;
         const auto result = Exploration::interact(hero, floor, view.index, 1);
@@ -157,6 +182,9 @@ std::uint64_t explorationFingerprint() {
       std::vector<std::string> notes;
       Campaign::makeEnemy(hero, floor, &notes);
       for (const auto &note : notes) print.add(note);
+      addFork(print, hero, floor);
+      print.add(Exploration::remaining(hero, floor));
+      print.add(Exploration::guardianReachable(hero, floor) ? 1 : 0);
     }
     for (const auto &recipe : Exploration::recipes()) {
       print.add(recipe.name);
@@ -177,7 +205,7 @@ std::uint64_t explorationFingerprint() {
 
 void testExplorationFingerprint() {
   const std::uint64_t actual = explorationFingerprint();
-  require(actual == 0x5f1125db8e2b21aeULL, "exploration fingerprint is " + hex(actual));
+  require(actual == 0x32e2c45c26efd2fcULL, "exploration fingerprint is " + hex(actual));
   require(explorationFingerprint() == actual, "exploration must not depend on earlier calls");
 }
 

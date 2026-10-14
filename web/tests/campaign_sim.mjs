@@ -187,6 +187,44 @@ export function choose(hero, monster, battle, aware, state) {
   return { type: ActionType.Attack };
 }
 
+// Fight to the end with the policy.
+function playOut(hero, monster, battle, aware) {
+  const state = { cursor: 0 };
+  while (battle.beginTurn()) {
+    const action = choose(hero, monster, battle, aware, state);
+    if (!battle.act(action)) throw new Error('simulation submitted invalid action');
+  }
+  battle.close();
+  if (battle.turns() > battle.turnLimit()) throw new Error('encounter exceeded its turn bound');
+}
+
+// Both policies take a fork like a careful player who has just prepared at
+// camp: fight the patrol with two thirds of their health, spend a key on the stash when hurt or
+// rich in keys, else walk the fog (whose source explore() shuts first). A lost
+// patrol fight is not retried. Returns false when the hero fell for good.
+function takeFork(hero, floor, aware) {
+  const { Branch } = Exploration;
+  const fork = Exploration.fork(hero, floor);
+  if (!fork.branches.length || fork.taken !== Branch.None) return true;
+  const offered = (kind) => fork.branches.some((b) => b.kind === kind && b.available);
+  const fresh = hero.gethp() * 100 >= hero.getmaxhp() * 65;
+  if (offered(Branch.Patrol) && fresh) {
+    const monster = Campaign.makePatrol(hero, floor);
+    Campaign.seedStream(hero, floor, Campaign.PatrolBattleStream);
+    const battle = new BattleSession(hero, monster, Campaign.patrolRules(hero, floor));
+    playOut(hero, monster, battle, aware);
+    Campaign.settlePatrol(hero, monster, battle, floor);
+    if (!hero.isalive() && !Campaign.revive(hero, hero.getfreerevives() > 0)) return false;
+  }
+  if (Exploration.branchTaken(hero, floor) === Branch.None) {
+    const keys = hero.runState().keys;
+    const hurt = hero.gethp() * 100 < hero.getmaxhp() * 60;
+    if (offered(Branch.Locked) && keys >= 1 && (hurt || keys >= 3)) Exploration.takeBranch(hero, floor, Branch.Locked);
+    else Exploration.takeBranch(hero, floor, Branch.Fog);
+  }
+  return true;
+}
+
 export function run(job, seed, route, challenge, aware) {
   const hero = new Player('sim', job);
   Campaign.initialize(hero, seed, challenge);
@@ -200,6 +238,12 @@ export function run(job, seed, route, challenge, aware) {
     if (Campaign.eventPending(hero, floor))
       Campaign.resolveEvent(hero, floor, hero.getcoin() >= restCost(floor) ? 1 : 2);
     explore(hero, floor, spend);
+    if (Exploration.fork(hero, floor).branches.length) {
+      prepare(hero, floor, (seed % 2) + 1, spend);
+      if (!takeFork(hero, floor, aware)) break;
+      explore(hero, floor, spend); // The branch and the guardian's side of the fork.
+    }
+    if (!Exploration.guardianReachable(hero, floor)) throw new Error('fork left the guardian unreachable');
     let won = false;
     for (let retry = 0; retry < 3 && !won; ++retry) {
       prepare(hero, floor, (seed % 2) + 1, spend);
@@ -207,14 +251,8 @@ export function run(job, seed, route, challenge, aware) {
       Campaign.seedStream(hero, floor, 1200 + hero.runState().attempts[floor]);
       const rules = Campaign.rulesFor(hero, floor);
       const battle = new BattleSession(hero, monster, rules);
-      const state = { cursor: 0 };
-      while (battle.beginTurn()) {
-        const action = choose(hero, monster, battle, aware, state);
-        if (!battle.act(action)) throw new Error('simulation submitted invalid action');
-      }
-      battle.close();
+      playOut(hero, monster, battle, aware);
       timeouts += battle.report.timeout ? 1 : 0;
-      if (battle.turns() > battle.turnLimit()) throw new Error('encounter exceeded its turn bound');
       if (battle.won() && monster.isalive()) ++objectiveWins;
       won = Campaign.settleEncounter(hero, monster, battle, floor);
       if (!won && !hero.isalive()) {

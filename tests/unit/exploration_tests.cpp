@@ -57,8 +57,15 @@ void testGeneration() {
         const auto spots = generate(seed, floor);
         require(sameSpots(spots, generate(seed, floor)), "generation must be stable");
         require(spots.size() >= 3 && static_cast<int>(spots.size()) <= MaxSpots, "spot count bounds");
-        require(spots.back().kind == SpotKind::Lore && spots.back().variant == floor &&
-                spots.back().zone == Zone::Hidden, "every floor ends with its hidden journal page");
+        const auto page = std::find_if(spots.begin(), spots.end(), [](const Spot &s) { return s.kind == SpotKind::Lore; });
+        require(page != spots.end() && page->variant == floor && page->zone == Zone::Hidden,
+                "every floor holds its hidden journal page");
+        const bool fork = isForkFloor(seed, floor);
+        require(std::all_of(page + 1, spots.end(), [](const Spot &s) {
+                  return s.kind == SpotKind::FogSource || s.kind == SpotKind::Vantage || s.kind == SpotKind::Shortcut ||
+                         s.zone == Zone::Branch;
+                }) && (page + 1 == spots.end()) == !fork,
+                "the journal page ends the spots a floor had before forks; only fork floors add more");
         std::map<SpotKind, int> here;
         for (const auto &spot : spots) ++here[spot.kind];
         if (local == 10) {
@@ -66,7 +73,7 @@ void testGeneration() {
                   "boss floors hold one cache, one curio and the page");
           continue;
         }
-        require(here[SpotKind::Cache] >= 1 && here[SpotKind::Curio] >= 1 && here[SpotKind::Gather] <= 2 &&
+        require(here[SpotKind::Cache] >= 1 && here[SpotKind::Curio] >= 1 && here[SpotKind::Gather] <= (fork ? 3 : 2) &&
                 here[SpotKind::AffixSource] <= 1, "ordinary floors hold a cache and a curio");
         if (local == 1) require(here[SpotKind::AffixSource] == 0, "no affix source on a chapter's first floor");
         for (const auto &[kind, count] : here) counts[kind] += count;
@@ -85,6 +92,164 @@ void testGeneration() {
   require(generate(1, 0).empty() && generate(1, 101).empty(), "invalid floors hold nothing");
   require(!sameSpots(generate(1, 5), generate(2, 5)) || !sameSpots(generate(1, 6), generate(2, 6)),
           "seeds change the layout");
+}
+
+std::vector<int> forkFloorsOf(unsigned seed, int chapter) {
+  std::vector<int> floors;
+  for (int floor = chapter * 10 + 1; floor <= chapter * 10 + 10; ++floor)
+    if (isForkFloor(seed, floor)) floors.push_back(floor);
+  return floors;
+}
+// A fork floor of this seed whose branches include the given one, or 0.
+int forkWith(unsigned seed, Branch branch) {
+  for (int floor = 1; floor <= 100; ++floor) {
+    const auto ways = branches(seed, floor);
+    if (std::find(ways.begin(), ways.end(), branch) != ways.end()) return floor;
+  }
+  return 0;
+}
+int branchSpot(const player &hero, int floor) {
+  for (const auto &view : survey(hero, floor))
+    if (view.spot.zone == Zone::Branch) return view.index;
+  return -1;
+}
+const BranchView &branchView(const Fork &fork, Branch kind) {
+  for (const auto &view : fork.branches)
+    if (view.kind == kind) return view;
+  throw std::runtime_error("branch missing");
+}
+
+void testForkPlacement() {
+  for (unsigned seed : {1u, 777u, 12345u}) {
+    for (int chapter = 0; chapter < 10; ++chapter) {
+      const auto plan = chapterPlan(seed, chapter);
+      const auto floors = forkFloorsOf(seed, chapter);
+      require(floors == std::vector<int>(plan.forkFloors.begin(), plan.forkFloors.end()), "the plan lists the fork floors");
+      require(floors.size() == ForkFloorsPerChapter, "three fork floors per chapter");
+      for (int floor : floors) {
+        const int local = (floor - 1) % 10 + 1;
+        require(local >= 2 && local <= 9 && !Campaign::isEliteFloor(floor) && floor != plan.puzzleFloor &&
+                floor != plan.vaultFloors[0] && floor != plan.vaultFloors[1],
+                "forks skip first, elite, boss, puzzle and vault floors");
+        const auto ways = branches(seed, floor);
+        require(ways.size() >= 2 && std::find(ways.begin(), ways.end(), Branch::Fog) != ways.end() &&
+                std::is_sorted(ways.begin(), ways.end()), "every fork offers the fog branch, near to key");
+        const auto spots = generate(seed, floor);
+        int fogSpots = 0;
+        for (const auto &spot : spots) {
+          fogSpots += spot.zone == Zone::Branch && spot.branch == Branch::Fog;
+          require((spot.zone == Zone::Branch) == (spot.branch != Branch::None), "only branch spots name a branch");
+          require(!(spot.kind == SpotKind::Cache && spot.zone == Zone::Middle) &&
+                  !(spot.kind == SpotKind::Gather && spot.zone != Zone::Branch), "the fog branch carries the supplies");
+        }
+        require(fogSpots >= 1 && std::count_if(spots.begin(), spots.end(), [](const Spot &s) {
+                  return (s.kind == SpotKind::Cache && s.variant == 1) || s.kind == SpotKind::FogSource ||
+                         s.kind == SpotKind::Vantage;
+                }) == 3, "a fork floor holds a medicine chest past the fog, a fog source and high ground");
+      }
+    }
+  }
+  require(branches(1, 10).empty() && branches(1, 0).empty() && !isForkFloor(1, 101), "no forks off fork floors");
+}
+
+void testForkBranches() {
+  const unsigned seed = 2024;
+  const int floor = forkWith(seed, Branch::Locked);
+  require(floor > 0, "a key fork exists");
+  auto hero = campaignHero(seed);
+  require(!guardianReachable(*hero, floor) && branchTaken(*hero, floor) == Branch::None, "the fork comes before the guardian");
+  const int supply = branchSpot(*hero, floor);
+  const auto view = survey(*hero, floor)[supply];
+  require(!view.blocked.empty() && !interact(*hero, floor, supply, 1).ok, "supplies past the fog wait for the branch");
+  const auto blocked = options(*hero, floor, supply);
+  require(!blocked.empty() && std::none_of(blocked.begin(), blocked.end(), [](const Option &o) { return o.available; }),
+          "blocked spots list their choices as unavailable");
+  for (const auto &spot : survey(*hero, floor))
+    if (spot.spot.zone == Zone::Guardian) require(!spot.blocked.empty(), "the guardian's side waits for a branch");
+  require(!takeBranch(*hero, floor, Branch::Patrol).ok, "the patrol branch needs a fight");
+  hero->runState().keys = 0;
+  require(!branchView(fork(*hero, floor), Branch::Locked).available && !takeBranch(*hero, floor, Branch::Locked).ok,
+          "the key branch needs a key");
+  // High ground shows the stash before choosing.
+  const int vantage = indexOf(*hero, floor, SpotKind::Vantage);
+  require(branchView(fork(*hero, floor), Branch::Locked).reward.find("内容不明") != std::string::npos, "the stash starts unknown");
+  require(interact(*hero, floor, vantage, 1).ok &&
+          branchView(fork(*hero, floor), Branch::Locked).reward.find("内容不明") == std::string::npos, "high ground shows the stash");
+  hero->runState().keys = 2;
+  const int coins = hero->getcoin(), materials = hero->runState().materials, hp = hero->gethp();
+  const auto result = takeBranch(*hero, floor, Branch::Locked);
+  require(result.ok && hero->runState().keys == 1 && hero->gethp() == hp &&
+          (hero->getcoin() > coins || hero->runState().materials > materials || hero->getSaveBackpack().size() > 1),
+          "the key branch pays its stash without hurting");
+  require(branchTaken(*hero, floor) == Branch::Locked && guardianReachable(*hero, floor), "taking a branch opens the guardian");
+  const auto after = fork(*hero, floor);
+  require(std::none_of(after.branches.begin(), after.branches.end(), [](const BranchView &b) { return b.available; }) &&
+          !takeBranch(*hero, floor, Branch::Fog).ok, "one branch per floor");
+  const bool shortcut = indexOf(*hero, floor, SpotKind::Shortcut) >= 0;
+  require(!interact(*hero, floor, supply, 1).ok, "the fog branch closed with the key branch taken");
+  if (shortcut) {
+    require(interact(*hero, floor, indexOf(*hero, floor, SpotKind::Shortcut), 1).ok && interact(*hero, floor, supply, 1).ok,
+            "a shortcut opens the fog branch's supplies");
+  } else {
+    int expected = 0;
+    for (const auto &spot : survey(*hero, floor))
+      expected += !spot.done && countsTowardCompletion(spot.spot.kind) && spot.spot.zone != Zone::Branch;
+    require(remaining(*hero, floor) == expected, "closed branches leave the count of spots to find");
+  }
+
+  // The fog costs health until its source is shut.
+  const int fogFloor = forkWith(seed, Branch::Fog);
+  for (bool shut : {false, true}) {
+    auto walker = campaignHero(seed);
+    if (shut) require(interact(*walker, fogFloor, indexOf(*walker, fogFloor, SpotKind::FogSource), 1).ok, "shut the source");
+    const int before = walker->gethp();
+    require(takeBranch(*walker, fogFloor, Branch::Fog).ok && interact(*walker, fogFloor, branchSpot(*walker, fogFloor), 1).ok,
+            "walking the fog opens its supplies");
+    require(shut ? walker->gethp() == before : walker->gethp() == before - before * 20 / 100, "the fog's toll");
+  }
+  auto low = campaignHero(seed);
+  low->sethp(1);
+  require(takeBranch(*low, fogFloor, Branch::Fog).ok && low->gethp() == 1, "the fog never kills");
+  require(guardianReachable(*campaignHero(seed), 10), "floors without a fork stay open");
+}
+
+void testPatrols() {
+  const unsigned seed = 31;
+  const int floor = forkWith(seed, Branch::Patrol);
+  require(floor > 0, "a patrol fork exists");
+  auto hero = campaignHero(seed);
+  const enemy a = Campaign::makePatrol(*hero, floor), b = Campaign::makePatrol(*hero, floor);
+  require(a.getname() == b.getname() && a.getmaxhp() == b.getmaxhp() && a.getAffixes() == b.getAffixes(),
+          "patrols are fixed by seed and floor");
+  require(a.getname().rfind("巡逻·", 0) == 0 && a.getAffixes().size() >= 2, "patrols are named and carry two affixes");
+  hero->runState().boon = 1;
+  hero->runState().bane = 2;
+  const enemy blessed = Campaign::makePatrol(*hero, floor);
+  require(blessed.getattack() == a.getattack() && blessed.getmaxhp() == a.getmaxhp(), "boons and banes are kept for the guardian");
+
+  // A lost fight changes no branch; a win takes the near branch once.
+  hero->sethp(1);
+  enemy lethal("lethal", 1000000, 100, 0, 0, 0, 1);
+  lethal.configureEncounter(floor, false); lethal.setdodgeRate(0);
+  BattleSession loss(*hero, lethal);
+  require(loss.beginTurn() && loss.act({ActionType::Attack}) && !hero->isalive(), "death fixture");
+  require(!Campaign::settlePatrol(*hero, lethal, loss, floor) && hero->runState().deaths == 1 &&
+          branchTaken(*hero, floor) == Branch::None && hero->runState().boon == 1, "a lost patrol keeps the fork open");
+  hero->revive();
+  enemy weak("weak", 1, 0, 0, 40, 30, 1);
+  weak.configureEncounter(floor, false); weak.setdodgeRate(0);
+  BattleSession win(*hero, weak);
+  require(win.beginTurn() && win.act({ActionType::Attack}) && win.won(), "win fixture");
+  const int coins = hero->getcoin(), materials = hero->runState().materials;
+  require(Campaign::settlePatrol(*hero, weak, win, floor) && branchTaken(*hero, floor) == Branch::Patrol &&
+          hero->getcoin() == coins + 30 && hero->runState().materials == materials + Campaign::PatrolMaterials &&
+          hero->runState().attempts[floor] == 0 && hero->runState().boon == 1 && guardianReachable(*hero, floor),
+          "a won patrol pays once, opens the guardian and keeps the boon");
+  enemy second("weak", 1, 0, 0, 40, 30, 1);
+  second.configureEncounter(floor, false); second.setdodgeRate(0);
+  BattleSession again(*hero, second);
+  require(again.beginTurn() && again.act({ActionType::Attack}) && !Campaign::settlePatrol(*hero, second, again, floor) &&
+          hero->getcoin() == coins + 30, "a taken fork pays no second patrol");
 }
 
 void testInteractionRules() {
@@ -147,7 +312,8 @@ void testAffixSource() {
   int floor = 0;
   for (int candidate = 2; candidate < 100 && !floor; ++candidate)
     if (indexOf(*hero, candidate, SpotKind::AffixSource) >= 0 &&
-        !Campaign::makeEnemy(*hero, candidate).getAffixes().empty() && candidate % 10 != 9)
+        !Campaign::makeEnemy(*hero, candidate).getAffixes().empty() && candidate % 10 != 9 &&
+        !isForkFloor(2024, candidate)) // Past a fork the source waits for a branch.
       floor = candidate;
   require(floor > 0, "a floor with an affix source and an affixed guardian");
   const int source = indexOf(*hero, floor, SpotKind::AffixSource);
@@ -349,9 +515,11 @@ std::string field(const std::string &text, const std::string &key) {
 
 void testSaves() {
   auto hero = campaignHero(1234, 20);
-  for (int floor = 1; floor <= 20; ++floor)
+  for (int floor = 1; floor <= 20; ++floor) {
+    takeBranch(*hero, floor, Branch::Fog);
     for (const auto &view : survey(*hero, floor))
       if (!view.done && view.spot.kind != SpotKind::Puzzle) interact(*hero, floor, view.index, 1);
+  }
   const int merchantFloor = chapterPlan(1234, 0).merchantFloors[0];
   hero->gaincoin(5000);
   interact(*hero, merchantFloor, indexOf(*hero, merchantFloor, SpotKind::Merchant), 2);
@@ -383,8 +551,19 @@ void testSaves() {
     return withLine(saved, "EXPLORED", "EXPLORED " + joined);
   };
   int plainFloor = 1;
-  while (plainFloor == merchantFloor || indexOf(*hero, plainFloor, SpotKind::Merchant) >= 0) ++plainFloor;
-  const std::vector<std::pair<std::string, std::string>> broken = {
+  while (plainFloor == merchantFloor || indexOf(*hero, plainFloor, SpotKind::Merchant) >= 0 ||
+         isForkFloor(1234, plainFloor)) ++plainFloor;
+  const int forkFloor = chapterPlan(1234, 0).forkFloors[0];
+  require(branchTaken(*loaded, forkFloor) == Branch::Fog, "the branch taken round trips");
+  int noKey = 0; // A fork floor without the key branch.
+  for (int f = 1; f <= 20 && !noKey; ++f) {
+    const auto ways = branches(1234, f);
+    if (!ways.empty() && std::find(ways.begin(), ways.end(), Branch::Locked) == ways.end()) noKey = f;
+  }
+  const auto branchMask = [&](int at, Branch branch) {
+    return withMask(at, std::to_string((std::stoi(masks[at]) & ((1 << BranchBit) - 1)) | (static_cast<int>(branch) << BranchBit)));
+  };
+  std::vector<std::pair<std::string, std::string>> broken = {
       {"spot bits beyond the floor", withMask(1, std::to_string(1 << 15))},
       {"records above the highest floor", withMask(21, "1")},
       {"goods without a merchant", withMask(plainFloor, std::to_string(std::stoi(masks[plainFloor]) | (1 << MerchantBit)))},
@@ -396,7 +575,10 @@ void testSaves() {
       {"unknown bane", withLine(saved, "BANE", "BANE 3")},
       {"ingredient overflow", withLine(saved, "INGREDIENTS", "INGREDIENTS 0|0|0|100|0")},
       {"short array", withLine(saved, "INGREDIENTS", "INGREDIENTS 0|0|0")},
+      {"a branch off a fork floor", branchMask(plainFloor, Branch::Fog)},
+      {"an unknown branch", withMask(forkFloor, std::to_string(std::stoi(masks[forkFloor]) | (1 << (BranchBit + 2))))},
   };
+  if (noKey) broken.push_back({"a branch the fork lacks", branchMask(noKey, Branch::Locked)});
   for (const auto &[what, text] : broken) {
     file.write(text);
     floor = 42;
@@ -424,6 +606,9 @@ int main() {
   std::string failure;
   try {
     testGeneration();
+    testForkPlacement();
+    testForkBranches();
+    testPatrols();
     testInteractionRules();
     testDeterministicOutcomes();
     testCurioCosts();
@@ -445,7 +630,7 @@ int main() {
     std::cerr << "Exploration tests FAILED: " << failure << "\n";
     return 1;
   }
-  std::cout << "Exploration tests passed: generation, quotas, interactions, determinism, affix sources, boons, vaults, "
-               "merchants, quest items, puzzles, cooking, journal, achievements, saves.\n";
+  std::cout << "Exploration tests passed: generation, forks, patrols, quotas, interactions, determinism, affix sources, "
+               "boons, vaults, merchants, quest items, puzzles, cooking, journal, achievements, saves.\n";
   return 0;
 }
